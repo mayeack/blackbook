@@ -22,6 +22,16 @@ platform :ios do
       readonly: is_ci
     )
 
+    if is_ci
+      update_code_signing_settings(
+        use_automatic_signing: false,
+        path: "Blackbook.xcodeproj",
+        team_id: "37NR4Z7NT6",
+        profile_name: "match AppStore com.blackbookdevelopment.app",
+        code_sign_identity: "Apple Distribution"
+      )
+    end
+
     increment_build_number(
       build_number: ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")
     )
