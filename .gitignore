@@ -5,8 +5,7 @@ DerivedData/
 *.xcworkspacedata
 xcuserdata/
 
-# Amplify - contains AWS resource identifiers
-amplifyconfiguration.json
+# Amplify
 awsconfiguration.json
 amplify/team-provider-info.json
 
