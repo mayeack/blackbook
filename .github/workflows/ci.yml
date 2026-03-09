@@ -75,6 +75,9 @@ jobs:
       - name: Install Fastlane
         run: gem install fastlane
 
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project Blackbook.xcodeproj -scheme Blackbook
+
       - name: Deploy to TestFlight
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -84,5 +87,6 @@ jobs:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
           FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.FASTLANE_APP_PASSWORD }}
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
           BUILD_NUMBER: ${{ github.run_number }}
         run: fastlane ios beta
