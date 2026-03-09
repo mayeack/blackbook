@@ -574,3 +574,226 @@ Every menu item and its pages are documented in `.cursor/pages/*.md`. These file
 - Validate and sanitize all external input (API responses, imported files, user text fields).
 - Enable App Transport Security; never add blanket `NSAllowsArbitraryLoads` exceptions.
 - Use certificate pinning for high-value API endpoints when feasible.
+
+## Build — Swift & SwiftUI Compilation
+
+These patterns have caused real build failures. Follow them strictly to keep the project compiling.
+
+### Button Initializer Syntax
+
+Never use `Button(action: methodReference)` with a trailing closure for the label. The compiler matches it to `init(role:action:)` instead of `init(action:label:)`. Always use the explicit `label:` parameter:
+
+```swift
+// ❌ BAD — ambiguous overload, compiler picks init(role:action:)
+Button(action: signIn) {
+    Text("Sign In")
+}
+
+// ❌ STILL BAD — closure wrapper doesn't help
+Button(action: { signIn() }) {
+    Text("Sign In")
+}
+
+// ✅ GOOD — explicit label: parameter, no ambiguity
+Button {
+    signIn()
+} label: {
+    Text("Sign In")
+}
+```
+
+### SwiftUI.Group Qualification
+
+Already documented above — `Group` resolves to the SwiftData model. Always write `SwiftUI.Group { }`.
+
+### Exhaustive Switch on SDK Enums
+
+Amplify and other SDK enums may add cases in future versions. Always include `@unknown default` to prevent non-exhaustive switch errors. Use `String(describing:)` for logging since many SDK enums don't conform to `CustomStringConvertible`.
+
+```swift
+// ✅ GOOD
+switch result.nextStep {
+case .confirmUser:
+    authState = .confirmSignUp(email: email)
+case .done:
+    await signIn(email: email, password: password)
+@unknown default:
+    logger.warning("Unhandled step: \(String(describing: result.nextStep))")
+}
+```
+
+### Decimal from StoreKit Prices
+
+StoreKit `Product.price` is `Decimal`, which doesn't conform to `BinaryInteger`. Never write `Int(decimalValue)`. Use `NSDecimalNumber` for conversion:
+
+```swift
+// ❌ BAD — won't compile
+Text("Save \(Int(savings))%")
+
+// ✅ GOOD
+Text("Save \(NSDecimalNumber(decimal: savings).intValue)%")
+```
+
+### JSONEncoder vs JSONSerialization
+
+`JSONEncoder` requires `Encodable` conformance. `[String: Any]` doesn't conform. Use `JSONSerialization` for untyped dictionaries:
+
+```swift
+// ❌ BAD — [String: Any] is not Encodable
+let data = try JSONEncoder().encode(dict)
+
+// ✅ GOOD
+let data = try JSONSerialization.data(withJSONObject: dict)
+```
+
+### os.Logger String Interpolation
+
+`os.Logger` uses `OSLogMessage` interpolation, not standard Swift interpolation. Property references inside logger calls may require explicit `self.` in certain contexts. Non-`CustomStringConvertible` types need `String(describing:)`:
+
+```swift
+// ❌ BAD — may fail in closures or with non-conforming types
+logger.info("Count: \(offlineQueue.count)")
+logger.info("Step: \(result.nextStep)")
+
+// ✅ GOOD
+logger.info("Count: \(self.offlineQueue.count)")
+logger.info("Step: \(String(describing: result.nextStep))")
+```
+
+## CI/CD — GitHub Actions & Fastlane
+
+### Xcode Version Must Match Project Format
+
+The project uses Xcode 26 format (version 77). CI runners must use a compatible Xcode. The `macos-15` runner provides Xcode 26.3. Always keep the CI Xcode version in sync with the local development version:
+
+```yaml
+# .github/workflows/ci.yml
+runs-on: macos-15
+steps:
+  - name: Select Xcode
+    run: sudo xcode-select -s /Applications/Xcode_26.3.app
+```
+
+If upgrading Xcode locally, update the CI workflow in the same commit.
+
+### Simulator Destination Must Exist on Runner
+
+Use simulator device names available on the CI runner image. Currently `iPhone 16` on `macos-15`. Check runner image release notes when updating.
+
+### SPM Package Resolution Timeout
+
+Fastlane's `build_app` calls `xcodebuild -showBuildSettings`, which resolves SPM packages with a 3-second default timeout. For projects with many dependencies (Amplify, AWS SDK, etc.), this always times out. Fix both:
+
+1. **Pre-resolve packages** as a separate CI step before Fastlane runs
+2. **Increase the timeout** via environment variable
+
+```yaml
+- name: Resolve packages
+  run: xcodebuild -resolvePackageDependencies -project Blackbook.xcodeproj -scheme Blackbook
+
+- name: Deploy to TestFlight
+  env:
+    FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
+  run: fastlane ios beta
+```
+
+### Code Signing in CI
+
+Automatic signing doesn't work on CI runners. The Fastlane `beta` lane must explicitly configure signing when running in CI:
+
+```ruby
+if is_ci
+  update_code_signing_settings(
+    use_automatic_signing: false,
+    path: "Blackbook.xcodeproj",
+    team_id: "37NR4Z7NT6",
+    profile_name: "match AppStore com.blackbookdevelopment.app",
+    code_sign_identity: "Apple Distribution"
+  )
+end
+```
+
+### Fastlane Match — Private Repo Access
+
+Match stores encrypted certificates in a private git repo. CI runners can't interactively authenticate, so provide a base64-encoded PAT:
+
+1. Create a GitHub PAT with `repo` scope
+2. Base64 encode: `echo -n "username:token" | base64`
+3. Store as `MATCH_GIT_BASIC_AUTHORIZATION` secret
+4. Pass to Fastlane as an environment variable in the workflow
+
+### Required GitHub Secrets
+
+The deploy-testflight job requires all of these secrets to be configured:
+
+| Secret | Purpose |
+|---|---|
+| `APPLE_ID` | Apple Developer account email |
+| `APP_APPLE_ID` | Numeric App ID from App Store Connect |
+| `ITC_TEAM_ID` | App Store Connect team ID |
+| `MATCH_GIT_URL` | Private certs repo URL |
+| `MATCH_PASSWORD` | Encryption password for Match certs |
+| `MATCH_GIT_BASIC_AUTHORIZATION` | Base64 `username:PAT` for repo access |
+| `FASTLANE_APP_PASSWORD` | App-specific password from appleid.apple.com |
+
+If any secret is missing or wrong, the deploy will fail silently or with cryptic errors. After rotating any credential, update the corresponding secret immediately.
+
+### Git Identity on Build Machines
+
+Fastlane Match commits encrypted certs to the certs repo. Git requires `user.name` and `user.email` to be configured. On fresh machines or CI runners, `setup_ci` handles this, but on local machines ensure global git config is set before running `fastlane match`:
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "your-email"
+```
+
+## App Store Validation — TestFlight Upload
+
+These are hard requirements enforced by App Store Connect. A build will upload but be rejected if any are missing.
+
+### App Icon
+
+The asset catalog must include a 1024x1024 PNG referenced in `AppIcon.appiconset/Contents.json` with a `"filename"` key. Empty icon slots (no filename) cause validation failure:
+
+```json
+{
+  "filename": "AppIcon.png",
+  "idiom": "universal",
+  "platform": "ios",
+  "size": "1024x1024"
+}
+```
+
+### iPad Interface Orientations
+
+All four orientations must be specified for iPad multitasking support. Missing `UIInterfaceOrientationPortraitUpsideDown` causes rejection:
+
+```
+INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+```
+
+### Launch Screen
+
+Apps targeting iOS 14+ must declare a launch screen. Set this build setting:
+
+```
+INFOPLIST_KEY_UILaunchScreen_Generation = YES
+```
+
+### Files Referenced in Xcode Project Must Exist
+
+If the Xcode project references a file (e.g., `amplifyconfiguration.json`), that file must be present in the repo for CI builds. Either commit the file (with placeholder values) or generate it in a CI step before building. Check `.gitignore` whenever a CI build fails with "No such file or directory".
+
+## Pre-Push Checklist
+
+Before pushing to `main` (which triggers the full CI/CD pipeline):
+
+1. **Local build succeeds:** `xcodebuild build -scheme Blackbook -destination 'generic/platform=iOS Simulator'`
+2. **No new compiler warnings** in files you touched
+3. **All switch statements** on SDK enums have `@unknown default`
+4. **No `Button(action:)` with trailing closures** — use `Button { } label: { }` syntax
+5. **No bare `Group { }`** in view code — use `SwiftUI.Group { }`
+6. **All files referenced in pbxproj exist on disk** and are not gitignored
+7. **App icon PNG present** in `AppIcon.appiconset/` with filename in `Contents.json`
+8. **CI workflow Xcode version matches** local Xcode version
