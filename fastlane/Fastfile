@@ -7,7 +7,7 @@ platform :ios do
     run_tests(
       project: "Blackbook.xcodeproj",
       scheme: "BlackbookTests",
-      devices: ["iPhone 15"],
+      devices: ["iPhone 16"],
       clean: true,
       code_coverage: true
     )
