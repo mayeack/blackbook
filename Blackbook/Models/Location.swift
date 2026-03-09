@@ -10,6 +10,9 @@ final class Location {
     var icon: String
     var contacts: [Contact]
 
+    var syncStatus: String = SyncStatus.pending.rawValue
+    var lastSyncedAt: Date?
+
     var color: Color {
         Color(hex: colorHex) ?? .accentColor
     }

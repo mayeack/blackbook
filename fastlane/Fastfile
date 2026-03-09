@@ -1,0 +1,94 @@
+default_platform(:ios)
+
+platform :ios do
+
+  desc "Run unit tests"
+  lane :test do
+    run_tests(
+      project: "Blackbook.xcodeproj",
+      scheme: "BlackbookTests",
+      devices: ["iPhone 15"],
+      clean: true,
+      code_coverage: true
+    )
+  end
+
+  desc "Build and upload to TestFlight"
+  lane :beta do
+    setup_ci if is_ci
+
+    match(
+      type: "appstore",
+      readonly: is_ci
+    )
+
+    increment_build_number(
+      build_number: ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")
+    )
+
+    build_app(
+      project: "Blackbook.xcodeproj",
+      scheme: "Blackbook",
+      export_method: "app-store",
+      clean: true,
+      include_bitcode: false
+    )
+
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true,
+      apple_id: ENV["APP_APPLE_ID"]
+    )
+  end
+
+  desc "Build and submit for App Store review"
+  lane :release do
+    setup_ci if is_ci
+
+    match(
+      type: "appstore",
+      readonly: is_ci
+    )
+
+    build_app(
+      project: "Blackbook.xcodeproj",
+      scheme: "Blackbook",
+      export_method: "app-store",
+      clean: true,
+      include_bitcode: false
+    )
+
+    upload_to_app_store(
+      submit_for_review: false,
+      automatic_release: false,
+      force: true,
+      skip_metadata: true,
+      skip_screenshots: true
+    )
+  end
+
+end
+
+platform :mac do
+
+  desc "Run macOS unit tests"
+  lane :test do
+    run_tests(
+      project: "Blackbook.xcodeproj",
+      scheme: "BlackbookTests",
+      destination: "platform=macOS",
+      clean: true,
+      code_coverage: true
+    )
+  end
+
+  desc "Build macOS app for distribution"
+  lane :build do
+    build_mac_app(
+      project: "Blackbook.xcodeproj",
+      scheme: "Blackbook",
+      clean: true,
+      export_method: "app-store"
+    )
+  end
+
+end

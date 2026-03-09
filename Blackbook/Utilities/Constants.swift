@@ -4,6 +4,22 @@ enum AppConstants {
     static let appName = "Blackbook"
     static let cloudKitContainer = "iCloud.com.blackbookdevelopment.app"
 
+    enum AWS {
+        static let graphQLAPIName = "blackbookAPI"
+        static let s3PhotoPrefix = "contact-photos"
+    }
+
+    enum Auth {
+        static let keychainServiceName = "com.blackbookdevelopment.auth"
+        static let biometricEnabledKey = "biometric-lock-enabled"
+    }
+
+    enum Subscription {
+        static let monthlyProductId = "com.blackbookdevelopment.pro.monthly"
+        static let yearlyProductId = "com.blackbookdevelopment.pro.yearly"
+        static let freeContactLimit = 25
+    }
+
     enum Scoring {
         static let recencyWeight: Double = 0.35
         static let frequencyWeight: Double = 0.30
@@ -33,8 +49,10 @@ enum AppConstants {
         static let dormantGray = Color(red: 0.55, green: 0.55, blue: 0.55)
         #if os(iOS)
         static let cardBackground = Color(.systemGray6)
+        static let screenBackground = Color(.systemBackground)
         #else
         static let cardBackground = Color(.controlBackgroundColor)
+        static let screenBackground = Color(.windowBackgroundColor)
         #endif
 
         // MARK: - Layout & Typography

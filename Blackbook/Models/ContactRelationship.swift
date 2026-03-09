@@ -9,6 +9,9 @@ final class ContactRelationship {
     var label: String?
     var strength: Double?
 
+    var syncStatus: String = SyncStatus.pending.rawValue
+    var lastSyncedAt: Date?
+
     init(
         from: Contact,
         to: Contact,

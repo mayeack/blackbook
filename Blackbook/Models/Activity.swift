@@ -16,6 +16,9 @@ final class Activity {
     var contacts: [Contact]
     var groups: [Group]
 
+    var syncStatus: String = SyncStatus.pending.rawValue
+    var lastSyncedAt: Date?
+
     var color: Color {
         Color(hex: colorHex) ?? .accentColor
     }

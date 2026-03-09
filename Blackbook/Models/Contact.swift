@@ -18,6 +18,7 @@ final class Contact {
     var addresses: [String]
     var birthday: Date?
     @Attribute(.externalStorage) var photoData: Data?
+    var photoS3Key: String?
     var interests: [String]
     var familyDetails: String?
     var linkedInURL: String?
@@ -30,6 +31,11 @@ final class Contact {
     var isMergedAway: Bool
     var createdAt: Date
     var updatedAt: Date
+
+    // Sync tracking
+    var syncStatus: String = SyncStatus.pending.rawValue
+    var lastSyncedAt: Date?
+    var syncVersion: Int = 0
 
     @Relationship(deleteRule: .cascade, inverse: \Interaction.contact)
     var interactions: [Interaction]

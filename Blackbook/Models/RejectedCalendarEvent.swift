@@ -10,6 +10,9 @@ final class RejectedCalendarEvent {
     var calendarName: String
     var rejectedAt: Date
 
+    var syncStatus: String = SyncStatus.pending.rawValue
+    var lastSyncedAt: Date?
+
     init(
         googleEventId: String,
         title: String,

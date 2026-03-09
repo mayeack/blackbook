@@ -47,20 +47,25 @@ private struct SettingsRow<Trailing: View>: View {
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AuthenticationService.self) private var authService
     @State private var syncService = ContactSyncService()
     @State private var showAPIKeyEntry = false
     @State private var hasAPIKey = false
     @State private var calendarService = GoogleCalendarService()
     @State private var showGoogleClientIdEntry = false
+    @State private var showSignOutConfirm = false
 
     var body: some View {
         NavigationStack {
             Form {
                 contactsSyncSection
                 hiddenContactsSection
+                securitySection
                 aiSection
                 googleCalendarSection
                 scoringSection
+                subscriptionSection
+                accountSection
                 aboutSection
             }
             .formStyle(.grouped)
@@ -70,6 +75,14 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showGoogleClientIdEntry) {
                 GoogleClientIdEntryView(calendarService: calendarService)
+            }
+            .alert("Sign Out", isPresented: $showSignOutConfirm) {
+                Button("Sign Out", role: .destructive) {
+                    Task { await authService.signOut() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Are you sure you want to sign out? Your data is stored locally and will remain on this device.")
             }
             .onAppear {
                 hasAPIKey = KeychainService.retrieve(
@@ -308,6 +321,68 @@ struct SettingsView: View {
         let count = calendarService.selectedCalendarIds.count
         if count == 0 { return "No calendars selected" }
         return "\(count) calendar\(count == 1 ? "" : "s") selected"
+    }
+
+    // MARK: Security
+
+    private var securitySection: some View {
+        Section {
+            NavigationLink {
+                BiometricSettingsView()
+            } label: {
+                SettingsRow(
+                    icon: "faceid",
+                    iconColor: .green,
+                    title: "App Lock",
+                    subtitle: BiometricService.shared.isEnabled ? "Enabled" : "Disabled"
+                ) {
+                    EmptyView()
+                }
+            }
+        } header: {
+            Text("Security")
+        }
+    }
+
+    // MARK: Subscription
+
+    private var subscriptionSection: some View {
+        Section {
+            NavigationLink {
+                SubscriptionView()
+            } label: {
+                SettingsRow(
+                    icon: "crown.fill",
+                    iconColor: AppConstants.UI.accentGold,
+                    title: "Subscription",
+                    subtitle: "Manage your plan"
+                ) {
+                    EmptyView()
+                }
+            }
+        } header: {
+            Text("Subscription")
+        }
+    }
+
+    // MARK: Account
+
+    private var accountSection: some View {
+        Section {
+            Button { showSignOutConfirm = true } label: {
+                SettingsRow(
+                    icon: "rectangle.portrait.and.arrow.right",
+                    iconColor: .red,
+                    title: "Sign Out",
+                    subtitle: authService.currentUserId.map { _ in "Signed in" }
+                ) {
+                    EmptyView()
+                }
+            }
+            .buttonStyle(.plain)
+        } header: {
+            Text("Account")
+        }
     }
 
     // MARK: Scoring

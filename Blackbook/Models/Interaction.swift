@@ -12,6 +12,9 @@ final class Interaction {
     var sentiment: Sentiment?
     var createdAt: Date
 
+    var syncStatus: String = SyncStatus.pending.rawValue
+    var lastSyncedAt: Date?
+
     init(
         contact: Contact,
         type: InteractionType,

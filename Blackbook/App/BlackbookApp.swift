@@ -1,5 +1,9 @@
 import SwiftUI
 import SwiftData
+import Amplify
+import AWSCognitoAuthPlugin
+import AWSAPIPlugin
+import AWSS3StoragePlugin
 import os
 
 private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "AppSetup")
@@ -7,8 +11,11 @@ private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category:
 @main
 struct BlackbookApp: App {
     let modelContainer: ModelContainer
+    @State private var authService = AuthenticationService()
 
     init() {
+        Self.configureAmplify()
+
         let schema = Schema([
             Contact.self,
             Interaction.self,
@@ -27,31 +34,29 @@ struct BlackbookApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AuthGateView()
+                .environment(authService)
         }
         .modelContainer(modelContainer)
+    }
+
+    private static func configureAmplify() {
+        do {
+            try Amplify.add(plugin: AWSCognitoAuthPlugin())
+            try Amplify.add(plugin: AWSAPIPlugin(modelRegistration: AmplifyModels()))
+            try Amplify.add(plugin: AWSS3StoragePlugin())
+            try Amplify.configure()
+            logger.info("Amplify configured successfully")
+        } catch {
+            logger.error("Amplify configuration failed: \(error.localizedDescription)")
+        }
     }
 
     private static func createContainer(schema: Schema) -> ModelContainer {
         let storeDirectory = URL.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
 
-        // 1. Try CloudKit sync — verify with a test fetch
-        do {
-            let config = ModelConfiguration(
-                schema: schema,
-                url: storeDirectory.appending(path: "default.store"),
-                cloudKitDatabase: .private(AppConstants.cloudKitContainer)
-            )
-            let container = try ModelContainer(for: schema, configurations: [config])
-            _ = try container.mainContext.fetchCount(FetchDescriptor<Contact>())
-            logger.info("Using CloudKit sync")
-            return container
-        } catch {
-            logger.warning("CloudKit container failed: \(error.localizedDescription)")
-        }
-
-        // 2. Try local-only
+        // Local-only SwiftData store; cloud sync handled by AWSSyncService via AppSync
         do {
             let config = ModelConfiguration(
                 schema: schema,
@@ -60,13 +65,13 @@ struct BlackbookApp: App {
             )
             let container = try ModelContainer(for: schema, configurations: [config])
             _ = try container.mainContext.fetchCount(FetchDescriptor<Contact>())
-            logger.info("Using local storage (CloudKit unavailable)")
+            logger.info("SwiftData local store ready (cloud sync via AWS)")
             return container
         } catch {
             logger.warning("Local container failed: \(error.localizedDescription)")
         }
 
-        // 3. Last resort: delete corrupt store and retry
+        // Last resort: delete corrupt store and retry
         logger.warning("Existing store incompatible — resetting database")
         let storeURL = storeDirectory.appending(path: "default.store")
         for suffix in ["", "-wal", "-shm"] {

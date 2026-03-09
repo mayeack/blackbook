@@ -10,6 +10,9 @@ final class Note {
     var createdAt: Date
     var updatedAt: Date
 
+    var syncStatus: String = SyncStatus.pending.rawValue
+    var lastSyncedAt: Date?
+
     init(
         contact: Contact,
         content: String,
