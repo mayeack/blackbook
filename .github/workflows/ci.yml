@@ -82,6 +82,7 @@ jobs:
           ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
           FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.FASTLANE_APP_PASSWORD }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: fastlane ios beta
