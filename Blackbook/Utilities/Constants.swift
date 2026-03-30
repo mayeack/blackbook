@@ -101,6 +101,19 @@ enum AppConstants {
         static let lastAutoBackupKey = "backup.lastAutoDate"
     }
 
+    enum LocalSync {
+        static let keychainServiceName = "com.blackbookdevelopment.local-sync"
+        static let keychainServerURLAccount = "server-url"
+        static let keychainPasswordAccount = "server-password"
+    }
+
+    enum IMessageSync {
+        static let chatDBPath = "\(NSHomeDirectory())/Library/Messages/chat.db"
+        static let pollIntervalSeconds: TimeInterval = 30
+        static let lastProcessedROWIDKey = "iMessageSync.lastProcessedROWID"
+        static let enabledKey = "iMessageSync.enabled"
+    }
+
     enum Defaults {
         static let reminderLeadTimeDays = 1
         static let autoReminderThreshold: Double = 25.0

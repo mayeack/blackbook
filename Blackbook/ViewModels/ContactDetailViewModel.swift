@@ -9,6 +9,9 @@ final class ContactDetailViewModel {
     var showAddReminder = false
     var showEditContact = false
     var showMergeContact = false
+    var showTagPicker = false
+    var showGroupPicker = false
+    var showLocationPicker = false
     var selectedNoteCategory: NoteCategory? = nil
 
     /// Returns the contact's notes filtered by the selected category (if any), sorted newest first.

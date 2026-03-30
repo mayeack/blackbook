@@ -8,6 +8,9 @@ private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category:
 struct BlackbookApp: App {
     let modelContainer: ModelContainer
     @State private var authService = AuthenticationService()
+    #if os(macOS)
+    @State private var iMessageService = IMessageSyncService()
+    #endif
 
     init() {
         // Check for a pending restore before opening the store
@@ -40,6 +43,12 @@ struct BlackbookApp: App {
         WindowGroup {
             AuthGateView()
                 .environment(authService)
+                #if os(macOS)
+                .environment(iMessageService)
+                .onAppear {
+                    iMessageService.startIfEnabled(with: modelContainer.mainContext)
+                }
+                #endif
         }
         .modelContainer(modelContainer)
     }

@@ -54,11 +54,17 @@ struct SettingsView: View {
     @State private var calendarService = GoogleCalendarService()
     @State private var showGoogleClientIdEntry = false
     @State private var showSignOutConfirm = false
+    #if os(macOS)
+    @Environment(IMessageSyncService.self) private var iMessageService
+    #endif
 
     var body: some View {
         NavigationStack {
             Form {
                 contactsSyncSection
+                #if os(macOS)
+                iMessageSyncSection
+                #endif
                 hiddenContactsSection
                 securitySection
                 dataSection
@@ -77,7 +83,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showGoogleClientIdEntry) {
                 GoogleClientIdEntryView(calendarService: calendarService)
             }
-            .alert("Sign Out", isPresented: $showSignOutConfirm) {
+            .alert("Sign out of \(authService.currentUserId ?? "account")?", isPresented: $showSignOutConfirm) {
                 Button("Sign Out", role: .destructive) {
                     Task { await authService.signOut() }
                 }
@@ -157,6 +163,70 @@ struct SettingsView: View {
         }
         return "Not synced"
     }
+
+    // MARK: iMessage Sync (macOS)
+
+    #if os(macOS)
+    private var iMessageSyncSection: some View {
+        Section {
+            SettingsRow(
+                icon: "message.fill",
+                iconColor: .green,
+                title: "iMessage Sync",
+                subtitle: iMessageSyncSubtitle
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { iMessageService.isEnabled },
+                    set: { newValue in
+                        iMessageService.isEnabled = newValue
+                        if newValue {
+                            iMessageService.startIfEnabled(with: modelContext)
+                        }
+                    }
+                ))
+                .labelsHidden()
+            }
+
+            if iMessageService.isRunning {
+                SettingsRow(
+                    icon: "checkmark.circle.fill",
+                    iconColor: .green,
+                    title: "Messages Logged",
+                    subtitle: nil
+                ) {
+                    Text("\(iMessageService.messagesProcessed)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let err = iMessageService.syncError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                .padding(.leading, 40)
+            }
+        } header: {
+            Text("iMessage")
+        } footer: {
+            Text("Automatically logs sent and received iMessages as interactions for matching contacts. Requires Full Disk Access.")
+        }
+    }
+
+    private var iMessageSyncSubtitle: String {
+        if iMessageService.isRunning, let date = iMessageService.lastSyncDate {
+            return "Last checked: \(date.relativeDescription)"
+        }
+        if iMessageService.isRunning {
+            return "Running"
+        }
+        return "Disabled"
+    }
+    #endif
 
     // MARK: Hidden Contacts
 
@@ -395,7 +465,7 @@ struct SettingsView: View {
                 SettingsRow(
                     icon: "rectangle.portrait.and.arrow.right",
                     iconColor: .red,
-                    title: "Sign Out",
+                    title: "Sign out of \(authService.currentUserId ?? "account")?",
                     subtitle: authService.currentUserId.map { _ in "Signed in" }
                 ) {
                     EmptyView()

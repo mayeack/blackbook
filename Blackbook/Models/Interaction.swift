@@ -13,6 +13,15 @@ final class Interaction {
     var sentiment: Sentiment?
     var createdAt: Date
 
+    /// Raw storage for message direction (sent/received). Nil for manually logged interactions.
+    var directionRaw: String?
+
+    /// Typed accessor for message direction.
+    var messageDirection: MessageDirection? {
+        get { directionRaw.flatMap(MessageDirection.init(rawValue:)) }
+        set { directionRaw = newValue?.rawValue }
+    }
+
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
@@ -56,6 +65,21 @@ enum InteractionType: String, Codable, CaseIterable, Identifiable {
         case .email: return "envelope.fill"
         case .social: return "globe"
         case .other: return "ellipsis.circle.fill"
+        }
+    }
+}
+
+/// Direction of an auto-synced message (e.g. iMessage).
+enum MessageDirection: String, Codable, CaseIterable, Identifiable {
+    case sent = "Sent"
+    case received = "Received"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .sent: return "arrow.up.circle.fill"
+        case .received: return "arrow.down.circle.fill"
         }
     }
 }

@@ -9,6 +9,10 @@ struct DashboardView: View {
     @State private var showingPrioritizePicker = false
     private var contacts: [Contact] { allContacts.filter { !$0.isHidden && !$0.isMergedAway } }
 
+    private var contactsByID: [UUID: Contact] {
+        Dictionary(uniqueKeysWithValues: contacts.map { ($0.id, $0) })
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -17,6 +21,9 @@ struct DashboardView: View {
                 }.padding()
             }
             .navigationTitle("Overview")
+            .navigationDestination(for: UUID.self) { id in
+                if let c = contactsByID[id] { ContactDetailView(contact: c) }
+            }
             .task { viewModel.recalculateScoresIfNeeded(context: modelContext) }
             .sheet(isPresented: $showingPrioritizePicker) {
                 PrioritizeContactPicker(contacts: contacts.filter { !$0.isPriority })
@@ -46,9 +53,12 @@ struct DashboardView: View {
             } else {
                 PriorityChipFlowLayout(spacing: 12) {
                     ForEach(prioritized) { contact in
-                        PriorityContactChip(contact: contact) {
-                            withAnimation { contact.isPriority = false }
+                        NavigationLink(value: contact.id) {
+                            PriorityContactChip(contact: contact) {
+                                withAnimation { contact.isPriority = false }
+                            }
                         }
+                        .buttonStyle(.plain)
                     }
                     Button { showingPrioritizePicker = true } label: {
                         AddContactChip()
@@ -69,7 +79,10 @@ struct DashboardView: View {
             else {
                 PriorityChipFlowLayout(spacing: 12) {
                     ForEach(fading) { contact in
-                        ContactChip(contact: contact)
+                        NavigationLink(value: contact.id) {
+                            ContactChip(contact: contact)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -99,7 +112,10 @@ struct DashboardView: View {
             else {
                 PriorityChipFlowLayout(spacing: 12) {
                     ForEach(top) { contact in
-                        ContactChip(contact: contact)
+                        NavigationLink(value: contact.id) {
+                            ContactChip(contact: contact)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
