@@ -36,10 +36,12 @@
 		627F00BB1C55B4CD93AD362C /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B68EA01CC90E403184F8383 /* DashboardView.swift */; };
 		63AED38B279341EDDCFAA16A /* GroupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F85542EF75DA29ECB0FBC2 /* GroupDetailView.swift */; };
 		65B286D2AE249F7934A9E5BB /* ReminderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 950AC9FC1E76731546573DEA /* ReminderService.swift */; };
+		6688C7483298E8104B4AB117 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E45B9468F2B4B009B33B0122 /* BackupService.swift */; };
 		695359244DF1D6CE13710E37 /* LogInteractionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D88B14476C7E4A4574B1FB1 /* LogInteractionView.swift */; };
 		69C167B283DF373F9AADEE03 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B4686D34DCC894416E2DB8D /* SettingsView.swift */; };
 		69E8237701B2BDD1763EEE1F /* ContactModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D95AA83A5437DFA01312E219 /* ContactModelTests.swift */; };
 		6EBB34A3DDBE871B6B3BF70E /* DateHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815CE74C56D359F1D0990254 /* DateHelpers.swift */; };
+		72326B255067A794241B231C /* BackupMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */; };
 		72883A5C13AC7845998454E1 /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89AD54534AC73AD4F065D4D0 /* SubscriptionManager.swift */; };
 		72982030B4A88B5856E0BBF5 /* AuthStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D73B4693AF749AE8014A6606 /* AuthStateTests.swift */; };
 		73CA60D4647B30BCD6344253 /* ActivityDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49DEEAFF70171BC0B9298B47 /* ActivityDetailView.swift */; };
@@ -55,6 +57,7 @@
 		9EF211A7D945367755381495 /* GroupManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8CEE510B1D768170F3FFF5E /* GroupManagerView.swift */; };
 		A303CE901664DED4348494BD /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB7F634E85EAB2589E6F041 /* KeychainServiceTests.swift */; };
 		A83BFC0E65269E8E57FE2EF7 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2877312225BA97E41E36D583 /* KeychainService.swift */; };
+		A9C0AC72BC7536D4CA4B2702 /* BackupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B388096991E8F365A624F046 /* BackupDetailView.swift */; };
 		AADE6DA4DB134D860275385E /* TagListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEE4CD8BE91D0E8284B87F31 /* TagListView.swift */; };
 		ADD9B5E47EF47C5E5D0D23F3 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60CB33C4C83A483A548510B /* TestHelpers.swift */; };
 		AF1648E3FB295CF468ADB9D4 /* MergeContactPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45D3CC62965E709240EF206 /* MergeContactPickerView.swift */; };
@@ -64,6 +67,7 @@
 		B7A06A425624014C337FFB6E /* BiometricServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA93BA20CE88C3BC9C9317A /* BiometricServiceTests.swift */; };
 		B8795D426E8414EDC3028C87 /* ContactFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98155954680EC712B26CB05D /* ContactFormView.swift */; };
 		B99B1B94442BAC565FEDAAA2 /* AIAssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36AE5C06322D7E805B52341 /* AIAssistantViewModel.swift */; };
+		BD62475DEAA35DB0EFF03150 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B1C638B4A31E4A23207C6E0 /* BackupRestoreView.swift */; };
 		BF4B58B36798C30735F316B3 /* SFSymbolSearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB0EEFC6BF1CA172898A5CC /* SFSymbolSearchServiceTests.swift */; };
 		C2884A1E1560B0F8842C2964 /* SFSymbolSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450B014084ADF659A27C3F58 /* SFSymbolSearchService.swift */; };
 		C31D09F55E3735C61BE790F0 /* ActivityFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB300BB5DF41935C07BC4210 /* ActivityFormView.swift */; };
@@ -78,6 +82,7 @@
 		CC26CF0556D6D39776B42471 /* TagDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A1DDF330662D885E7FA4B89 /* TagDetailView.swift */; };
 		CFDEF705ED6BC7629FB51319 /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C0BE4D5872D0BE63AD0569 /* AuthenticationService.swift */; };
 		D1D5EC721BB0E44AF9636690 /* LocationIconSuggestionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F767094E24F344D3643565AA /* LocationIconSuggestionView.swift */; };
+		D230F0B42992BD121949564C /* BackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C9CF11EF94294BB04E3C45E /* BackupServiceTests.swift */; };
 		D686046C1D26C20526E7F2EC /* ContactDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5E5C6F2FA21494AB7263DE /* ContactDetailViewModel.swift */; };
 		D7E0ED56BF705785303CC3A7 /* SocialEnrichmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3389D37BC55476F3FB56F529 /* SocialEnrichmentService.swift */; };
 		DB5A2A585D046B17B96EA4E2 /* ContactSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC159C3515CC1B41D178A551 /* ContactSyncService.swift */; };
@@ -103,11 +108,6 @@
 		FC4D35EB1F0F93963E0499E2 /* DateHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */; };
 		FD356F0646511FD58F59CCEF /* RelationshipScoreEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7B07D8F95B7197892AB8D6 /* RelationshipScoreEngineTests.swift */; };
 		FD484B077257640144869BCF /* NetworkGraphViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */; };
-		F6E7CF1D5A8AA19008371521 /* BackupMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED5A6E52C921883FA5EC814D /* BackupMetadata.swift */; };
-		50AA27234BCEA6AFFF67B584 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4827070B59A6878BCCFAE47B /* BackupService.swift */; };
-		F67BF2E4792F395E3B7C3B27 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40935FE44A337D1081D3D184 /* BackupRestoreView.swift */; };
-		CC83C3111D30DBF12C5C6C9A /* BackupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367946C7B461430C91919D12 /* BackupDetailView.swift */; };
-		FAAE09CF89D0F1F68235C521 /* BackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818B00599D7A513988C40DD8 /* BackupServiceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -155,6 +155,7 @@
 		56EBAC598F8585225B1F09E4 /* RelationshipScoreEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelationshipScoreEngine.swift; sourceTree = "<group>"; };
 		59D5A4C8F3FE7AFE76757690 /* Group.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Group.swift; sourceTree = "<group>"; };
 		5AA17CB7865FCC549E3A695B /* InteractionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionViewModel.swift; sourceTree = "<group>"; };
+		5C9CF11EF94294BB04E3C45E /* BackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupServiceTests.swift; sourceTree = "<group>"; };
 		5CD02AD2B31E4BDFBABB04A9 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		5E2950E1BC23195EB252E6C1 /* SignUpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignUpView.swift; sourceTree = "<group>"; };
 		6169F3E4455CDCD77042D958 /* SyncTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTypesTests.swift; sourceTree = "<group>"; };
@@ -177,6 +178,7 @@
 		8680F5E40C5778658ABF142D /* Interaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Interaction.swift; sourceTree = "<group>"; };
 		88153A388C33AA1F9FCA3424 /* RejectedCalendarEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RejectedCalendarEvent.swift; sourceTree = "<group>"; };
 		89AD54534AC73AD4F065D4D0 /* SubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionManager.swift; sourceTree = "<group>"; };
+		8B1C638B4A31E4A23207C6E0 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
 		8C76958AF5D1BEA2F22D389A /* IconAndColorPickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconAndColorPickers.swift; sourceTree = "<group>"; };
 		9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModelTests.swift; sourceTree = "<group>"; };
 		950AC9FC1E76731546573DEA /* ReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderService.swift; sourceTree = "<group>"; };
@@ -197,15 +199,18 @@
 		B0BBA6EAAA528870946A9A68 /* AddNoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddNoteView.swift; sourceTree = "<group>"; };
 		B10282AE3F76E876ADDB3A4A /* ReminderServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderServiceTests.swift; sourceTree = "<group>"; };
 		B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateHelpersTests.swift; sourceTree = "<group>"; };
+		B388096991E8F365A624F046 /* BackupDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupDetailView.swift; sourceTree = "<group>"; };
 		BB300BB5DF41935C07BC4210 /* ActivityFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFormView.swift; sourceTree = "<group>"; };
 		BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPickerView.swift; sourceTree = "<group>"; };
 		BEE4CD8BE91D0E8284B87F31 /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		C0BF1D07C08681789AF0CC48 /* FeatureGating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureGating.swift; sourceTree = "<group>"; };
 		CC03CDCAD902D26F5F68C651 /* LocationManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManagerView.swift; sourceTree = "<group>"; };
+		CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupMetadata.swift; sourceTree = "<group>"; };
 		D45D3CC62965E709240EF206 /* MergeContactPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergeContactPickerView.swift; sourceTree = "<group>"; };
 		D73B4693AF749AE8014A6606 /* AuthStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateTests.swift; sourceTree = "<group>"; };
 		D95AA83A5437DFA01312E219 /* ContactModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactModelTests.swift; sourceTree = "<group>"; };
 		DC159C3515CC1B41D178A551 /* ContactSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSyncService.swift; sourceTree = "<group>"; };
+		E45B9468F2B4B009B33B0122 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
 		E60CB33C4C83A483A548510B /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
 		EA16574DE27E1A8A48DC9564 /* NetworkGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphView.swift; sourceTree = "<group>"; };
 		EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAPIServiceTests.swift; sourceTree = "<group>"; };
@@ -220,11 +225,6 @@
 		FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactMergeServiceTests.swift; sourceTree = "<group>"; };
 		FA9E2FA5C2EA9DC5CC7C31F9 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		FD10DDF37FAF1C8813B6C033 /* BiometricService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricService.swift; sourceTree = "<group>"; };
-		ED5A6E52C921883FA5EC814D /* BackupMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupMetadata.swift; sourceTree = "<group>"; };
-		4827070B59A6878BCCFAE47B /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
-		40935FE44A337D1081D3D184 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
-		367946C7B461430C91919D12 /* BackupDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupDetailView.swift; sourceTree = "<group>"; };
-		818B00599D7A513988C40DD8 /* BackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -311,8 +311,8 @@
 		8A03F406E1283D5F0A6AF5F3 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				4827070B59A6878BCCFAE47B /* BackupService.swift */,
 				63C0BE4D5872D0BE63AD0569 /* AuthenticationService.swift */,
+				E45B9468F2B4B009B33B0122 /* BackupService.swift */,
 				FD10DDF37FAF1C8813B6C033 /* BiometricService.swift */,
 				9C6BD1DE0B2466EA3DCFB985 /* ClaudeAPIService.swift */,
 				67485481A0ED6072989C3A0D /* ContactMergeService.swift */,
@@ -350,8 +350,8 @@
 		9B6244FC092837E06ACC3DA1 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				ED5A6E52C921883FA5EC814D /* BackupMetadata.swift */,
 				21445D604CF5DB4A2F69B7DF /* Activity.swift */,
+				CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */,
 				8222BEE7020B6711480F644E /* Contact.swift */,
 				364729C23FA9F3F62DDA06EF /* ContactRelationship.swift */,
 				59D5A4C8F3FE7AFE76757690 /* Group.swift */,
@@ -385,8 +385,8 @@
 		ABAF448165213B0CE9EA6415 /* BlackbookTests */ = {
 			isa = PBXGroup;
 			children = (
-				818B00599D7A513988C40DD8 /* BackupServiceTests.swift */,
 				D73B4693AF749AE8014A6606 /* AuthStateTests.swift */,
+				5C9CF11EF94294BB04E3C45E /* BackupServiceTests.swift */,
 				2AA93BA20CE88C3BC9C9317A /* BiometricServiceTests.swift */,
 				EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */,
 				F8A766A33F57F94C9BDF7ACF /* ConstantsTests.swift */,
@@ -433,8 +433,8 @@
 		C2D7BBECE154CA7F64065B1C /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				367946C7B461430C91919D12 /* BackupDetailView.swift */,
-				40935FE44A337D1081D3D184 /* BackupRestoreView.swift */,
+				B388096991E8F365A624F046 /* BackupDetailView.swift */,
+				8B1C638B4A31E4A23207C6E0 /* BackupRestoreView.swift */,
 				BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */,
 				1D43574664C82215699065AE /* GroupIconSuggestionView.swift */,
 				A8CEE510B1D768170F3FFF5E /* GroupManagerView.swift */,
@@ -596,10 +596,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CC83C3111D30DBF12C5C6C9A /* BackupDetailView.swift in Sources */,
-				F67BF2E4792F395E3B7C3B27 /* BackupRestoreView.swift in Sources */,
-				50AA27234BCEA6AFFF67B584 /* BackupService.swift in Sources */,
-				F6E7CF1D5A8AA19008371521 /* BackupMetadata.swift in Sources */,
 				B99B1B94442BAC565FEDAAA2 /* AIAssistantViewModel.swift in Sources */,
 				FC428EE351F1C7F125A3E819 /* AIInsightsView.swift in Sources */,
 				3C97130622FF6D29BACDEA77 /* Activity.swift in Sources */,
@@ -609,6 +605,10 @@
 				E93AF93D1470F43091DF3613 /* AddNoteView.swift in Sources */,
 				82E24EDF90B4FDD321E60DC3 /* AuthGateView.swift in Sources */,
 				CFDEF705ED6BC7629FB51319 /* AuthenticationService.swift in Sources */,
+				A9C0AC72BC7536D4CA4B2702 /* BackupDetailView.swift in Sources */,
+				72326B255067A794241B231C /* BackupMetadata.swift in Sources */,
+				BD62475DEAA35DB0EFF03150 /* BackupRestoreView.swift in Sources */,
+				6688C7483298E8104B4AB117 /* BackupService.swift in Sources */,
 				DC5C013A5E266CB281B39ECE /* BiometricLockView.swift in Sources */,
 				50BD69069FD89739B57C0CC1 /* BiometricService.swift in Sources */,
 				5B25E6A217BDD962CF4A1D7D /* BlackbookApp.swift in Sources */,
@@ -680,8 +680,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FAAE09CF89D0F1F68235C521 /* BackupServiceTests.swift in Sources */,
 				72982030B4A88B5856E0BBF5 /* AuthStateTests.swift in Sources */,
+				D230F0B42992BD121949564C /* BackupServiceTests.swift in Sources */,
 				B7A06A425624014C337FFB6E /* BiometricServiceTests.swift in Sources */,
 				F7DD6583F920E520F4EEBE9D /* ClaudeAPIServiceTests.swift in Sources */,
 				E71E2B55D28997F49015FA8D /* ConstantsTests.swift in Sources */,
@@ -737,7 +737,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.blackbookdevelopment.app;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -810,7 +810,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.blackbookdevelopment.app;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";

@@ -5,6 +5,7 @@ struct LoginView: View {
     @Environment(AuthenticationService.self) private var authService
     @State private var email = ""
     @State private var password = ""
+    @State private var isPasswordVisible = false
     @State private var showSignUp = false
     @FocusState private var focusedField: Field?
 
@@ -127,16 +128,44 @@ struct LoginView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            SecureField("Enter your password", text: $password)
-                .textFieldStyle(.plain)
-                .padding(12)
-                .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                #if os(iOS)
-                .textContentType(.password)
-                #endif
-                .focused($focusedField, equals: .password)
-                .submitLabel(.go)
-                .onSubmit { signIn() }
+            ZStack(alignment: .trailing) {
+                if isPasswordVisible {
+                    TextField("Enter your password", text: $password)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .padding(.trailing, 40)
+                        .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        #if os(iOS)
+                        .textContentType(.password)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.go)
+                        .onSubmit { signIn() }
+                } else {
+                    SecureField("Enter your password", text: $password)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .padding(.trailing, 40)
+                        .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        #if os(iOS)
+                        .textContentType(.password)
+                        #endif
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.go)
+                        .onSubmit { signIn() }
+                }
+
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 12)
+            }
         }
     }
 

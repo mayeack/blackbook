@@ -6,6 +6,8 @@ struct SignUpView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
+    @State private var isPasswordVisible = false
+    @State private var isConfirmPasswordVisible = false
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable { case email, password, confirm }
@@ -94,16 +96,44 @@ struct SignUpView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            SecureField("Create a password", text: $password)
-                .textFieldStyle(.plain)
-                .padding(12)
-                .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                #if os(iOS)
-                .textContentType(.newPassword)
-                #endif
-                .focused($focusedField, equals: .password)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .confirm }
+            ZStack(alignment: .trailing) {
+                if isPasswordVisible {
+                    TextField("Create a password", text: $password)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .padding(.trailing, 40)
+                        .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        #if os(iOS)
+                        .textContentType(.newPassword)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .confirm }
+                } else {
+                    SecureField("Create a password", text: $password)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .padding(.trailing, 40)
+                        .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        #if os(iOS)
+                        .textContentType(.newPassword)
+                        #endif
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .confirm }
+                }
+
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 12)
+            }
         }
     }
 
@@ -113,16 +143,44 @@ struct SignUpView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            SecureField("Re-enter your password", text: $confirmPassword)
-                .textFieldStyle(.plain)
-                .padding(12)
-                .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                #if os(iOS)
-                .textContentType(.newPassword)
-                #endif
-                .focused($focusedField, equals: .confirm)
-                .submitLabel(.go)
-                .onSubmit { signUp() }
+            ZStack(alignment: .trailing) {
+                if isConfirmPasswordVisible {
+                    TextField("Re-enter your password", text: $confirmPassword)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .padding(.trailing, 40)
+                        .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        #if os(iOS)
+                        .textContentType(.newPassword)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .confirm)
+                        .submitLabel(.go)
+                        .onSubmit { signUp() }
+                } else {
+                    SecureField("Re-enter your password", text: $confirmPassword)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .padding(.trailing, 40)
+                        .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        #if os(iOS)
+                        .textContentType(.newPassword)
+                        #endif
+                        .focused($focusedField, equals: .confirm)
+                        .submitLabel(.go)
+                        .onSubmit { signUp() }
+                }
+
+                Button {
+                    isConfirmPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isConfirmPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 12)
+            }
         }
     }
 
@@ -199,6 +257,9 @@ struct SignUpView: View {
 
     private func signUp() {
         guard canSubmit else { return }
+        let email = email
+        let password = password
+        dismiss()
         Task {
             await authService.signUp(email: email, password: password)
         }

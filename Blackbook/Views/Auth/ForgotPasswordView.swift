@@ -6,6 +6,8 @@ struct ForgotPasswordView: View {
     @State private var code = ""
     @State private var newPassword = ""
     @State private var confirmPassword = ""
+    @State private var isNewPasswordVisible = false
+    @State private var isConfirmPasswordVisible = false
     @State var showCodeEntry: Bool
     @FocusState private var focusedField: Field?
 
@@ -149,16 +151,44 @@ struct ForgotPasswordView: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
 
-                SecureField("Create a new password", text: $newPassword)
-                    .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    #if os(iOS)
-                    .textContentType(.newPassword)
-                    #endif
-                    .focused($focusedField, equals: .password)
-                    .submitLabel(.next)
-                    .onSubmit { focusedField = .confirm }
+                ZStack(alignment: .trailing) {
+                    if isNewPasswordVisible {
+                        TextField("Create a new password", text: $newPassword)
+                            .textFieldStyle(.plain)
+                            .padding(12)
+                            .padding(.trailing, 40)
+                            .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            #if os(iOS)
+                            .textContentType(.newPassword)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .focused($focusedField, equals: .password)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .confirm }
+                    } else {
+                        SecureField("Create a new password", text: $newPassword)
+                            .textFieldStyle(.plain)
+                            .padding(12)
+                            .padding(.trailing, 40)
+                            .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            #if os(iOS)
+                            .textContentType(.newPassword)
+                            #endif
+                            .focused($focusedField, equals: .password)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .confirm }
+                    }
+
+                    Button {
+                        isNewPasswordVisible.toggle()
+                    } label: {
+                        Image(systemName: isNewPasswordVisible ? "eye.slash" : "eye")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 12)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -166,16 +196,44 @@ struct ForgotPasswordView: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
 
-                SecureField("Re-enter new password", text: $confirmPassword)
-                    .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    #if os(iOS)
-                    .textContentType(.newPassword)
-                    #endif
-                    .focused($focusedField, equals: .confirm)
-                    .submitLabel(.go)
-                    .onSubmit { confirmReset() }
+                ZStack(alignment: .trailing) {
+                    if isConfirmPasswordVisible {
+                        TextField("Re-enter new password", text: $confirmPassword)
+                            .textFieldStyle(.plain)
+                            .padding(12)
+                            .padding(.trailing, 40)
+                            .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            #if os(iOS)
+                            .textContentType(.newPassword)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .focused($focusedField, equals: .confirm)
+                            .submitLabel(.go)
+                            .onSubmit { confirmReset() }
+                    } else {
+                        SecureField("Re-enter new password", text: $confirmPassword)
+                            .textFieldStyle(.plain)
+                            .padding(12)
+                            .padding(.trailing, 40)
+                            .background(AppConstants.UI.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            #if os(iOS)
+                            .textContentType(.newPassword)
+                            #endif
+                            .focused($focusedField, equals: .confirm)
+                            .submitLabel(.go)
+                            .onSubmit { confirmReset() }
+                    }
+
+                    Button {
+                        isConfirmPasswordVisible.toggle()
+                    } label: {
+                        Image(systemName: isConfirmPasswordVisible ? "eye.slash" : "eye")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 12)
+                }
             }
 
             Button {
