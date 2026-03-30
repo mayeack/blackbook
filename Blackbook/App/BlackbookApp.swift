@@ -4,6 +4,13 @@ import os
 
 private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "AppSetup")
 
+/// Bump this integer whenever the SwiftData schema changes (new/removed/renamed
+/// stored properties, new model classes, relationship changes, etc.).
+/// When the running version doesn't match the value stored in UserDefaults the
+/// existing store is deleted before SwiftData tries to open it, preventing a
+/// fatal crash inside `DefaultStore.fulfill`.
+private let currentSchemaVersion = 2
+
 @main
 struct BlackbookApp: App {
     let modelContainer: ModelContainer
@@ -36,6 +43,10 @@ struct BlackbookApp: App {
             RejectedCalendarEvent.self
         ])
 
+        // Wipe the store when the schema version changes so SwiftData never
+        // tries to load data that doesn't match the current model definitions.
+        Self.migrateStoreIfNeeded()
+
         modelContainer = Self.createContainer(schema: schema)
     }
 
@@ -51,6 +62,24 @@ struct BlackbookApp: App {
                 #endif
         }
         .modelContainer(modelContainer)
+    }
+
+    /// Deletes the on-disk store when the persisted schema version doesn't match
+    /// `currentSchemaVersion`. This runs *before* `ModelContainer` is created so
+    /// SwiftData never attempts to deserialize incompatible data.
+    private static func migrateStoreIfNeeded() {
+        let key = "SwiftDataSchemaVersion"
+        let saved = UserDefaults.standard.integer(forKey: key)
+        guard saved != currentSchemaVersion else { return }
+
+        logger.warning("Schema version changed (\(saved) → \(currentSchemaVersion)) — removing old store")
+        let storeURL = URL.applicationSupportDirectory.appending(path: "default.store")
+        for suffix in ["", "-wal", "-shm"] {
+            let fileURL = storeURL.deletingPathExtension()
+                .appendingPathExtension("store\(suffix)")
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        UserDefaults.standard.set(currentSchemaVersion, forKey: key)
     }
 
     private static func createContainer(schema: Schema) -> ModelContainer {
@@ -69,7 +98,14 @@ struct BlackbookApp: App {
                 cloudKitDatabase: .none
             )
             let container = try ModelContainer(for: schema, configurations: [config])
-            _ = try container.mainContext.fetchCount(FetchDescriptor<Contact>())
+            // Materialize a real object (not just count) to catch schema mismatches
+            // that only surface during property access.
+            var descriptor = FetchDescriptor<Contact>()
+            descriptor.fetchLimit = 1
+            let probe = try container.mainContext.fetch(descriptor)
+            if let contact = probe.first {
+                _ = contact.firstName
+            }
             logger.info("SwiftData local store ready")
             return container
         } catch {
