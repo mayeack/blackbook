@@ -93,6 +93,14 @@ enum AppConstants {
         static let calendarListURL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
     }
 
+    enum Backup {
+        static let maxBackupsDefault = 10
+        static let autoBackupIntervalHours = 24
+        static let autoBackupEnabledKey = "backup.autoEnabled"
+        static let maxBackupsKey = "backup.maxRetained"
+        static let lastAutoBackupKey = "backup.lastAutoDate"
+    }
+
     enum Defaults {
         static let reminderLeadTimeDays = 1
         static let autoReminderThreshold: Double = 25.0

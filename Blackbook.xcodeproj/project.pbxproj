@@ -103,6 +103,11 @@
 		FC4D35EB1F0F93963E0499E2 /* DateHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */; };
 		FD356F0646511FD58F59CCEF /* RelationshipScoreEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7B07D8F95B7197892AB8D6 /* RelationshipScoreEngineTests.swift */; };
 		FD484B077257640144869BCF /* NetworkGraphViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */; };
+		F6E7CF1D5A8AA19008371521 /* BackupMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED5A6E52C921883FA5EC814D /* BackupMetadata.swift */; };
+		50AA27234BCEA6AFFF67B584 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4827070B59A6878BCCFAE47B /* BackupService.swift */; };
+		F67BF2E4792F395E3B7C3B27 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40935FE44A337D1081D3D184 /* BackupRestoreView.swift */; };
+		CC83C3111D30DBF12C5C6C9A /* BackupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367946C7B461430C91919D12 /* BackupDetailView.swift */; };
+		FAAE09CF89D0F1F68235C521 /* BackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818B00599D7A513988C40DD8 /* BackupServiceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -215,6 +220,11 @@
 		FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactMergeServiceTests.swift; sourceTree = "<group>"; };
 		FA9E2FA5C2EA9DC5CC7C31F9 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		FD10DDF37FAF1C8813B6C033 /* BiometricService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricService.swift; sourceTree = "<group>"; };
+		ED5A6E52C921883FA5EC814D /* BackupMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupMetadata.swift; sourceTree = "<group>"; };
+		4827070B59A6878BCCFAE47B /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
+		40935FE44A337D1081D3D184 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
+		367946C7B461430C91919D12 /* BackupDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupDetailView.swift; sourceTree = "<group>"; };
+		818B00599D7A513988C40DD8 /* BackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -301,6 +311,7 @@
 		8A03F406E1283D5F0A6AF5F3 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				4827070B59A6878BCCFAE47B /* BackupService.swift */,
 				63C0BE4D5872D0BE63AD0569 /* AuthenticationService.swift */,
 				FD10DDF37FAF1C8813B6C033 /* BiometricService.swift */,
 				9C6BD1DE0B2466EA3DCFB985 /* ClaudeAPIService.swift */,
@@ -339,6 +350,7 @@
 		9B6244FC092837E06ACC3DA1 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				ED5A6E52C921883FA5EC814D /* BackupMetadata.swift */,
 				21445D604CF5DB4A2F69B7DF /* Activity.swift */,
 				8222BEE7020B6711480F644E /* Contact.swift */,
 				364729C23FA9F3F62DDA06EF /* ContactRelationship.swift */,
@@ -373,6 +385,7 @@
 		ABAF448165213B0CE9EA6415 /* BlackbookTests */ = {
 			isa = PBXGroup;
 			children = (
+				818B00599D7A513988C40DD8 /* BackupServiceTests.swift */,
 				D73B4693AF749AE8014A6606 /* AuthStateTests.swift */,
 				2AA93BA20CE88C3BC9C9317A /* BiometricServiceTests.swift */,
 				EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */,
@@ -420,6 +433,8 @@
 		C2D7BBECE154CA7F64065B1C /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				367946C7B461430C91919D12 /* BackupDetailView.swift */,
+				40935FE44A337D1081D3D184 /* BackupRestoreView.swift */,
 				BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */,
 				1D43574664C82215699065AE /* GroupIconSuggestionView.swift */,
 				A8CEE510B1D768170F3FFF5E /* GroupManagerView.swift */,
@@ -581,6 +596,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC83C3111D30DBF12C5C6C9A /* BackupDetailView.swift in Sources */,
+				F67BF2E4792F395E3B7C3B27 /* BackupRestoreView.swift in Sources */,
+				50AA27234BCEA6AFFF67B584 /* BackupService.swift in Sources */,
+				F6E7CF1D5A8AA19008371521 /* BackupMetadata.swift in Sources */,
 				B99B1B94442BAC565FEDAAA2 /* AIAssistantViewModel.swift in Sources */,
 				FC428EE351F1C7F125A3E819 /* AIInsightsView.swift in Sources */,
 				3C97130622FF6D29BACDEA77 /* Activity.swift in Sources */,
@@ -661,6 +680,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FAAE09CF89D0F1F68235C521 /* BackupServiceTests.swift in Sources */,
 				72982030B4A88B5856E0BBF5 /* AuthStateTests.swift in Sources */,
 				B7A06A425624014C337FFB6E /* BiometricServiceTests.swift in Sources */,
 				F7DD6583F920E520F4EEBE9D /* ClaudeAPIServiceTests.swift in Sources */,
@@ -717,7 +737,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.blackbookdevelopment.app;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -790,7 +810,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.blackbookdevelopment.app;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
