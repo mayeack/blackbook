@@ -44,6 +44,12 @@ final class AuthenticationService {
     var authState: AuthState = .loading
     var error: AppAuthError?
     var isProcessing = false
+    var userEmail: String?
+
+    /// The display name for the current user, defaulting to their email.
+    var displayName: String? {
+        userEmail
+    }
 
     /// Whether the user is currently signed in.
     var isSignedIn: Bool {
@@ -73,6 +79,7 @@ final class AuthenticationService {
         self.error = nil
         defer { isProcessing = false }
 
+        self.userEmail = email
         authState = .signedIn(userId: "local")
         logger.info("Local sign-in succeeded")
     }
@@ -85,6 +92,7 @@ final class AuthenticationService {
         self.error = nil
         defer { isProcessing = false }
 
+        self.userEmail = email
         authState = .signedIn(userId: "local")
         logger.info("Local sign-up succeeded")
     }
@@ -148,6 +156,7 @@ final class AuthenticationService {
         self.error = nil
         defer { isProcessing = false }
 
+        self.userEmail = nil
         authState = .signedOut
         logger.info("Sign-out complete")
     }

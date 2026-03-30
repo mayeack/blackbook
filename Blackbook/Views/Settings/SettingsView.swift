@@ -83,7 +83,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showGoogleClientIdEntry) {
                 GoogleClientIdEntryView(calendarService: calendarService)
             }
-            .alert("Sign out of \(authService.currentUserId ?? "account")?", isPresented: $showSignOutConfirm) {
+            .alert("Sign out of \(authService.displayName ?? "account")?", isPresented: $showSignOutConfirm) {
                 Button("Sign Out", role: .destructive) {
                     Task { await authService.signOut() }
                 }
@@ -465,7 +465,7 @@ struct SettingsView: View {
                 SettingsRow(
                     icon: "rectangle.portrait.and.arrow.right",
                     iconColor: .red,
-                    title: "Sign out of \(authService.currentUserId ?? "account")?",
+                    title: "Sign out of \(authService.displayName ?? "account")?",
                     subtitle: authService.currentUserId.map { _ in "Signed in" }
                 ) {
                     EmptyView()
