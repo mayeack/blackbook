@@ -48,13 +48,11 @@ final class BackupService {
     }
 
     static var backupsDirectory: URL {
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Blackbook/Backups", isDirectory: true)
+        URL.applicationSupportDirectory.appendingPathComponent("Blackbook/Backups", isDirectory: true)
     }
 
     static var photosDirectory: URL {
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Blackbook/Photos", isDirectory: true)
+        URL.applicationSupportDirectory.appendingPathComponent("Blackbook/Photos", isDirectory: true)
     }
 
     static var sentinelURL: URL {
