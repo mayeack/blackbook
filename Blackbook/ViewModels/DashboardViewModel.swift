@@ -39,6 +39,28 @@ final class DashboardViewModel {
         )
     }
 
+    /// Queries the Interaction table directly to compute weekly stats, avoiding
+    /// lazy relationship traversal that crashes inside SwiftUI view body evaluation.
+    func computeWeeklyStats(context: ModelContext) -> WeeklyStats {
+        let calendar = Calendar.current
+        guard let weekStart = calendar.dateInterval(of: .weekOfYear, for: Date())?.start else {
+            return WeeklyStats(totalInteractions: 0, uniqueContacts: 0, byType: [:])
+        }
+        let descriptor = FetchDescriptor<Interaction>(
+            predicate: #Predicate<Interaction> { $0.date >= weekStart }
+        )
+        do {
+            let thisWeek = try context.fetch(descriptor)
+            return WeeklyStats(
+                totalInteractions: thisWeek.count,
+                uniqueContacts: Set(thisWeek.compactMap { $0.contact?.id }).count,
+                byType: Dictionary(grouping: thisWeek, by: \.type).mapValues(\.count)
+            )
+        } catch {
+            return WeeklyStats(totalInteractions: 0, uniqueContacts: 0, byType: [:])
+        }
+    }
+
     /// Returns contacts marked as priority, sorted alphabetically.
     func prioritizedContacts(from contacts: [Contact]) -> [Contact] {
         contacts.filter(\.isPriority).sorted { $0.displayName < $1.displayName }

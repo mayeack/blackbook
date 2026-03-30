@@ -7,6 +7,7 @@ struct DashboardView: View {
     @Query(sort: \Reminder.dueDate) private var reminders: [Reminder]
     @State private var viewModel = DashboardViewModel()
     @State private var showingPrioritizePicker = false
+    @State private var weeklyStats = WeeklyStats(totalInteractions: 0, uniqueContacts: 0, byType: [:])
     private var contacts: [Contact] { allContacts.filter { !$0.isHidden && !$0.isMergedAway } }
 
     private var contactsByID: [UUID: Contact] {
@@ -24,7 +25,13 @@ struct DashboardView: View {
             .navigationDestination(for: UUID.self) { id in
                 if let c = contactsByID[id] { ContactDetailView(contact: c) }
             }
-            .task { viewModel.recalculateScoresIfNeeded(context: modelContext) }
+            .task {
+                viewModel.recalculateScoresIfNeeded(context: modelContext)
+                weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
+            }
+            .onChange(of: allContacts.count) { _, _ in
+                weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
+            }
             .sheet(isPresented: $showingPrioritizePicker) {
                 PrioritizeContactPicker(contacts: contacts.filter { !$0.isPriority })
             }
@@ -32,9 +39,8 @@ struct DashboardView: View {
     }
 
     private var weeklyStatsCard: some View {
-        let s = viewModel.weeklyStats(from: contacts)
-        return DashboardCard(title: "This Week", icon: "chart.bar.fill") {
-            HStack(spacing: 24) { StatBubble(value: "\(s.totalInteractions)", label: "Interactions"); StatBubble(value: "\(s.uniqueContacts)", label: "People") }
+        DashboardCard(title: "This Week", icon: "chart.bar.fill") {
+            HStack(spacing: 24) { StatBubble(value: "\(weeklyStats.totalInteractions)", label: "Interactions"); StatBubble(value: "\(weeklyStats.uniqueContacts)", label: "People") }
         }
     }
 
