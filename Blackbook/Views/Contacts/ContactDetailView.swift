@@ -5,6 +5,9 @@ struct ContactDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: [SortDescriptor(\Contact.firstName), SortDescriptor(\Contact.lastName)]) private var allContacts: [Contact]
+    @Query(sort: \Tag.name) private var allTags: [Tag]
+    @Query(sort: \Group.name) private var allGroups: [Group]
+    @Query(sort: \Location.name) private var allLocations: [Location]
     @Bindable var contact: Contact
     @State private var viewModel = ContactDetailViewModel()
     @State private var selectedSection: DetailSection = .overview
@@ -45,6 +48,10 @@ struct ContactDetailView: View {
                     Button { viewModel.showAddNote = true } label: { Label("Add Note", systemImage: "note.text.badge.plus") }
                     Button { viewModel.showAddReminder = true } label: { Label("Set Reminder", systemImage: "bell.badge.fill") }
                     Divider()
+                    Button { viewModel.showTagPicker = true } label: { Label("Manage Tags", systemImage: "tag") }
+                    Button { viewModel.showGroupPicker = true } label: { Label("Manage Groups", systemImage: "folder") }
+                    Button { viewModel.showLocationPicker = true } label: { Label("Manage Locations", systemImage: "mappin") }
+                    Divider()
                     Button { viewModel.showMergeContact = true } label: {
                         Label("Merge with\u{2026}", systemImage: "arrow.triangle.merge")
                     }
@@ -81,6 +88,15 @@ struct ContactDetailView: View {
             MergeContactPickerView(primaryContact: contact) {
                 viewModel.showMergeContact = false
             }
+        }
+        .sheet(isPresented: $viewModel.showTagPicker) {
+            ContactTagPickerView(contact: contact, allTags: allTags)
+        }
+        .sheet(isPresented: $viewModel.showGroupPicker) {
+            ContactGroupPickerView(contact: contact, allGroups: allGroups)
+        }
+        .sheet(isPresented: $viewModel.showLocationPicker) {
+            ContactLocationPickerView(contact: contact, allLocations: allLocations)
         }
     }
 
@@ -213,6 +229,74 @@ struct ContactDetailView: View {
                     }
                 }
                 Button { showIntroducedToPicker = true } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "pencil").font(.caption)
+                        Text("Edit").font(.caption)
+                    }.foregroundStyle(AppConstants.UI.accentGold)
+                }.buttonStyle(.plain)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Tags", systemImage: "tag").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                if contact.tags.isEmpty {
+                    Text("None").font(.body).foregroundStyle(.tertiary)
+                } else {
+                    FlowLayout(spacing: 8) {
+                        ForEach(contact.tags.sorted { $0.name < $1.name }) { tag in
+                            Text(tag.name).font(.subheadline.weight(.medium)).foregroundStyle(tag.color)
+                                .padding(.horizontal, AppConstants.UI.chipPaddingH).padding(.vertical, AppConstants.UI.chipPaddingV)
+                                .background(tag.color.opacity(0.15), in: Capsule())
+                        }
+                    }
+                }
+                Button { viewModel.showTagPicker = true } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "pencil").font(.caption)
+                        Text("Edit").font(.caption)
+                    }.foregroundStyle(AppConstants.UI.accentGold)
+                }.buttonStyle(.plain)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Groups", systemImage: "folder").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                if contact.groups.isEmpty {
+                    Text("None").font(.body).foregroundStyle(.tertiary)
+                } else {
+                    FlowLayout(spacing: 8) {
+                        ForEach(contact.groups.sorted { $0.name < $1.name }) { group in
+                            HStack(spacing: 5) {
+                                Image(systemName: group.icon).font(.caption)
+                                Text(group.name).font(.subheadline.weight(.medium))
+                            }
+                            .foregroundStyle(group.color)
+                            .padding(.horizontal, AppConstants.UI.chipPaddingH).padding(.vertical, AppConstants.UI.chipPaddingV)
+                            .background(group.color.opacity(0.15), in: Capsule())
+                        }
+                    }
+                }
+                Button { viewModel.showGroupPicker = true } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "pencil").font(.caption)
+                        Text("Edit").font(.caption)
+                    }.foregroundStyle(AppConstants.UI.accentGold)
+                }.buttonStyle(.plain)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Locations", systemImage: "mappin").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                if contact.locations.isEmpty {
+                    Text("None").font(.body).foregroundStyle(.tertiary)
+                } else {
+                    FlowLayout(spacing: 8) {
+                        ForEach(contact.locations.sorted { $0.name < $1.name }) { location in
+                            HStack(spacing: 5) {
+                                Image(systemName: location.icon).font(.caption)
+                                Text(location.name).font(.subheadline.weight(.medium))
+                            }
+                            .foregroundStyle(location.color)
+                            .padding(.horizontal, AppConstants.UI.chipPaddingH).padding(.vertical, AppConstants.UI.chipPaddingV)
+                            .background(location.color.opacity(0.15), in: Capsule())
+                        }
+                    }
+                }
+                Button { viewModel.showLocationPicker = true } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "pencil").font(.caption)
                         Text("Edit").font(.caption)
