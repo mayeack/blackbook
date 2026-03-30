@@ -10,6 +10,16 @@ struct BlackbookApp: App {
     @State private var authService = AuthenticationService()
 
     init() {
+        // Check for a pending restore before opening the store
+        if let backupDir = BackupService.checkPendingRestore() {
+            do {
+                try BackupService.performRestore(from: backupDir)
+                logger.info("Database restored from backup: \(backupDir.lastPathComponent)")
+            } catch {
+                logger.error("Restore failed: \(error.localizedDescription)")
+            }
+        }
+
         let schema = Schema([
             Contact.self,
             Interaction.self,
