@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 
+/// A scheduled reminder associated with a contact, supporting optional recurrence.
 @Model
 final class Reminder {
     var id: UUID
@@ -15,10 +16,12 @@ final class Reminder {
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
+    /// True when the reminder is incomplete and its due date has passed.
     var isOverdue: Bool {
         !isCompleted && dueDate < Date()
     }
 
+    /// Creates a new incomplete reminder for the given contact.
     init(
         contact: Contact,
         title: String,
@@ -36,6 +39,7 @@ final class Reminder {
         self.createdAt = Date()
     }
 
+    /// Computes the next due date based on the recurrence interval, or nil if non-recurring.
     func nextOccurrence() -> Date? {
         guard let recurrence else { return nil }
         let calendar = Calendar.current
@@ -52,6 +56,7 @@ final class Reminder {
     }
 }
 
+/// Supported repeat intervals for reminders.
 enum Recurrence: String, Codable, CaseIterable, Identifiable {
     case weekly = "Weekly"
     case biweekly = "Biweekly"

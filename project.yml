@@ -10,17 +10,18 @@ settings:
     SWIFT_VERSION: "5.9"
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-packages:
-  Amplify:
-    url: https://github.com/aws-amplify/amplify-swift
-    from: "2.0.0"
 schemes:
   Blackbook:
     build:
       targets:
         Blackbook: all
+        BlackbookTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - BlackbookTests
     profile:
       config: Release
 targets:
@@ -29,15 +30,6 @@ targets:
     supportedDestinations: [iOS, macOS]
     sources:
       - Blackbook
-    dependencies:
-      - package: Amplify
-        product: Amplify
-      - package: Amplify
-        product: AWSCognitoAuthPlugin
-      - package: Amplify
-        product: AWSAPIPlugin
-      - package: Amplify
-        product: AWSS3StoragePlugin
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.blackbookdevelopment.app
@@ -60,6 +52,6 @@ targets:
       - BlackbookTests
     dependencies:
       - target: Blackbook
-    scheme:
-      testTargets:
-        - BlackbookTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

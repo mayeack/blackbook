@@ -1,0 +1,33 @@
+# Xcode
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+xcuserdata/
+
+# Build
+build/
+.build/
+
+# Swift Package Manager
+.swiftpm/
+Packages/
+Package.resolved
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# CocoaPods (if used)
+Pods/
+
+# IDE
+.idea/
+*.code-workspace

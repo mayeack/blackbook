@@ -5,7 +5,6 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var selectedTab: AppTab = .dashboard
     @State private var syncService = ContactSyncService()
-    @State private var awsSyncService = AWSSyncService()
 
     var body: some View {
         #if os(iOS)
@@ -23,8 +22,6 @@ struct ContentView: View {
         .tint(AppConstants.UI.accentGold)
         .onAppear {
             syncService.startAutoSync(with: modelContext)
-            awsSyncService.configure(with: modelContext)
-            Task { await awsSyncService.performFullSync() }
         }
         #else
         NavigationSplitView {
@@ -42,8 +39,6 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 500)
         .onAppear {
             syncService.startAutoSync(with: modelContext)
-            awsSyncService.configure(with: modelContext)
-            Task { await awsSyncService.performFullSync() }
         }
         #endif
     }

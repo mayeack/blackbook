@@ -2,6 +2,8 @@ import Foundation
 import Observation
 import SwiftData
 
+/// Computes relationship scores for contacts using a weighted formula:
+/// `score = recency*W1 + frequency*W2 + variety*W3 + sentiment*W4 + priorityBoost + activityBoost`, clamped to 0-100.
 @Observable
 final class RelationshipScoreEngine {
     private var recencyWeight: Double {
@@ -17,6 +19,7 @@ final class RelationshipScoreEngine {
         UserDefaults.standard.object(forKey: "scoring.sentimentWeight") as? Double ?? AppConstants.Scoring.sentimentWeight
     }
 
+    /// Recalculates scores and trends for all contacts, comparing 7-day interaction counts to determine trend direction.
     func recalculateAll(context: ModelContext) {
         do {
             let contacts = try context.fetch(FetchDescriptor<Contact>())
@@ -34,6 +37,7 @@ final class RelationshipScoreEngine {
         } catch {}
     }
 
+    /// Returns the composite relationship score (0-100) for a contact using weighted sub-scores plus optional boosts.
     func calculateScore(for contact: Contact) -> Double {
         let raw = (recencyWeight * recencyScore(for: contact))
             + (frequencyWeight * frequencyScore(for: contact))

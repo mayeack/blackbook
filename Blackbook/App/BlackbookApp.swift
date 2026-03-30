@@ -1,9 +1,5 @@
 import SwiftUI
 import SwiftData
-import Amplify
-import AWSCognitoAuthPlugin
-import AWSAPIPlugin
-import AWSS3StoragePlugin
 import os
 
 private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "AppSetup")
@@ -14,8 +10,6 @@ struct BlackbookApp: App {
     @State private var authService = AuthenticationService()
 
     init() {
-        Self.configureAmplify()
-
         let schema = Schema([
             Contact.self,
             Interaction.self,
@@ -40,23 +34,15 @@ struct BlackbookApp: App {
         .modelContainer(modelContainer)
     }
 
-    private static func configureAmplify() {
-        do {
-            try Amplify.add(plugin: AWSCognitoAuthPlugin())
-            try Amplify.add(plugin: AWSAPIPlugin(modelRegistration: AmplifyModels()))
-            try Amplify.add(plugin: AWSS3StoragePlugin())
-            try Amplify.configure()
-            logger.info("Amplify configured successfully")
-        } catch {
-            logger.error("Amplify configuration failed: \(error.localizedDescription)")
-        }
-    }
-
     private static func createContainer(schema: Schema) -> ModelContainer {
         let storeDirectory = URL.applicationSupportDirectory
-        try? FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
+        } catch {
+            logger.error("Failed to create store directory: \(error.localizedDescription)")
+        }
 
-        // Local-only SwiftData store; cloud sync handled by AWSSyncService via AppSync
+        // Local-only SwiftData store
         do {
             let config = ModelConfiguration(
                 schema: schema,
@@ -65,7 +51,7 @@ struct BlackbookApp: App {
             )
             let container = try ModelContainer(for: schema, configurations: [config])
             _ = try container.mainContext.fetchCount(FetchDescriptor<Contact>())
-            logger.info("SwiftData local store ready (cloud sync via AWS)")
+            logger.info("SwiftData local store ready")
             return container
         } catch {
             logger.warning("Local container failed: \(error.localizedDescription)")
@@ -90,7 +76,14 @@ struct BlackbookApp: App {
             logger.info("Created fresh local store")
             return container
         } catch {
-            fatalError("Cannot create SwiftData container: \(error)")
+            // Fall back to in-memory container to avoid crashing the app
+            logger.error("Cannot create persistent SwiftData container: \(error.localizedDescription). Using in-memory store.")
+            do {
+                let inMemoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+                return try ModelContainer(for: schema, configurations: [inMemoryConfig])
+            } catch {
+                fatalError("Cannot create even in-memory SwiftData container: \(error)")
+            }
         }
     }
 }

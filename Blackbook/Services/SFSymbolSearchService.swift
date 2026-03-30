@@ -1,7 +1,10 @@
 import Foundation
 
+/// Fuzzy-searches SF Symbol names against a keyword map and symbol list.
 enum SFSymbolSearchService {
 
+    /// Returns up to `limit` SF Symbol names matching `query`, scored by exact (10), prefix (6), and substring (3) keyword matches
+    /// plus symbol-name matches (exact 8, substring 4). Falls back to `defaults` if fewer than 6 results.
     static func suggestIcons(for query: String, defaults: [String]? = nil, limit: Int = 24) -> [String] {
         let fallback = defaults ?? defaultLocationIcons
         let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -370,11 +373,8 @@ enum SFSymbolSearchService {
         "sorority": ["person.3", "heart", "building.columns"],
         "wedding": ["heart", "sparkles", "gift"],
         "reunion": ["person.3", "star", "heart"],
-        "dinner": ["fork.knife", "wineglass"],
-        "brunch": ["cup.and.saucer", "fork.knife"],
         "crafts": ["paintbrush", "scissors", "sparkles"],
         "photography": ["camera", "photo.artframe"],
-        "movie": ["film"],
         "gaming": ["gamecontroller", "puzzlepiece"],
         "hobby": ["star", "paintbrush", "puzzlepiece"],
         "social": ["person.2", "bubble.left.and.bubble.right", "heart"],

@@ -2,16 +2,24 @@ import Foundation
 import Observation
 import UserNotifications
 import SwiftData
+import os
 
+private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "Reminders")
+
+/// Manages contact reminders and local notification scheduling.
 @Observable
 final class ReminderService {
     var notificationsAuthorized = false
 
+    /// Requests notification permission from the user.
     func requestNotificationPermission() async {
         do {
             notificationsAuthorized = try await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .badge, .sound])
-        } catch { notificationsAuthorized = false }
+        } catch {
+            logger.warning("Notification permission request failed: \(error.localizedDescription)")
+            notificationsAuthorized = false
+        }
     }
 
     func scheduleNotification(for reminder: Reminder) {
@@ -55,6 +63,8 @@ final class ReminderService {
                 scheduleNotification(for: reminder)
             }
             try context.save()
-        } catch {}
+        } catch {
+            logger.error("Failed to generate auto-reminders: \(error.localizedDescription)")
+        }
     }
 }

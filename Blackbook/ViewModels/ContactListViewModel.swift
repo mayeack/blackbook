@@ -10,6 +10,7 @@ final class ContactListViewModel {
     var selectedLocations: Set<UUID> = []
     var sortOrder: ContactSortOrder = .name
 
+    /// Available sort orders for the contact list.
     enum ContactSortOrder: String, CaseIterable, Identifiable {
         case name = "Name", score = "Score", recentInteraction = "Recent", dateAdded = "Added"
         var id: String { rawValue }
@@ -17,6 +18,7 @@ final class ContactListViewModel {
 
     var showHidden = false
 
+    /// Filters contacts by search text, selected tags/groups/locations, and hidden state, then sorts by the current sort order.
     func filteredContacts(_ contacts: [Contact], tags: [Tag], groups: [Group] = [], locations: [Location] = []) -> [Contact] {
         var result = showHidden ? contacts.filter { !$0.isMergedAway } : contacts.filter { !$0.isHidden && !$0.isMergedAway }
         if !searchText.isEmpty {

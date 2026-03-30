@@ -2,12 +2,14 @@ import Foundation
 import Observation
 import CoreGraphics
 
+/// A node in the "met via" referral tree, where children are contacts introduced by this contact.
 struct MetViaTreeNode: Identifiable {
     let id: UUID
     let contact: Contact
     let children: [MetViaTreeNode]?
 }
 
+/// A positioned node for rendering in the network graph, with depth and parent/child references.
 struct LayoutNode: Identifiable {
     let id: UUID
     let contact: Contact
@@ -17,6 +19,7 @@ struct LayoutNode: Identifiable {
     let childIDs: [UUID]
 }
 
+/// Builds and lays out a forest of "met via" trees for the network graph visualization.
 @Observable
 final class NetworkGraphViewModel {
 
@@ -29,6 +32,8 @@ final class NetworkGraphViewModel {
     static let paddingH: CGFloat = 40
     static let paddingV: CGFloat = 60
 
+    /// Builds a forest of referral trees from visible contacts. Roots are contacts who introduced others
+    /// but were not themselves introduced by a visible contact. Traverses metViaBacklinks recursively.
     func buildTree(contacts: [Contact]) -> [MetViaTreeNode] {
         let visible = contacts.filter { !$0.isHidden && !$0.isMergedAway }
         let visibleIDs = Set(visible.map(\.id))
@@ -47,6 +52,7 @@ final class NetworkGraphViewModel {
         return rootNodes
     }
 
+    /// Assigns x/y positions to all tree nodes using a leaf-first layout, then centers parents over their children.
     func computeLayout(trees: [MetViaTreeNode]) {
         layoutNodes = [:]
         guard !trees.isEmpty else {

@@ -1,11 +1,16 @@
 import Foundation
 import Observation
+import os
 
+private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "ClaudeAPI")
+
+/// Provides AI-powered relationship insights via the Claude API.
 @Observable
 final class ClaudeAPIService {
     private let endpoint = "https://api.anthropic.com/v1/messages"
     private let model = "claude-sonnet-4-20250514"
     private let apiVersion = "2023-06-01"
+    private let maxTokens = 1024
 
     var isLoading = false
     var lastError: String?
@@ -71,21 +76,29 @@ final class ClaudeAPIService {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
         request.timeoutInterval = 30
-        let body: [String: Any] = ["model": model, "max_tokens": 1024, "messages": [["role": "user", "content": userMessage]]]
+        let body: [String: Any] = ["model": model, "max_tokens": maxTokens, "messages": [["role": "user", "content": userMessage]]]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                lastError = "API error"; return nil
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                lastError = "API error (HTTP \(statusCode))"
+                logger.error("Claude API returned HTTP \(statusCode)")
+                return nil
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let content = json["content"] as? [[String: Any]],
                   let text = content.first?["text"] as? String else { return nil }
             return text
-        } catch { lastError = error.localizedDescription; return nil }
+        } catch {
+            lastError = error.localizedDescription
+            logger.error("Claude API request failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
-    private func extractJSON(from text: String) -> String? {
+    /// Extracts a JSON array or object from a text response that may contain surrounding markdown.
+    func extractJSON(from text: String) -> String? {
         if let s = text.firstIndex(of: "["), let e = text.lastIndex(of: "]") { return String(text[s...e]) }
         if let s = text.firstIndex(of: "{"), let e = text.lastIndex(of: "}") { return String(text[s...e]) }
         return nil

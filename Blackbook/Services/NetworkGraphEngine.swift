@@ -17,16 +17,30 @@ struct GraphEdge: Identifiable {
     let toId: UUID
 }
 
+/// Force-directed graph layout engine for visualizing contact relationships.
+///
+/// Uses physics simulation with repulsive forces between all nodes,
+/// attractive forces along edges, and gravity toward the canvas center.
 @Observable
 final class NetworkGraphEngine {
     var nodes: [GraphNode] = []
     var edges: [GraphEdge] = []
 
+    // MARK: - Physics Constants
+
+    private let nodePadding: CGFloat = 50
+    private let repulsionForce: CGFloat = 5000
+    private let attractionForce: CGFloat = 0.001
+    private let gravityForce: CGFloat = 0.01
+    private let velocityDamping: CGFloat = 0.85
+    private let maxVelocity: CGFloat = 10
+    private let convergenceThreshold: CGFloat = 0.1
+
     func buildGraph(contacts: [Contact], relationships: [ContactRelationship], canvasSize: CGSize) {
         nodes = contacts.map {
             GraphNode(id: $0.id, contact: $0, position: CGPoint(
-                x: CGFloat.random(in: 50...(canvasSize.width - 50)),
-                y: CGFloat.random(in: 50...(canvasSize.height - 50))
+                x: CGFloat.random(in: nodePadding...(canvasSize.width - nodePadding)),
+                y: CGFloat.random(in: nodePadding...(canvasSize.height - nodePadding))
             ))
         }
         let contactIds = Set(contacts.map(\.id))
@@ -48,7 +62,7 @@ final class NetworkGraphEngine {
                 let dy = nodes[j].position.y - nodes[i].position.y
                 let distSq = max(dx*dx + dy*dy, 1)
                 let dist = sqrt(distSq)
-                let f = 5000 / distSq
+                let f = repulsionForce / distSq
                 forces[nodes[i].id]?.x -= (dx/dist)*f
                 forces[nodes[i].id]?.y -= (dy/dist)*f
                 forces[nodes[j].id]?.x += (dx/dist)*f
@@ -60,25 +74,25 @@ final class NetworkGraphEngine {
             guard let fi = idx[edge.fromId], let ti = idx[edge.toId] else { continue }
             let dx = nodes[ti].position.x - nodes[fi].position.x
             let dy = nodes[ti].position.y - nodes[fi].position.y
-            forces[edge.fromId]?.x += dx * 0.001
-            forces[edge.fromId]?.y += dy * 0.001
-            forces[edge.toId]?.x -= dx * 0.001
-            forces[edge.toId]?.y -= dy * 0.001
+            forces[edge.fromId]?.x += dx * attractionForce
+            forces[edge.fromId]?.y += dy * attractionForce
+            forces[edge.toId]?.x -= dx * attractionForce
+            forces[edge.toId]?.y -= dy * attractionForce
         }
         var maxSpeed: CGFloat = 0
         for i in 0..<nodes.count {
             guard let force = forces[nodes[i].id] else { continue }
             let gx = center.x - nodes[i].position.x
             let gy = center.y - nodes[i].position.y
-            nodes[i].velocity.x = (nodes[i].velocity.x + force.x + gx*0.01) * 0.85
-            nodes[i].velocity.y = (nodes[i].velocity.y + force.y + gy*0.01) * 0.85
+            nodes[i].velocity.x = (nodes[i].velocity.x + force.x + gx*gravityForce) * velocityDamping
+            nodes[i].velocity.y = (nodes[i].velocity.y + force.y + gy*gravityForce) * velocityDamping
             let speed = sqrt(nodes[i].velocity.x*nodes[i].velocity.x + nodes[i].velocity.y*nodes[i].velocity.y)
             if speed > maxSpeed { maxSpeed = speed }
-            if speed > 10 { nodes[i].velocity.x *= 10/speed; nodes[i].velocity.y *= 10/speed }
+            if speed > maxVelocity { nodes[i].velocity.x *= maxVelocity/speed; nodes[i].velocity.y *= maxVelocity/speed }
             nodes[i].position.x = max(nodes[i].radius, min(canvasSize.width - nodes[i].radius, nodes[i].position.x + nodes[i].velocity.x))
             nodes[i].position.y = max(nodes[i].radius, min(canvasSize.height - nodes[i].radius, nodes[i].position.y + nodes[i].velocity.y))
         }
-        return maxSpeed < 0.1
+        return maxSpeed < convergenceThreshold
     }
 
     func filteredNodes(byTagIds tagIds: Set<UUID>) -> [GraphNode] {

@@ -4,8 +4,11 @@ import os
 
 private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "ContactMerge")
 
+/// Merges two contact records, absorbing the secondary contact into the primary.
 final class ContactMergeService {
 
+    /// Merges `secondary` into `primary`: primary's existing fields take precedence for scalars,
+    /// arrays are unioned, children are reparented, and the secondary is marked as merged away.
     func merge(primary: Contact, secondary: Contact, context: ModelContext) throws {
         guard primary.id != secondary.id else { return }
 
@@ -28,6 +31,7 @@ final class ContactMergeService {
 
     // MARK: - Scalar Fields
 
+    /// Fills empty scalar fields on primary (company, jobTitle, birthday, etc.) from secondary.
     private func mergeScalarFields(into primary: Contact, from secondary: Contact) {
         if primary.company == nil || primary.company?.isEmpty == true {
             primary.company = secondary.company
@@ -54,6 +58,7 @@ final class ContactMergeService {
 
     // MARK: - Array Fields
 
+    /// Unions array fields (emails, phones, addresses, interests, customFields) from both contacts.
     private func mergeArrayFields(into primary: Contact, from secondary: Contact) {
         primary.emails = Array(Set(primary.emails).union(secondary.emails))
         primary.phones = Array(Set(primary.phones).union(secondary.phones))
@@ -67,6 +72,7 @@ final class ContactMergeService {
         primary.customFields = merged
     }
 
+    /// Returns the ordered union of two string arrays, preserving the order of `a` first.
     private func orderedUnion(_ a: [String], _ b: [String]) -> [String] {
         var seen = Set(a)
         var result = a
@@ -79,6 +85,7 @@ final class ContactMergeService {
 
     // MARK: - Score & Metadata
 
+    /// Keeps the higher score, most recent interaction date, and preserves priority status.
     private func mergeScoreAndMetadata(into primary: Contact, from secondary: Contact) {
         primary.relationshipScore = max(primary.relationshipScore, secondary.relationshipScore)
 
@@ -97,6 +104,7 @@ final class ContactMergeService {
 
     // MARK: - Child Relationships (re-parent)
 
+    /// Moves all interactions, notes, and reminders from secondary to primary.
     private func reparentChildren(into primary: Contact, from secondary: Contact) {
         for interaction in secondary.interactions {
             interaction.contact = primary
@@ -111,6 +119,7 @@ final class ContactMergeService {
 
     // MARK: - Many-to-Many Memberships
 
+    /// Adds secondary's tags, groups, locations, and activities to primary, skipping duplicates.
     private func unionMemberships(into primary: Contact, from secondary: Contact) {
         let existingTagIDs = Set(primary.tags.map(\.id))
         for tag in secondary.tags where !existingTagIDs.contains(tag.id) {
@@ -135,6 +144,7 @@ final class ContactMergeService {
 
     // MARK: - ContactRelationship Edges
 
+    /// Reassigns secondary's relationship edges to primary, removing duplicates and self-loops.
     private func mergeConnectionEdges(into primary: Contact, from secondary: Contact, context: ModelContext) {
         let existingFromPairs = Set(primary.connectionsFrom.compactMap { edge -> String? in
             guard let toID = edge.toContact?.id else { return nil }
@@ -176,6 +186,7 @@ final class ContactMergeService {
 
     // MARK: - Met Via / Backlinks
 
+    /// Redirects "met via" backlinks from secondary to primary, and inherits secondary's metVia if primary has none.
     private func mergeMetVia(into primary: Contact, from secondary: Contact) {
         for contact in secondary.metViaBacklinks {
             contact.metVia = primary

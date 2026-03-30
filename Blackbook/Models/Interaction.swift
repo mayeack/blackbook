@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 
+/// A recorded interaction (call, meeting, text, etc.) between the user and a contact.
 @Model
 final class Interaction {
     var id: UUID
@@ -15,6 +16,7 @@ final class Interaction {
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
+    /// Creates a new interaction linked to the given contact.
     init(
         contact: Contact,
         type: InteractionType,
@@ -34,6 +36,7 @@ final class Interaction {
     }
 }
 
+/// The channel through which an interaction occurred.
 enum InteractionType: String, Codable, CaseIterable, Identifiable {
     case call = "Call"
     case meeting = "Meeting"
@@ -44,6 +47,7 @@ enum InteractionType: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// SF Symbol name representing this interaction type.
     var icon: String {
         switch self {
         case .call: return "phone.fill"
@@ -56,6 +60,7 @@ enum InteractionType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Emotional tone of an interaction, used to influence relationship score calculations.
 enum Sentiment: String, Codable, CaseIterable, Identifiable {
     case positive = "Positive"
     case neutral = "Neutral"
@@ -71,6 +76,7 @@ enum Sentiment: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// Numeric weight for score calculations: positive=1.0, neutral=0.5, negative=0.0.
     var weight: Double {
         switch self {
         case .positive: return 1.0

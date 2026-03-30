@@ -6,6 +6,7 @@ import SwiftData
 final class InteractionViewModel {
     var filterType: InteractionType?
 
+    /// Returns the contact's interactions sorted newest first, optionally filtered by `filterType`.
     func filteredInteractions(for contact: Contact) -> [Interaction] {
         let all = contact.interactions.sorted { $0.date > $1.date }
         if let filter = filterType { return all.filter { $0.type == filter } }

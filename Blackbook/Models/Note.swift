@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 
+/// A free-form text note attached to a contact.
 @Model
 final class Note {
     var id: UUID
@@ -13,6 +14,7 @@ final class Note {
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
+    /// Creates a new note for the given contact, defaulting to the general category.
     init(
         contact: Contact,
         content: String,
@@ -27,6 +29,7 @@ final class Note {
     }
 }
 
+/// Classification for notes to aid filtering and display.
 enum NoteCategory: String, Codable, CaseIterable, Identifiable {
     case general = "General"
     case personal = "Personal"

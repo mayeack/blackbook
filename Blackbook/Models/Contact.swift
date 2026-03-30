@@ -1,10 +1,12 @@
 import Foundation
 import SwiftData
 
+/// Wrapper for navigating to a specific contact by ID.
 struct ContactNavigationID: Hashable {
     let id: UUID
 }
 
+/// Core model representing a person in the user's relationship network.
 @Model
 final class Contact {
     var id: UUID
@@ -76,11 +78,13 @@ final class Contact {
     @Relationship
     var mergedContacts: [Contact]
 
+    /// Full name of the contact, falling back to "Unknown" if both names are empty.
     var displayName: String {
         let full = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces)
         return full.isEmpty ? "Unknown" : full
     }
 
+    /// First letters of first and last name, or "?" if unavailable.
     var initials: String {
         let f = firstName.first.map(String.init) ?? ""
         let l = lastName.first.map(String.init) ?? ""
@@ -88,6 +92,7 @@ final class Contact {
         return result.isEmpty ? "?" : result
     }
 
+    /// Categorizes the relationship score into strong, moderate, fading, or dormant.
     var scoreCategory: ScoreCategory {
         switch relationshipScore {
         case 70...100: return .strong
@@ -99,11 +104,17 @@ final class Contact {
 
     var scoreTrendRaw: String = ScoreTrend.stable.rawValue
 
+    /// Whether the relationship score is trending up, down, or stable.
     var scoreTrend: ScoreTrend {
         get { ScoreTrend(rawValue: scoreTrendRaw) ?? .stable }
         set { scoreTrendRaw = newValue.rawValue }
     }
 
+    /// Creates a new contact with default score of 50 and empty collections.
+    /// - Parameters:
+    ///   - firstName: Contact's first name.
+    ///   - lastName: Contact's last name.
+    ///   - cnContactIdentifier: Optional identifier linking to a system CNContact.
     init(
         firstName: String,
         lastName: String,
@@ -144,6 +155,7 @@ final class Contact {
     }
 }
 
+/// Buckets for relationship health based on numeric score thresholds.
 enum ScoreCategory: String, Codable {
     case strong = "Strong"
     case moderate = "Moderate"
@@ -151,6 +163,7 @@ enum ScoreCategory: String, Codable {
     case dormant = "Dormant"
 }
 
+/// Directional trend of a contact's relationship score over time.
 enum ScoreTrend: String, Codable {
     case up, down, stable
 }
