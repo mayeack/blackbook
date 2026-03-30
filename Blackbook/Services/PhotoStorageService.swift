@@ -16,11 +16,8 @@ final class PhotoStorageService {
     private let cacheDirectory: URL
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        photosDirectory = appSupport.appendingPathComponent("Blackbook/Photos", isDirectory: true)
-
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        cacheDirectory = caches.appendingPathComponent("contact-photos", isDirectory: true)
+        photosDirectory = URL.applicationSupportDirectory.appendingPathComponent("Blackbook/Photos", isDirectory: true)
+        cacheDirectory = URL.cachesDirectory.appendingPathComponent("contact-photos", isDirectory: true)
 
         do {
             try FileManager.default.createDirectory(at: photosDirectory, withIntermediateDirectories: true)
