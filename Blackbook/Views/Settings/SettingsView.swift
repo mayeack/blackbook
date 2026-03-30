@@ -3,7 +3,7 @@ import SwiftData
 
 // MARK: - Settings Row Icon
 
-private struct SettingsIcon: View {
+struct SettingsIcon: View {
     let systemName: String
     let color: Color
 
@@ -18,7 +18,7 @@ private struct SettingsIcon: View {
 
 // MARK: - Settings Row
 
-private struct SettingsRow<Trailing: View>: View {
+struct SettingsRow<Trailing: View>: View {
     let icon: String
     let iconColor: Color
     let title: String
@@ -61,6 +61,7 @@ struct SettingsView: View {
                 contactsSyncSection
                 hiddenContactsSection
                 securitySection
+                dataSection
                 aiSection
                 googleCalendarSection
                 scoringSection
@@ -175,6 +176,27 @@ struct SettingsView: View {
             }
         } header: {
             Text("Privacy")
+        }
+    }
+
+    // MARK: Data
+
+    private var dataSection: some View {
+        Section {
+            NavigationLink {
+                BackupRestoreView()
+            } label: {
+                SettingsRow(
+                    icon: "clock.arrow.circlepath",
+                    iconColor: .cyan,
+                    title: "Backup & Restore",
+                    subtitle: "Version history for your data"
+                ) {
+                    EmptyView()
+                }
+            }
+        } header: {
+            Text("Data")
         }
     }
 
@@ -416,7 +438,7 @@ struct SettingsView: View {
                 title: "Version",
                 subtitle: nil
             ) {
-                Text("1.0.0")
+                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.1")
                     .foregroundStyle(.secondary)
             }
         } header: {
