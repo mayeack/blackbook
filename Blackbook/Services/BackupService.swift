@@ -456,7 +456,7 @@ final class BackupService {
             if let enumerator = Self.fm.enumerator(at: backupDir, includingPropertiesForKeys: nil) {
                 while let url = enumerator.nextObject() as? URL {
                     guard !url.hasDirectoryPath else { continue }
-                    let rel = url.path.replacingOccurrences(of: backupDir.path + "/", with: "")
+                    let rel = url.standardizedFileURL.path.replacingOccurrences(of: backupDir.standardizedFileURL.path + "/", with: "")
                     if rel != "metadata.json" { files.append((rel, url)) }
                 }
             }
@@ -632,6 +632,10 @@ final class BackupService {
                 restoreScoringWeights(from: metadata)
             }
         }
+
+        // Mark schema version as current so migrateStoreIfNeeded() doesn't
+        // delete the restored database thinking it's from an old schema.
+        UserDefaults.standard.set(3, forKey: "SwiftDataSchemaVersion")
 
         // Delete sentinel
         try? fm.removeItem(at: sentinelURL)
