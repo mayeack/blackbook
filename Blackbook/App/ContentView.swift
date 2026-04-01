@@ -5,6 +5,9 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var selectedTab: AppTab = .dashboard
     @State private var syncService = ContactSyncService()
+    #if os(iOS)
+    @State private var bonjourBrowser = BonjourBrowser()
+    #endif
 
     var body: some View {
         #if os(iOS)
@@ -22,6 +25,7 @@ struct ContentView: View {
         .tint(AppConstants.UI.accentGold)
         .onAppear {
             syncService.startAutoSync(with: modelContext)
+            bonjourBrowser.configure()
         }
         #else
         NavigationSplitView {
