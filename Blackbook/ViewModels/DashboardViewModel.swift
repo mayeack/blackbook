@@ -29,16 +29,6 @@ final class DashboardViewModel {
         }
     }
 
-    /// Aggregates this week's interaction counts, unique contacts, and type breakdown.
-    func weeklyStats(from contacts: [Contact]) -> WeeklyStats {
-        let thisWeek = contacts.flatMap(\.interactions).filter { $0.date.isThisWeek }
-        return WeeklyStats(
-            totalInteractions: thisWeek.count,
-            uniqueContacts: Set(thisWeek.compactMap { $0.contact?.id }).count,
-            byType: Dictionary(grouping: thisWeek, by: \.type).mapValues(\.count)
-        )
-    }
-
     /// Queries the Interaction table directly to compute weekly stats, avoiding
     /// lazy relationship traversal that crashes inside SwiftUI view body evaluation.
     func computeWeeklyStats(context: ModelContext) -> WeeklyStats {
@@ -51,9 +41,16 @@ final class DashboardViewModel {
         )
         do {
             let thisWeek = try context.fetch(descriptor)
+            // Count unique contacts by checking lastInteractionDate instead of
+            // traversing the Interaction→Contact relationship (which triggers
+            // SwiftData inverse faulting and causes EXC_BAD_ACCESS).
+            let contactDescriptor = FetchDescriptor<Contact>(
+                predicate: #Predicate<Contact> { $0.lastInteractionDate != nil && $0.lastInteractionDate! >= weekStart }
+            )
+            let activeContacts = (try? context.fetch(contactDescriptor))?.count ?? 0
             return WeeklyStats(
                 totalInteractions: thisWeek.count,
-                uniqueContacts: Set(thisWeek.compactMap { $0.contact?.id }).count,
+                uniqueContacts: activeContacts,
                 byType: Dictionary(grouping: thisWeek, by: \.type).mapValues(\.count)
             )
         } catch {

@@ -107,7 +107,7 @@ struct SettingsView: View {
             Button {
                 Task {
                     if await syncService.requestAccess() {
-                        await syncService.importContacts(into: modelContext)
+                        syncService.importContacts(into: modelContext)
                         syncService.startObservingChanges()
                     }
                 }

@@ -48,7 +48,7 @@ final class LocalSyncServer: @unchecked Sendable {
                 if case .ready = state {
                     self?.port = listener.port?.rawValue ?? 0
                     self?.isRunning = true
-                    self?.publishBonjour(port: self?.port ?? 0)
+                    self?.publishBonjour(port: Int(self?.port ?? 0))
                     logger.info("Local sync server listening on port \(self?.port ?? 0)")
                 } else if case .failed(let error) = state {
                     logger.error("Listener failed: \(error.localizedDescription)")
@@ -209,6 +209,13 @@ final class LocalSyncServer: @unchecked Sendable {
             let id = String(request.path.dropFirst("/photo/".count))
             return handleDeletePhoto(contactId: id)
         }
+        // Backup endpoints
+        if request.path.hasPrefix("/backups") {
+            guard let email = request.headers["x-user-email"], !email.isEmpty else {
+                return (400, [:], "Missing X-User-Email header".data(using: .utf8))
+            }
+            return handleBackupRoute(request: request, userEmail: email)
+        }
         return (404, [:], "Not Found".data(using: .utf8))
     }
 
@@ -300,6 +307,141 @@ final class LocalSyncServer: @unchecked Sendable {
         try? FileManager.default.removeItem(at: fileURL)
         return (200, [:], nil)
     }
+
+    // MARK: - Backup Endpoints
+
+    private var remoteBackupsDirectory: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Blackbook/RemoteBackups", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func sanitizeEmail(_ email: String) -> String {
+        email.replacingOccurrences(of: "@", with: "_at_")
+            .replacingOccurrences(of: ".", with: "_")
+    }
+
+    private func userBackupDir(_ email: String) -> URL {
+        remoteBackupsDirectory.appendingPathComponent(sanitizeEmail(email), isDirectory: true)
+    }
+
+    private func handleBackupRoute(request: HTTPRequest, userEmail: String) -> (status: Int, headers: [String: String], body: Data?) {
+        let path = request.path
+        let fm = FileManager.default
+
+        // GET /backups — list all backups for user
+        if request.method == "GET" && path == "/backups" {
+            let userDir = userBackupDir(userEmail)
+            guard let contents = try? fm.contentsOfDirectory(at: userDir, includingPropertiesForKeys: nil) else {
+                return (200, ["Content-Type": "application/json"], "[]".data(using: .utf8))
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            var backups: [BackupMetadata] = []
+            for dir in contents where dir.hasDirectoryPath {
+                let metaURL = dir.appendingPathComponent("metadata.json")
+                guard let data = try? Data(contentsOf: metaURL),
+                      let meta = try? decoder.decode(BackupMetadata.self, from: data),
+                      meta.isComplete else { continue }
+                backups.append(meta)
+            }
+            backups.sort { $0.createdAt > $1.createdAt }
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            guard let json = try? encoder.encode(backups) else {
+                return (500, [:], nil)
+            }
+            return (200, ["Content-Type": "application/json"], json)
+        }
+
+        // Parse path segments: /backups/{id}/...
+        let segments = path.split(separator: "/").map(String.init) // ["backups", id, ...]
+        guard segments.count >= 2 else {
+            return (404, [:], "Not Found".data(using: .utf8))
+        }
+        let backupId = segments[1]
+
+        // Validate backup ID (prevent path traversal)
+        guard !backupId.contains(".."), !backupId.contains("/") else {
+            return (400, [:], "Invalid backup ID".data(using: .utf8))
+        }
+
+        let backupDir = userBackupDir(userEmail).appendingPathComponent(backupId, isDirectory: true)
+
+        // DELETE /backups/{id}
+        if request.method == "DELETE" && segments.count == 2 {
+            try? fm.removeItem(at: backupDir)
+            logger.info("Deleted remote backup \(backupId) for \(userEmail)")
+            return (200, [:], nil)
+        }
+
+        // POST /backups/{id}/metadata
+        if request.method == "POST" && segments.count == 3 && segments[2] == "metadata" {
+            guard let body = request.body else { return (400, [:], "Missing body".data(using: .utf8)) }
+            try? fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
+            do {
+                try body.write(to: backupDir.appendingPathComponent("metadata.json"))
+                logger.info("Saved metadata for backup \(backupId) from \(userEmail)")
+                return (200, [:], nil)
+            } catch {
+                return (500, [:], "Write failed".data(using: .utf8))
+            }
+        }
+
+        // POST /backups/{id}/file/{filename...}
+        if request.method == "POST" && segments.count >= 4 && segments[2] == "file" {
+            let filename = segments[3...].joined(separator: "/")
+            guard !filename.contains(".."), !filename.hasPrefix("/") else {
+                return (400, [:], "Invalid filename".data(using: .utf8))
+            }
+            guard let body = request.body else { return (400, [:], "Missing body".data(using: .utf8)) }
+            let fileURL = backupDir.appendingPathComponent(filename)
+            try? fm.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            do {
+                try body.write(to: fileURL)
+                logger.info("Saved backup file \(filename) for \(backupId)")
+                return (200, [:], nil)
+            } catch {
+                return (500, [:], "Write failed".data(using: .utf8))
+            }
+        }
+
+        // GET /backups/{id}/files — list files in backup
+        if request.method == "GET" && segments.count == 3 && segments[2] == "files" {
+            guard let enumerator = fm.enumerator(at: backupDir, includingPropertiesForKeys: [.fileSizeKey]) else {
+                return (404, [:], "Backup not found".data(using: .utf8))
+            }
+            var files: [[String: Any]] = []
+            while let url = enumerator.nextObject() as? URL {
+                guard !url.hasDirectoryPath else { continue }
+                let relativePath = url.path.replacingOccurrences(of: backupDir.path + "/", with: "")
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                files.append(["name": relativePath, "size": size])
+            }
+            guard let json = try? JSONSerialization.data(withJSONObject: ["files": files]) else {
+                return (500, [:], nil)
+            }
+            return (200, ["Content-Type": "application/json"], json)
+        }
+
+        // GET /backups/{id}/file/{filename...} — download file
+        if request.method == "GET" && segments.count >= 4 && segments[2] == "file" {
+            let filename = segments[3...].joined(separator: "/")
+            guard !filename.contains(".."), !filename.hasPrefix("/") else {
+                return (400, [:], "Invalid filename".data(using: .utf8))
+            }
+            let fileURL = backupDir.appendingPathComponent(filename)
+            guard let data = try? Data(contentsOf: fileURL) else {
+                return (404, [:], "File not found".data(using: .utf8))
+            }
+            return (200, ["Content-Type": "application/octet-stream"], data)
+        }
+
+        return (404, [:], "Not Found".data(using: .utf8))
+    }
+
+    // MARK: - Response Helpers
 
     private func sendResponse(_ response: (status: Int, headers: [String: String], body: Data?), on connection: NWConnection, completion: @escaping () -> Void) {
         let statusLine = "HTTP/1.1 \(response.status) \(statusText(response.status))\r\n"
