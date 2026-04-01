@@ -56,6 +56,7 @@
 		8B2CB978D413E80BD9F38F3D /* ContactRelationship.swift in Sources */ = {isa = PBXBuildFile; fileRef = 364729C23FA9F3F62DDA06EF /* ContactRelationship.swift */; };
 		9365296C3F60B05F955EAA71 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A826F19906D36E4EB3A83908 /* ContentView.swift */; };
 		9A18735D7C1D616279A77B5E /* LocalServerSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */; };
+		CB92C975707A4C0F811EDDD9 /* BonjourBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC6050191E6433E91D7A90F /* BonjourBrowser.swift */; };
 		9EF211A7D945367755381495 /* GroupManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8CEE510B1D768170F3FFF5E /* GroupManagerView.swift */; };
 		A303CE901664DED4348494BD /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB7F634E85EAB2589E6F041 /* KeychainServiceTests.swift */; };
 		A83BFC0E65269E8E57FE2EF7 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2877312225BA97E41E36D583 /* KeychainService.swift */; };
@@ -223,6 +224,7 @@
 		BB3333333333333333333333 /* ContactLocationPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactLocationPickerView.swift; sourceTree = "<group>"; };
 		D73B4693AF749AE8014A6606 /* AuthStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateTests.swift; sourceTree = "<group>"; };
 		D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServerSyncService.swift; sourceTree = "<group>"; };
+		6EC6050191E6433E91D7A90F /* BonjourBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourBrowser.swift; sourceTree = "<group>"; };
 		D95AA83A5437DFA01312E219 /* ContactModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactModelTests.swift; sourceTree = "<group>"; };
 		DC159C3515CC1B41D178A551 /* ContactSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSyncService.swift; sourceTree = "<group>"; };
 		E45B9468F2B4B009B33B0122 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
@@ -339,6 +341,7 @@
 				2382E25FE6BDF339DA44560D /* GoogleCalendarService.swift */,
 				51B78E4C7B87A207BBC1A65A /* IMessageSyncService.swift */,
 				D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */,
+				6EC6050191E6433E91D7A90F /* BonjourBrowser.swift */,
 				4E45E53C6F0C7F7A6808F6EE /* LocalSyncServer.swift */,
 				682862BCC7F0F257DF35CEB8 /* NetworkGraphEngine.swift */,
 				1D046FD999BC660D58C26E32 /* PhotoStorageService.swift */,
@@ -669,6 +672,7 @@
 				C386A3D91B842AB5512D4B09 /* InteractionViewModel.swift in Sources */,
 				A83BFC0E65269E8E57FE2EF7 /* KeychainService.swift in Sources */,
 				9A18735D7C1D616279A77B5E /* LocalServerSyncService.swift in Sources */,
+				CB92C975707A4C0F811EDDD9 /* BonjourBrowser.swift in Sources */,
 				AC83AF34CB61E8BE2848B4F1 /* LocalSyncProtocol.swift in Sources */,
 				7EAE471A3C0DEAE6F297474D /* LocalSyncServer.swift in Sources */,
 				480F4AB91090F3D31E17B0D2 /* Location.swift in Sources */,

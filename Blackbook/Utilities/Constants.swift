@@ -105,6 +105,7 @@ enum AppConstants {
         static let keychainServiceName = "com.blackbookdevelopment.local-sync"
         static let keychainServerURLAccount = "server-url"
         static let keychainPasswordAccount = "server-password"
+        static let serverURL = "https://sync.libersecretorum.com"
     }
 
     enum IMessageSync {
