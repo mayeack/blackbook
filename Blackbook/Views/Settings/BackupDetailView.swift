@@ -37,12 +37,21 @@ struct BackupDetailView: View {
         }
         .alert("Delete Backup", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
-                backupService.deleteBackup(backup)
-                dismiss()
+                if backup.source == .remote {
+                    Task {
+                        await backupService.deleteRemoteBackup(backup)
+                        dismiss()
+                    }
+                } else {
+                    backupService.deleteBackup(backup)
+                    dismiss()
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This backup will be permanently deleted. This action cannot be undone.")
+            Text(backup.source == .remote
+                 ? "This backup will be permanently deleted from the server. This action cannot be undone."
+                 : "This backup will be permanently deleted. This action cannot be undone.")
         }
     }
 
@@ -55,6 +64,21 @@ struct BackupDetailView: View {
             }
             LabeledContent("Type") {
                 Text(backup.type.displayName)
+            }
+            if let deviceName = backup.deviceName {
+                LabeledContent("Device") {
+                    Text(deviceName)
+                }
+            }
+            if backup.source == .remote {
+                LabeledContent("Location") {
+                    HStack(spacing: 4) {
+                        Image(systemName: "externaldrive.fill")
+                            .font(.caption)
+                        Text("Server")
+                    }
+                    .foregroundStyle(.teal)
+                }
             }
             if let label = backup.label {
                 LabeledContent("Label") {
@@ -100,14 +124,18 @@ struct BackupDetailView: View {
             } label: {
                 HStack {
                     Spacer()
-                    if showRestoreProgress {
+                    if showRestoreProgress || backupService.isDownloadingBackup {
                         ProgressView()
                             .controlSize(.small)
                             .padding(.trailing, 8)
-                        Text("Preparing restore...")
+                        if backupService.isDownloadingBackup {
+                            Text("Downloading... \(Int(backupService.downloadProgress * 100))%")
+                        } else {
+                            Text("Preparing restore...")
+                        }
                     } else {
-                        Image(systemName: "arrow.counterclockwise")
-                        Text("Restore This Backup")
+                        Image(systemName: backup.source == .remote ? "arrow.down.circle" : "arrow.counterclockwise")
+                        Text(backup.source == .remote ? "Download & Restore" : "Restore This Backup")
                     }
                     Spacer()
                 }
@@ -116,9 +144,13 @@ struct BackupDetailView: View {
                 .padding(.vertical, 8)
             }
             .listRowBackground(Color.blue)
-            .disabled(showRestoreProgress || backupService.isPreparingRestore)
+            .disabled(showRestoreProgress || backupService.isPreparingRestore || backupService.isDownloadingBackup)
         } footer: {
-            Text("A safety backup of your current data will be created automatically before restoring. The app will close and restart with the restored data.")
+            if backup.source == .remote {
+                Text("This backup will be downloaded from the server first, then restored. A safety backup of your current data will be created automatically. The app will close and restart with the restored data.")
+            } else {
+                Text("A safety backup of your current data will be created automatically before restoring. The app will close and restart with the restored data.")
+            }
         }
     }
 
@@ -131,7 +163,7 @@ struct BackupDetailView: View {
             } label: {
                 HStack {
                     Spacer()
-                    Text("Delete Backup")
+                    Text(backup.source == .remote ? "Delete from Server" : "Delete Backup")
                     Spacer()
                 }
             }
@@ -143,9 +175,20 @@ struct BackupDetailView: View {
     private func performRestore() {
         showRestoreProgress = true
         Task {
-            let success = await backupService.prepareRestore(from: backup, modelContext: modelContext)
+            var localBackup = backup
+
+            // If remote, download first
+            if backup.source == .remote {
+                let downloaded = await backupService.downloadBackupFromServer(metadata: backup)
+                guard downloaded else {
+                    showRestoreProgress = false
+                    return
+                }
+                localBackup.source = .local
+            }
+
+            let success = await backupService.prepareRestore(from: localBackup, modelContext: modelContext)
             if success {
-                // Give the user a moment to see the progress state
                 try? await Task.sleep(for: .milliseconds(500))
                 exit(0)
             } else {

@@ -3,6 +3,9 @@ import SwiftData
 import SQLite3
 import Observation
 import os
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "Backup")
 
@@ -31,8 +34,14 @@ enum BackupError: LocalizedError {
 @Observable
 final class BackupService {
     private(set) var backups: [BackupMetadata] = []
+    private(set) var remoteBackups: [BackupMetadata] = []
     private(set) var isCreatingBackup = false
     private(set) var isPreparingRestore = false
+    private(set) var isUploadingBackup = false
+    private(set) var isDownloadingBackup = false
+    private(set) var isLoadingRemoteBackups = false
+    var uploadProgress: Double = 0
+    var downloadProgress: Double = 0
     private(set) var lastError: String?
 
     private static let fm = FileManager.default
@@ -98,7 +107,8 @@ final class BackupService {
                 recordCounts: counts,
                 totalSizeBytes: size,
                 scoringWeights: weights,
-                directoryName: dirName
+                directoryName: dirName,
+                deviceName: Self.currentDeviceName
             )
 
             // Write metadata.json
@@ -117,6 +127,11 @@ final class BackupService {
             // Update last auto-backup date
             if type == .automatic {
                 UserDefaults.standard.set(Date(), forKey: AppConstants.Backup.lastAutoBackupKey)
+            }
+
+            // Auto-upload to server (fire and forget)
+            if type != .preRestore {
+                Task { await uploadBackupToServer(metadata: metadata) }
             }
 
             return metadata
@@ -247,6 +262,216 @@ final class BackupService {
 
     var formattedTotalSize: String {
         ByteCountFormatter.string(fromByteCount: totalBackupSize, countStyle: .file)
+    }
+
+    // MARK: - Remote Backup Operations
+
+    /// Server base URL from Keychain (same as LocalServerSyncService uses).
+    private var serverBaseURL: String? {
+        KeychainService.retrieve(
+            service: AppConstants.LocalSync.keychainServiceName,
+            account: AppConstants.LocalSync.keychainServerURLAccount
+        )
+    }
+
+    /// Server password from Keychain.
+    private var serverPassword: String? {
+        KeychainService.retrieve(
+            service: AppConstants.LocalSync.keychainServiceName,
+            account: AppConstants.LocalSync.keychainPasswordAccount
+        )
+    }
+
+    /// Current user's email for organizing backups on the server.
+    private var userEmail: String? {
+        UserDefaults.standard.string(forKey: "auth.userEmail")
+    }
+
+    /// Whether the server connection is configured.
+    var isServerConfigured: Bool {
+        serverBaseURL != nil && serverPassword != nil && userEmail != nil
+    }
+
+    static var currentDeviceName: String {
+        #if os(iOS)
+        UIDevice.current.name
+        #else
+        Host.current().localizedName ?? "Mac"
+        #endif
+    }
+
+    private func makeServerRequest(path: String, method: String = "GET", body: Data? = nil) async throws -> (Data, HTTPURLResponse) {
+        guard let baseURL = serverBaseURL, let password = serverPassword, let email = userEmail else {
+            throw URLError(.userAuthenticationRequired)
+        }
+        guard let url = URL(string: baseURL + path) else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue(password, forHTTPHeaderField: LocalSyncProtocol.passwordHeader)
+        request.setValue(email, forHTTPHeaderField: LocalSyncProtocol.userEmailHeader)
+        if let body {
+            request.httpBody = body
+            request.setValue("\(body.count)", forHTTPHeaderField: "Content-Length")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        return (data, httpResponse)
+    }
+
+    /// Uploads a local backup to the central server.
+    func uploadBackupToServer(metadata: BackupMetadata) async {
+        guard isServerConfigured else { return }
+        isUploadingBackup = true
+        uploadProgress = 0
+        defer { isUploadingBackup = false }
+
+        let backupDir = Self.backupsDirectory.appendingPathComponent(metadata.directoryName, isDirectory: true)
+        guard Self.fm.fileExists(atPath: backupDir.path) else { return }
+
+        do {
+            // Collect all files to upload
+            var files: [(relativePath: String, url: URL)] = []
+            if let enumerator = Self.fm.enumerator(at: backupDir, includingPropertiesForKeys: nil) {
+                while let url = enumerator.nextObject() as? URL {
+                    guard !url.hasDirectoryPath else { continue }
+                    let rel = url.path.replacingOccurrences(of: backupDir.path + "/", with: "")
+                    if rel != "metadata.json" { files.append((rel, url)) }
+                }
+            }
+
+            let totalSteps = Double(files.count + 2) // +2 for metadata upload + finalize
+
+            // 1. Upload metadata with isComplete = false
+            var incompleteMeta = metadata
+            incompleteMeta.isComplete = false
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let metaData = try encoder.encode(incompleteMeta)
+            let metaPath = LocalSyncProtocol.Path.backupMetadata(backupId: metadata.directoryName)
+            let (_, metaResp) = try await makeServerRequest(path: metaPath, method: "POST", body: metaData)
+            guard metaResp.statusCode == 200 else {
+                logger.error("Failed to upload metadata: HTTP \(metaResp.statusCode)")
+                return
+            }
+            uploadProgress = 1.0 / totalSteps
+
+            // 2. Upload each file
+            for (i, file) in files.enumerated() {
+                let fileData = try Data(contentsOf: file.url)
+                let filePath = LocalSyncProtocol.Path.backupFile(backupId: metadata.directoryName, filename: file.relativePath)
+                let (_, fileResp) = try await makeServerRequest(path: filePath, method: "POST", body: fileData)
+                if fileResp.statusCode != 200 {
+                    logger.error("Failed to upload \(file.relativePath): HTTP \(fileResp.statusCode)")
+                }
+                uploadProgress = Double(i + 2) / totalSteps
+            }
+
+            // 3. Finalize: re-upload metadata with isComplete = true
+            var completeMeta = metadata
+            completeMeta.isComplete = true
+            let finalData = try encoder.encode(completeMeta)
+            let (_, finalResp) = try await makeServerRequest(path: metaPath, method: "POST", body: finalData)
+            if finalResp.statusCode == 200 {
+                logger.info("Backup uploaded to server: \(metadata.directoryName)")
+            }
+            uploadProgress = 1.0
+        } catch {
+            logger.error("Backup upload failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Fetches the list of backups stored on the central server for the current user.
+    func loadRemoteBackups() async {
+        guard isServerConfigured else {
+            remoteBackups = []
+            return
+        }
+        isLoadingRemoteBackups = true
+        defer { isLoadingRemoteBackups = false }
+
+        do {
+            let (data, response) = try await makeServerRequest(path: LocalSyncProtocol.Path.backups)
+            guard response.statusCode == 200 else {
+                logger.error("Failed to list remote backups: HTTP \(response.statusCode)")
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            var loaded = try decoder.decode([BackupMetadata].self, from: data)
+            for i in loaded.indices { loaded[i].source = .remote }
+            remoteBackups = loaded
+        } catch {
+            logger.error("Failed to load remote backups: \(error.localizedDescription)")
+        }
+    }
+
+    /// Downloads a remote backup to the local backups directory so it can be restored.
+    func downloadBackupFromServer(metadata: BackupMetadata) async -> Bool {
+        guard isServerConfigured else { return false }
+        isDownloadingBackup = true
+        downloadProgress = 0
+        defer { isDownloadingBackup = false }
+
+        let localDir = Self.backupsDirectory.appendingPathComponent(metadata.directoryName, isDirectory: true)
+
+        do {
+            try Self.fm.createDirectory(at: localDir, withIntermediateDirectories: true)
+
+            // Get file list
+            let filesPath = LocalSyncProtocol.Path.backupFiles(backupId: metadata.directoryName)
+            let (listData, listResp) = try await makeServerRequest(path: filesPath)
+            guard listResp.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: listData) as? [String: Any],
+                  let files = json["files"] as? [[String: Any]] else {
+                logger.error("Failed to list remote backup files")
+                return false
+            }
+
+            let totalFiles = Double(files.count)
+            guard totalFiles > 0 else { return false }
+
+            // Download each file
+            for (i, file) in files.enumerated() {
+                guard let name = file["name"] as? String else { continue }
+                let filePath = LocalSyncProtocol.Path.backupFile(backupId: metadata.directoryName, filename: name)
+                let (fileData, fileResp) = try await makeServerRequest(path: filePath)
+                guard fileResp.statusCode == 200 else { continue }
+
+                let dest = localDir.appendingPathComponent(name)
+                try Self.fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileData.write(to: dest)
+                downloadProgress = Double(i + 1) / totalFiles
+            }
+
+            downloadProgress = 1.0
+            loadBackups()
+            logger.info("Downloaded remote backup: \(metadata.directoryName)")
+            return true
+        } catch {
+            logger.error("Backup download failed: \(error.localizedDescription)")
+            lastError = "Download failed: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Deletes a backup from the central server.
+    func deleteRemoteBackup(_ backup: BackupMetadata) async {
+        guard isServerConfigured else { return }
+        let path = LocalSyncProtocol.Path.backup(backupId: backup.directoryName)
+        do {
+            let (_, response) = try await makeServerRequest(path: path, method: "DELETE")
+            if response.statusCode == 200 {
+                logger.info("Deleted remote backup: \(backup.directoryName)")
+            }
+            await loadRemoteBackups()
+        } catch {
+            logger.error("Failed to delete remote backup: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Static Restore Methods (called at app launch before ModelContainer)

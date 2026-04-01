@@ -16,6 +16,14 @@ enum BackupType: String, Codable {
     }
 }
 
+// MARK: - Backup Source
+
+/// Where a backup was loaded from — set at runtime, not persisted.
+enum BackupSource: String, Codable {
+    case local
+    case remote
+}
+
 // MARK: - Backup Metadata
 
 struct BackupMetadata: Codable, Identifiable {
@@ -31,6 +39,15 @@ struct BackupMetadata: Codable, Identifiable {
     /// Directory name for this backup (ISO 8601 timestamp)
     let directoryName: String
 
+    /// Name of the device that created this backup.
+    var deviceName: String?
+
+    /// Whether all files have been uploaded (used by server to filter incomplete uploads).
+    var isComplete: Bool
+
+    /// Where this backup was loaded from. Not encoded to JSON on disk.
+    var source: BackupSource = .local
+
     init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
@@ -40,7 +57,9 @@ struct BackupMetadata: Codable, Identifiable {
         recordCounts: [String: Int],
         totalSizeBytes: Int64,
         scoringWeights: [String: Double],
-        directoryName: String
+        directoryName: String,
+        deviceName: String? = nil,
+        isComplete: Bool = true
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -51,6 +70,32 @@ struct BackupMetadata: Codable, Identifiable {
         self.totalSizeBytes = totalSizeBytes
         self.scoringWeights = scoringWeights
         self.directoryName = directoryName
+        self.deviceName = deviceName
+        self.isComplete = isComplete
+    }
+
+    // MARK: Coding
+
+    enum CodingKeys: String, CodingKey {
+        case id, createdAt, appVersion, label, type, recordCounts
+        case totalSizeBytes, scoringWeights, directoryName
+        case deviceName, isComplete
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        appVersion = try c.decode(String.self, forKey: .appVersion)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        type = try c.decode(BackupType.self, forKey: .type)
+        recordCounts = try c.decode([String: Int].self, forKey: .recordCounts)
+        totalSizeBytes = try c.decode(Int64.self, forKey: .totalSizeBytes)
+        scoringWeights = try c.decode([String: Double].self, forKey: .scoringWeights)
+        directoryName = try c.decode(String.self, forKey: .directoryName)
+        deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName)
+        isComplete = try c.decodeIfPresent(Bool.self, forKey: .isComplete) ?? true
+        source = .local
     }
 
     // MARK: Computed Properties

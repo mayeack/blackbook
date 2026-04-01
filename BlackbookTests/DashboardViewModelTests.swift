@@ -149,8 +149,7 @@ final class DashboardViewModelTests: XCTestCase {
 
         try context.save()
 
-        let allContacts = try context.fetch(FetchDescriptor<Contact>())
-        let stats = viewModel.weeklyStats(from: allContacts)
+        let stats = viewModel.computeWeeklyStats(context: context)
 
         XCTAssertEqual(stats.totalInteractions, 3, "Should count only this week's interactions")
         XCTAssertEqual(stats.uniqueContacts, 2, "Should count 2 unique contacts with interactions this week")
@@ -159,7 +158,7 @@ final class DashboardViewModelTests: XCTestCase {
     // MARK: - 7. Weekly Stats Empty Contacts
 
     func testWeeklyStatsEmptyContacts() throws {
-        let stats = viewModel.weeklyStats(from: [])
+        let stats = viewModel.computeWeeklyStats(context: context)
 
         XCTAssertEqual(stats.totalInteractions, 0, "Empty contacts should yield 0 total interactions")
         XCTAssertEqual(stats.uniqueContacts, 0, "Empty contacts should yield 0 unique contacts")

@@ -18,7 +18,10 @@ final class ContactSyncService {
     }
 
     var isSyncing = false
-    var lastSyncDate: Date?
+    var lastSyncDate: Date? {
+        get { UserDefaults.standard.object(forKey: "contactSync.lastSyncDate") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "contactSync.lastSyncDate") }
+    }
     var syncError: String?
 
     deinit {
@@ -42,10 +45,9 @@ final class ContactSyncService {
             return
         }
 
-        Task { @MainActor in
-            await importContacts(into: modelContext)
-            startObservingChanges()
-        }
+        // Run synchronously on the main thread to keep ModelContext safe.
+        importContacts(into: modelContext)
+        startObservingChanges()
     }
 
     func startObservingChanges() {
@@ -54,7 +56,7 @@ final class ContactSyncService {
         changeObserver = NotificationCenter.default.addObserver(
             forName: .CNContactStoreDidChange,
             object: nil,
-            queue: nil
+            queue: .main
         ) { [weak self] _ in
             self?.handleContactStoreChange()
         }
@@ -77,13 +79,14 @@ final class ContactSyncService {
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             logger.info("System contacts changed — re-syncing")
-            await self.importContacts(into: modelContext)
+            self.importContacts(into: modelContext)
         }
     }
 
     // MARK: - Import
 
-    func importContacts(into modelContext: ModelContext) async {
+    /// Imports contacts synchronously. Must be called on the main thread.
+    func importContacts(into modelContext: ModelContext) {
         guard authorizationStatus == .authorized else {
             syncError = "Contacts access not authorized"; return
         }

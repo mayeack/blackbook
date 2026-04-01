@@ -13,6 +13,7 @@ struct BackupRestoreView: View {
             statusSection
             actionsSection
             backupsListSection
+            remoteBackupsSection
             settingsSection
         }
         .formStyle(.grouped)
@@ -22,6 +23,7 @@ struct BackupRestoreView: View {
         #endif
         .onAppear {
             backupService.loadBackups()
+            Task { await backupService.loadRemoteBackups() }
         }
         .sheet(item: $selectedBackup) { backup in
             NavigationStack {
@@ -52,6 +54,30 @@ struct BackupRestoreView: View {
             ) {
                 Text("\(backupService.formattedTotalSize) (\(backupService.backups.count) backups)")
                     .foregroundStyle(.secondary)
+            }
+
+            if backupService.isUploadingBackup {
+                SettingsRow(
+                    icon: "arrow.up.circle.fill",
+                    iconColor: .teal,
+                    title: "Uploading to Server",
+                    subtitle: "\(Int(backupService.uploadProgress * 100))%"
+                ) {
+                    ProgressView(value: backupService.uploadProgress)
+                        .frame(width: 100)
+                }
+            }
+
+            if backupService.isDownloadingBackup {
+                SettingsRow(
+                    icon: "arrow.down.circle.fill",
+                    iconColor: .teal,
+                    title: "Downloading from Server",
+                    subtitle: "\(Int(backupService.downloadProgress * 100))%"
+                ) {
+                    ProgressView(value: backupService.downloadProgress)
+                        .frame(width: 100)
+                }
             }
         } header: {
             Text("Status")
@@ -96,7 +122,7 @@ struct BackupRestoreView: View {
         }
     }
 
-    // MARK: - Backups List
+    // MARK: - Local Backups List
 
     private var backupsListSection: some View {
         Section {
@@ -122,7 +148,59 @@ struct BackupRestoreView: View {
                 }
             }
         } header: {
-            Text("Available Backups")
+            Text("Local Backups")
+        }
+    }
+
+    // MARK: - Server Backups
+
+    private var remoteBackupsSection: some View {
+        Section {
+            if !backupService.isServerConfigured {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                    Text("Configure the sync server to enable centralized backups.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if backupService.isLoadingRemoteBackups {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .controlSize(.small)
+                    Spacer()
+                }
+            } else if backupService.remoteBackups.isEmpty {
+                ContentUnavailableView {
+                    Label("No Server Backups", systemImage: "externaldrive.badge.icloud")
+                } description: {
+                    Text("Backups from all your devices will appear here.")
+                }
+            } else {
+                ForEach(backupService.remoteBackups) { backup in
+                    Button {
+                        selectedBackup = backup
+                    } label: {
+                        backupRow(backup)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        } header: {
+            HStack {
+                Text("Server Backups")
+                Spacer()
+                if backupService.isServerConfigured {
+                    Button {
+                        Task { await backupService.loadRemoteBackups() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -133,6 +211,14 @@ struct BackupRestoreView: View {
                     Text(backup.formattedDate)
                         .font(.subheadline.weight(.medium))
                     typeBadge(backup.type)
+                    if let deviceName = backup.deviceName {
+                        deviceBadge(deviceName)
+                    }
+                    if backup.source == .remote {
+                        Image(systemName: "externaldrive.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.teal)
+                    }
                 }
                 Text("\(backup.totalRecords) records \u{00B7} \(backup.formattedSize)")
                     .font(.caption)
@@ -153,6 +239,15 @@ struct BackupRestoreView: View {
             .padding(.vertical, 2)
             .background(badgeColor(for: type).opacity(0.15), in: Capsule())
             .foregroundStyle(badgeColor(for: type))
+    }
+
+    private func deviceBadge(_ name: String) -> some View {
+        Text(name)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.gray.opacity(0.15), in: Capsule())
+            .foregroundStyle(.secondary)
     }
 
     private func badgeColor(for type: BackupType) -> Color {

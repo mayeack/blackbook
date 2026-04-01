@@ -23,12 +23,6 @@ struct ContentView: View {
         .onAppear {
             syncService.startAutoSync(with: modelContext)
         }
-        .task {
-            let backupService = BackupService()
-            if backupService.checkAutoBackupNeeded() {
-                await backupService.createBackup(modelContext: modelContext, type: .automatic)
-            }
-        }
         #else
         NavigationSplitView {
             List(selection: $selectedTab) {
@@ -45,12 +39,6 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 500)
         .onAppear {
             syncService.startAutoSync(with: modelContext)
-        }
-        .task {
-            let backupService = BackupService()
-            if backupService.checkAutoBackupNeeded() {
-                await backupService.createBackup(modelContext: modelContext, type: .automatic)
-            }
         }
         #endif
     }

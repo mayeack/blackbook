@@ -9,7 +9,7 @@ private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category:
 /// When the running version doesn't match the value stored in UserDefaults the
 /// existing store is deleted before SwiftData tries to open it, preventing a
 /// fatal crash inside `DefaultStore.fulfill`.
-private let currentSchemaVersion = 2
+private let currentSchemaVersion = 3
 
 @main
 struct BlackbookApp: App {

@@ -65,10 +65,17 @@ final class AuthenticationService {
 
     // MARK: - Session Check
 
-    /// Checks for an existing session. In local mode, immediately signs in.
+    /// Checks for an existing session. Restores the signed-in state only if
+    /// the user has previously signed in; otherwise shows the login screen.
     func checkCurrentSession() async {
-        authState = .signedIn(userId: "local")
-        logger.info("Local session active")
+        if let email = UserDefaults.standard.string(forKey: "auth.userEmail"), !email.isEmpty {
+            self.userEmail = email
+            authState = .signedIn(userId: "local")
+            logger.info("Restored local session for \(email)")
+        } else {
+            authState = .signedOut
+            logger.info("No previous session — showing login")
+        }
     }
 
     // MARK: - Email/Password Sign In
@@ -80,6 +87,7 @@ final class AuthenticationService {
         defer { isProcessing = false }
 
         self.userEmail = email
+        UserDefaults.standard.set(email, forKey: "auth.userEmail")
         authState = .signedIn(userId: "local")
         logger.info("Local sign-in succeeded")
     }
@@ -93,6 +101,7 @@ final class AuthenticationService {
         defer { isProcessing = false }
 
         self.userEmail = email
+        UserDefaults.standard.set(email, forKey: "auth.userEmail")
         authState = .signedIn(userId: "local")
         logger.info("Local sign-up succeeded")
     }
@@ -144,8 +153,11 @@ final class AuthenticationService {
         self.error = nil
         defer { isProcessing = false }
 
+        let email = "apple-user"
+        self.userEmail = email
+        UserDefaults.standard.set(email, forKey: "auth.userEmail")
         authState = .signedIn(userId: "local")
-        logger.info("Apple sign-in not applicable in local mode")
+        logger.info("Apple sign-in succeeded (local mode)")
     }
 
     // MARK: - Sign Out
@@ -157,6 +169,7 @@ final class AuthenticationService {
         defer { isProcessing = false }
 
         self.userEmail = nil
+        UserDefaults.standard.removeObject(forKey: "auth.userEmail")
         authState = .signedOut
         logger.info("Sign-out complete")
     }
