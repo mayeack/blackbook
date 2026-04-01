@@ -122,7 +122,6 @@ final class LocalSyncServer: @unchecked Sendable {
             self.receiveBody(connection: connection, accumulated: rest, need: contentLength - rest.count) { body in
                 completion(HTTPRequest(method: req.method, path: req.path, query: req.query, headers: req.headers, body: body))
             }
-            self.receiveRequest(connection: connection, accumulated: acc, completion: completion)
         }
     }
 
@@ -131,7 +130,7 @@ final class LocalSyncServer: @unchecked Sendable {
             completion(accumulated.isEmpty ? nil : accumulated)
             return
         }
-        connection.receive(minimumIncompleteLength: 1, maximumLength: need) { [weak self] data, _, _, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: min(need, 1048576)) { [weak self] data, _, _, error in
             var acc = accumulated
             if let data = data { acc.append(data) }
             if error != nil || acc.count >= need {
