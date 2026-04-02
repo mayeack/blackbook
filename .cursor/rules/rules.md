@@ -728,13 +728,13 @@ The deploy-testflight job requires all of these secrets to be configured:
 
 | Secret | Purpose |
 |---|---|
-| `APPLE_ID` | Apple Developer account email |
-| `APP_APPLE_ID` | Numeric App ID from App Store Connect |
+| `ASC_KEY_ID` | App Store Connect API Key ID |
+| `ASC_ISSUER_ID` | App Store Connect API Issuer ID |
+| `ASC_KEY_CONTENT` | Base64-encoded `.p8` API key file |
 | `ITC_TEAM_ID` | App Store Connect team ID |
 | `MATCH_GIT_URL` | Private certs repo URL |
 | `MATCH_PASSWORD` | Encryption password for Match certs |
 | `MATCH_GIT_BASIC_AUTHORIZATION` | Base64 `username:PAT` for repo access |
-| `FASTLANE_APP_PASSWORD` | App-specific password from appleid.apple.com |
 
 If any secret is missing or wrong, the deploy will fail silently or with cryptic errors. After rotating any credential, update the corresponding secret immediately.
 
