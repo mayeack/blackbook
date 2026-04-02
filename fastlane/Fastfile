@@ -117,21 +117,49 @@ platform :mac do
       build_number: ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")
     )
 
-    build_mac_app(
-      project: "Blackbook.xcodeproj",
-      scheme: "Blackbook",
-      destination: "generic/platform=macOS",
-      clean: true,
-      export_method: "app-store",
-      output_directory: "./build",
-      output_name: "Blackbook",
-      skip_package_ipa: true
-    )
+    # Archive and export macOS app manually to avoid Fastlane's IPA validation bug
+    archive_path = File.expand_path("~/Library/Developer/Xcode/Archives/Blackbook.xcarchive")
+    export_path = File.expand_path("./build")
+
+    sh("xcodebuild", "-scheme", "Blackbook", "-project", "Blackbook.xcodeproj",
+       "-destination", "generic/platform=macOS",
+       "-archivePath", archive_path,
+       "clean", "archive")
+
+    # Generate export options plist
+    profile_name = ENV["sigh_com.blackbookdevelopment.app_appstore_macos_profile-name"] || "match AppStore com.blackbookdevelopment.app macos"
+    export_plist = Tempfile.new(["export", ".plist"])
+    export_plist.write(<<~PLIST)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>method</key>
+        <string>app-store-connect</string>
+        <key>signingStyle</key>
+        <string>manual</string>
+        <key>provisioningProfiles</key>
+        <dict>
+          <key>com.blackbookdevelopment.app</key>
+          <string>#{profile_name}</string>
+        </dict>
+      </dict>
+      </plist>
+    PLIST
+    export_plist.close
+
+    sh("xcodebuild", "-exportArchive",
+       "-archivePath", archive_path,
+       "-exportPath", export_path,
+       "-exportOptionsPlist", export_plist.path)
+
+    pkg_path = Dir["#{export_path}/*.pkg"].first
+    UI.user_error!("No .pkg found in #{export_path}") unless pkg_path
 
     upload_to_testflight(
       skip_waiting_for_build_processing: true,
       apple_id: ENV["APP_APPLE_ID"],
-      pkg: "./build/Blackbook.pkg"
+      pkg: pkg_path
     )
   end
 
