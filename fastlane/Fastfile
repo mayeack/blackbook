@@ -162,11 +162,17 @@ platform :mac do
 
     pkg_path = Dir["#{export_path}/*.pkg"].first
     UI.user_error!("No .pkg found in #{export_path}") unless pkg_path
+    UI.message("Found pkg at: #{pkg_path}")
+
+    # Clear any IPA path from the iOS lane to avoid conflicts
+    ENV.delete("PILOT_IPA")
+    lane_context.delete(SharedValues::IPA_OUTPUT_PATH)
 
     upload_to_testflight(
       skip_waiting_for_build_processing: true,
       apple_id: ENV["APP_APPLE_ID"],
-      pkg: pkg_path
+      pkg: pkg_path,
+      ipa: nil
     )
   end
 
