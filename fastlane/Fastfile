@@ -122,13 +122,16 @@ platform :mac do
       scheme: "Blackbook",
       destination: "generic/platform=macOS",
       clean: true,
-      export_method: "app-store-connect"
+      export_method: "app-store",
+      output_directory: "./build",
+      output_name: "Blackbook",
+      skip_package_ipa: true
     )
 
     upload_to_testflight(
       skip_waiting_for_build_processing: true,
       apple_id: ENV["APP_APPLE_ID"],
-      pkg: "Blackbook.pkg"
+      pkg: "./build/Blackbook.pkg"
     )
   end
 
