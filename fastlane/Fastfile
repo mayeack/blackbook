@@ -27,7 +27,7 @@ platform :ios do
         use_automatic_signing: false,
         path: "Blackbook.xcodeproj",
         team_id: "37NR4Z7NT6",
-        profile_name: "match AppStore com.blackbookdevelopment.app",
+        profile_name: ENV["sigh_com.blackbookdevelopment.app_appstore_profile-name"] || "match AppStore com.blackbookdevelopment.app",
         code_sign_identity: "Apple Distribution"
       )
     end
@@ -39,6 +39,7 @@ platform :ios do
     build_app(
       project: "Blackbook.xcodeproj",
       scheme: "Blackbook",
+      destination: "generic/platform=iOS",
       export_method: "app-store",
       clean: true,
       include_bitcode: false
@@ -106,7 +107,7 @@ platform :mac do
         use_automatic_signing: false,
         path: "Blackbook.xcodeproj",
         team_id: "37NR4Z7NT6",
-        profile_name: "match AppStore com.blackbookdevelopment.app macos",
+        profile_name: ENV["sigh_com.blackbookdevelopment.app_appstore_macos_profile-name"] || "match AppStore com.blackbookdevelopment.app macos",
         code_sign_identity: "Apple Distribution"
       )
     end
