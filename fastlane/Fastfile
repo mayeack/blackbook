@@ -113,8 +113,10 @@ platform :mac do
       )
     end
 
+    # Use a different build number from iOS to avoid App Store Connect conflicts
+    mac_build = (ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")).to_s + "1"
     increment_build_number(
-      build_number: ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")
+      build_number: mac_build
     )
 
     # Archive and export macOS app manually to avoid Fastlane's IPA validation bug
