@@ -15,50 +15,48 @@ struct LocationListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            SwiftUI.Group {
-                if filteredLocations.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Locations", systemImage: "mappin.and.ellipse")
-                    } description: {
-                        Text("Create locations to organize your contacts by place.")
-                    } actions: {
-                        Button("New Location") { showAddLocation = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(AppConstants.UI.accentGold)
-                    }
-                } else {
-                    List {
-                        ForEach(filteredLocations) { location in
-                            NavigationLink(value: location.id) {
-                                LocationRowView(location: location)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    modelContext.delete(location)
-                                    try? modelContext.save()
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+        SwiftUI.Group {
+            if filteredLocations.isEmpty {
+                ContentUnavailableView {
+                    Label("No Locations", systemImage: "mappin.and.ellipse")
+                } description: {
+                    Text("Create locations to organize your contacts by place.")
+                } actions: {
+                    Button("New Location") { showAddLocation = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppConstants.UI.accentGold)
+                }
+            } else {
+                List {
+                    ForEach(filteredLocations) { location in
+                        NavigationLink(value: location.id) {
+                            LocationRowView(location: location)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                modelContext.delete(location)
+                                try? modelContext.save()
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
-                    .navigationDestination(for: UUID.self) { id in
-                        if let location = locations.first(where: { $0.id == id }) {
-                            LocationDetailView(location: location)
-                        }
+                }
+                .navigationDestination(for: UUID.self) { id in
+                    if let location = locations.first(where: { $0.id == id }) {
+                        LocationDetailView(location: location)
                     }
                 }
             }
-            .navigationTitle("Locations")
-            .searchable(text: $searchText, prompt: "Search locations...")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showAddLocation = true } label: { Image(systemName: "plus") }
-                }
-            }
-            .sheet(isPresented: $showAddLocation) { LocationFormView(location: nil) }
         }
+        .navigationTitle("Locations")
+        .searchable(text: $searchText, prompt: "Search locations...")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showAddLocation = true } label: { Image(systemName: "plus") }
+            }
+        }
+        .sheet(isPresented: $showAddLocation) { LocationFormView(location: nil) }
     }
 }
 

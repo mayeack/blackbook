@@ -13,50 +13,48 @@ struct GroupListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            SwiftUI.Group {
-                if filteredGroups.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Groups", systemImage: "folder")
-                    } description: {
-                        Text("Create groups to organize your contacts.")
-                    } actions: {
-                        Button("New Group") { showAddGroup = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(AppConstants.UI.accentGold)
-                    }
-                } else {
-                    List {
-                        ForEach(filteredGroups) { group in
-                            NavigationLink(value: group.id) {
-                                GroupRowView(group: group)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    modelContext.delete(group)
-                                    try? modelContext.save()
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+        SwiftUI.Group {
+            if filteredGroups.isEmpty {
+                ContentUnavailableView {
+                    Label("No Groups", systemImage: "folder")
+                } description: {
+                    Text("Create groups to organize your contacts.")
+                } actions: {
+                    Button("New Group") { showAddGroup = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppConstants.UI.accentGold)
+                }
+            } else {
+                List {
+                    ForEach(filteredGroups) { group in
+                        NavigationLink(value: group.id) {
+                            GroupRowView(group: group)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                modelContext.delete(group)
+                                try? modelContext.save()
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
-                    .navigationDestination(for: UUID.self) { id in
-                        if let group = groups.first(where: { $0.id == id }) {
-                            GroupDetailView(group: group)
-                        }
+                }
+                .navigationDestination(for: UUID.self) { id in
+                    if let group = groups.first(where: { $0.id == id }) {
+                        GroupDetailView(group: group)
                     }
                 }
             }
-            .navigationTitle("Groups")
-            .searchable(text: $searchText, prompt: "Search groups...")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showAddGroup = true } label: { Image(systemName: "plus") }
-                }
-            }
-            .sheet(isPresented: $showAddGroup) { GroupFormView(group: nil) }
         }
+        .navigationTitle("Groups")
+        .searchable(text: $searchText, prompt: "Search groups...")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showAddGroup = true } label: { Image(systemName: "plus") }
+            }
+        }
+        .sheet(isPresented: $showAddGroup) { GroupFormView(group: nil) }
     }
 }
 

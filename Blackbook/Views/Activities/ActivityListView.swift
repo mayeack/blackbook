@@ -32,8 +32,7 @@ struct ActivityListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
                 // Top half: existing activities or empty state
                 SwiftUI.Group {
                     if filteredActivities.isEmpty {
@@ -87,7 +86,6 @@ struct ActivityListView: View {
                 await calendarService.fetchCalendarList()
                 await calendarService.fetchEvents(rejectedEventIds: rejectedEventIds, force: true)
             }
-        }
     }
 
     // MARK: - Suggested Activities

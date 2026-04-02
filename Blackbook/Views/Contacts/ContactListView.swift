@@ -40,9 +40,8 @@ struct ContactListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            let filtered = viewModel.filteredContacts(contacts, tags: tags, groups: groups, locations: locations)
-            SwiftUI.Group {
+        let filtered = viewModel.filteredContacts(contacts, tags: tags, groups: groups, locations: locations)
+        SwiftUI.Group {
                 if filtered.isEmpty {
                     ContentUnavailableView {
                         Label("No Contacts", systemImage: "person.crop.rectangle.stack")
@@ -148,7 +147,6 @@ struct ContactListView: View {
                     ContactFieldToggleSheet(contact: target.contact, column: target.column)
                 }
             }
-        }
     }
 }
 

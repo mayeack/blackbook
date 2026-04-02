@@ -59,44 +59,42 @@ struct SettingsView: View {
     #endif
 
     var body: some View {
-        NavigationStack {
-            Form {
-                contactsSyncSection
-                #if os(macOS)
-                iMessageSyncSection
-                #endif
-                hiddenContactsSection
-                securitySection
-                dataSection
-                aiSection
-                googleCalendarSection
-                scoringSection
-                subscriptionSection
-                accountSection
-                aboutSection
+        Form {
+            contactsSyncSection
+            #if os(macOS)
+            iMessageSyncSection
+            #endif
+            hiddenContactsSection
+            securitySection
+            dataSection
+            aiSection
+            googleCalendarSection
+            scoringSection
+            subscriptionSection
+            accountSection
+            aboutSection
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Settings")
+        .sheet(isPresented: $showAPIKeyEntry) {
+            APIKeyEntryView(onSave: { hasAPIKey = true })
+        }
+        .sheet(isPresented: $showGoogleClientIdEntry) {
+            GoogleClientIdEntryView(calendarService: calendarService)
+        }
+        .alert("Sign out of \(authService.displayName ?? "account")?", isPresented: $showSignOutConfirm) {
+            Button("Sign Out", role: .destructive) {
+                Task { await authService.signOut() }
             }
-            .formStyle(.grouped)
-            .navigationTitle("Settings")
-            .sheet(isPresented: $showAPIKeyEntry) {
-                APIKeyEntryView(onSave: { hasAPIKey = true })
-            }
-            .sheet(isPresented: $showGoogleClientIdEntry) {
-                GoogleClientIdEntryView(calendarService: calendarService)
-            }
-            .alert("Sign out of \(authService.displayName ?? "account")?", isPresented: $showSignOutConfirm) {
-                Button("Sign Out", role: .destructive) {
-                    Task { await authService.signOut() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Are you sure you want to sign out? Your data is stored locally and will remain on this device.")
-            }
-            .onAppear {
-                hasAPIKey = KeychainService.retrieve(
-                    service: AppConstants.AI.keychainServiceName,
-                    account: AppConstants.AI.keychainAccountName
-                ) != nil
-            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to sign out? Your data is stored locally and will remain on this device.")
+        }
+        .onAppear {
+            hasAPIKey = KeychainService.retrieve(
+                service: AppConstants.AI.keychainServiceName,
+                account: AppConstants.AI.keychainAccountName
+            ) != nil
         }
     }
 
