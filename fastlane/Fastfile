@@ -99,6 +99,7 @@ platform :mac do
     match(
       type: "appstore",
       platform: "macos",
+      additional_cert_types: ["mac_installer_distribution"],
       readonly: is_ci
     )
 
