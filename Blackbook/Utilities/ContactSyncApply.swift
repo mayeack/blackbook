@@ -33,6 +33,7 @@ enum ContactSyncApply {
         if let familyDetails = contact.familyDetails { dict["familyDetails"] = familyDetails }
         if let linkedInURL = contact.linkedInURL { dict["linkedInURL"] = linkedInURL }
         if let twitterHandle = contact.twitterHandle { dict["twitterHandle"] = twitterHandle }
+        if let instagramHandle = contact.instagramHandle { dict["instagramHandle"] = instagramHandle }
         if let lastInteractionDate = contact.lastInteractionDate {
             dict["lastInteractionDate"] = iso8601.string(from: lastInteractionDate)
         }
@@ -88,6 +89,7 @@ enum ContactSyncApply {
         contact.familyDetails = dict["familyDetails"] as? String
         contact.linkedInURL = dict["linkedInURL"] as? String
         contact.twitterHandle = dict["twitterHandle"] as? String
+        contact.instagramHandle = dict["instagramHandle"] as? String
         if let v = dict["relationshipScore"] as? Double { contact.relationshipScore = v }
         if let v = dict["isPriority"] as? Bool { contact.isPriority = v }
         if let v = dict["isHidden"] as? Bool { contact.isHidden = v }

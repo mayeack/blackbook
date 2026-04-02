@@ -58,15 +58,19 @@ struct NetworkGraphView: View {
                         isSelected: selectedContactID == node.id
                     )
                     .position(node.position)
-                    .onTapGesture {
+                    .highPriorityGesture(TapGesture().onEnded {
                         selectedContactID = node.id
-                    }
+                    })
                 }
             }
             .frame(
                 width: viewModel.canvasSize.width * scale,
                 height: viewModel.canvasSize.height * scale
             )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selectedContactID = nil
+            }
             .scaleEffect(scale, anchor: .topLeading)
             .gesture(
                 MagnifyGesture()

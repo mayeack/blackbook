@@ -5,18 +5,43 @@ struct LocationDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var location: Location
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \Tag.name) private var allTags: [Tag]
+    @Query(sort: \Group.name) private var allGroups: [Group]
     @State private var showEditLocation = false
     @State private var showAddContacts = false
     @State private var showDeleteConfirmation = false
     @State private var searchText = ""
+    @State private var selectedTagFilter: Set<UUID> = []
+    @State private var selectedGroupFilter: Set<UUID> = []
 
     private var sortedContacts: [Contact] {
-        let contacts = location.contacts.filter { !$0.isHidden && !$0.isMergedAway }.sorted { $0.lastName < $1.lastName }
+        var contacts = location.contacts.filter { !$0.isHidden && !$0.isMergedAway }
+        if !selectedTagFilter.isEmpty {
+            contacts = contacts.filter { c in c.tags.contains { selectedTagFilter.contains($0.id) } }
+        }
+        if !selectedGroupFilter.isEmpty {
+            contacts = contacts.filter { c in c.groups.contains { selectedGroupFilter.contains($0.id) } }
+        }
+        contacts = contacts.sorted {
+            let cmp = $0.lastName.localizedCaseInsensitiveCompare($1.lastName)
+            if cmp != .orderedSame { return cmp == .orderedAscending }
+            return $0.firstName.localizedCaseInsensitiveCompare($1.firstName) == .orderedAscending
+        }
         if searchText.isEmpty { return contacts }
         return contacts.filter {
             $0.displayName.localizedCaseInsensitiveContains(searchText)
             || ($0.company?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
+    }
+
+    private var relevantTags: [Tag] {
+        let memberTagIDs = Set(location.contacts.flatMap { $0.tags.map(\.id) })
+        return allTags.filter { memberTagIDs.contains($0.id) }
+    }
+
+    private var relevantGroups: [Group] {
+        let memberGroupIDs = Set(location.contacts.flatMap { $0.groups.map(\.id) })
+        return allGroups.filter { memberGroupIDs.contains($0.id) }
     }
 
     var body: some View {
@@ -70,10 +95,10 @@ struct LocationDetailView: View {
         Section {
             HStack(spacing: 12) {
                 Image(systemName: location.icon)
-                    .font(.title3)
+                    .font(.body)
                     .foregroundStyle(.white)
-                    .frame(width: AppConstants.UI.icon1Size, height: AppConstants.UI.icon1Size)
-                    .background(location.color.gradient, in: RoundedRectangle(cornerRadius: 10))
+                    .frame(width: 36, height: 36)
+                    .background(location.color.gradient, in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(location.name)
                         .font(.title.weight(.bold))
@@ -96,6 +121,26 @@ struct LocationDetailView: View {
             .buttonStyle(.borderedProminent)
             .tint(AppConstants.UI.accentGold)
             .listRowBackground(Color.clear)
+
+            if !relevantTags.isEmpty || !relevantGroups.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(relevantTags) { tag in
+                            TagChipView(tag: tag, isSelected: selectedTagFilter.contains(tag.id)) {
+                                if selectedTagFilter.contains(tag.id) { selectedTagFilter.remove(tag.id) }
+                                else { selectedTagFilter.insert(tag.id) }
+                            }
+                        }
+                        ForEach(relevantGroups) { group in
+                            GroupChipView(group: group, isSelected: selectedGroupFilter.contains(group.id)) {
+                                if selectedGroupFilter.contains(group.id) { selectedGroupFilter.remove(group.id) }
+                                else { selectedGroupFilter.insert(group.id) }
+                            }
+                        }
+                    }
+                }
+                .listRowSeparator(.hidden)
+            }
 
             if sortedContacts.isEmpty && !searchText.isEmpty {
                 ContentUnavailableView.search(text: searchText)

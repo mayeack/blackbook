@@ -33,7 +33,8 @@ struct ContactLocationPickerView: View {
     }
 
     private var filteredLocations: [Location] {
-        let base = allLocations.filter { !selectedIDs.contains($0.id) }
+        let suggestedIDs = searchText.isEmpty ? Set(suggestedLocations.map(\.id)) : []
+        let base = allLocations.filter { !selectedIDs.contains($0.id) && !suggestedIDs.contains($0.id) }
         if searchText.isEmpty { return base }
         return base.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }

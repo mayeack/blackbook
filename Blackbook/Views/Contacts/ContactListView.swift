@@ -34,6 +34,9 @@ struct ContactListView: View {
     @State private var viewModel = ContactListViewModel()
     @State private var showAddContact = false
     @State private var columnEditTarget: ColumnEditTarget?
+    @State private var contactToDelete: Contact?
+    @State private var contactToHide: Contact?
+    @State private var expandedFilters: Set<String> = []
 
     private var contactsByID: [UUID: Contact] {
         Dictionary(uniqueKeysWithValues: contacts.map { ($0.id, $0) })
@@ -55,33 +58,54 @@ struct ContactListView: View {
                 } else {
                     List {
                         if !tags.isEmpty || !groups.isEmpty || !locations.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 4) {
                                 if !tags.isEmpty {
-                                    FilterRow(label: "Tags") {
-                                        ForEach(tags) { tag in
-                                            TagChipView(tag: tag, isSelected: viewModel.selectedTags.contains(tag.id)) {
-                                                if viewModel.selectedTags.contains(tag.id) { viewModel.selectedTags.remove(tag.id) }
-                                                else { viewModel.selectedTags.insert(tag.id) }
+                                    CollapsibleFilterSection(
+                                        title: "Tags",
+                                        isExpanded: expandedFilters.contains("Tags"),
+                                        activeCount: viewModel.selectedTags.count,
+                                        onToggle: { toggleFilter("Tags") }
+                                    ) {
+                                        FlowLayout(spacing: 8) {
+                                            ForEach(tags) { tag in
+                                                TagChipView(tag: tag, isSelected: viewModel.selectedTags.contains(tag.id)) {
+                                                    if viewModel.selectedTags.contains(tag.id) { viewModel.selectedTags.remove(tag.id) }
+                                                    else { viewModel.selectedTags.insert(tag.id) }
+                                                }
                                             }
                                         }
                                     }
                                 }
                                 if !groups.isEmpty {
-                                    FilterRow(label: "Groups") {
-                                        ForEach(groups) { group in
-                                            GroupChipView(group: group, isSelected: viewModel.selectedGroups.contains(group.id)) {
-                                                if viewModel.selectedGroups.contains(group.id) { viewModel.selectedGroups.remove(group.id) }
-                                                else { viewModel.selectedGroups.insert(group.id) }
+                                    CollapsibleFilterSection(
+                                        title: "Groups",
+                                        isExpanded: expandedFilters.contains("Groups"),
+                                        activeCount: viewModel.selectedGroups.count,
+                                        onToggle: { toggleFilter("Groups") }
+                                    ) {
+                                        FlowLayout(spacing: 8) {
+                                            ForEach(groups) { group in
+                                                GroupChipView(group: group, isSelected: viewModel.selectedGroups.contains(group.id)) {
+                                                    if viewModel.selectedGroups.contains(group.id) { viewModel.selectedGroups.remove(group.id) }
+                                                    else { viewModel.selectedGroups.insert(group.id) }
+                                                }
                                             }
                                         }
                                     }
                                 }
                                 if !locations.isEmpty {
-                                    FilterRow(label: "Locations") {
-                                        ForEach(locations) { location in
-                                            LocationChipView(location: location, isSelected: viewModel.selectedLocations.contains(location.id)) {
-                                                if viewModel.selectedLocations.contains(location.id) { viewModel.selectedLocations.remove(location.id) }
-                                                else { viewModel.selectedLocations.insert(location.id) }
+                                    CollapsibleFilterSection(
+                                        title: "Locations",
+                                        isExpanded: expandedFilters.contains("Locations"),
+                                        activeCount: viewModel.selectedLocations.count,
+                                        onToggle: { toggleFilter("Locations") }
+                                    ) {
+                                        FlowLayout(spacing: 8) {
+                                            ForEach(locations) { location in
+                                                LocationChipView(location: location, isSelected: viewModel.selectedLocations.contains(location.id)) {
+                                                    if viewModel.selectedLocations.contains(location.id) { viewModel.selectedLocations.remove(location.id) }
+                                                    else { viewModel.selectedLocations.insert(location.id) }
+                                                }
                                             }
                                         }
                                     }
@@ -99,15 +123,11 @@ struct ContactListView: View {
                                     }
                                 }
                                 .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) { modelContext.delete(contact); try? modelContext.save() }
+                                    Button(role: .destructive) { contactToDelete = contact }
                                     label: { Label("Delete", systemImage: "trash") }
                                 }
                                 .swipeActions(edge: .leading) {
-                                    Button {
-                                        contact.isHidden = true
-                                        contact.updatedAt = Date()
-                                        try? modelContext.save()
-                                    } label: {
+                                    Button { contactToHide = contact } label: {
                                         Label("Hide", systemImage: "eye.slash")
                                     }
                                     .tint(.gray)
@@ -124,7 +144,7 @@ struct ContactListView: View {
                 }
             }
             .navigationTitle("Contacts")
-            .searchable(text: $viewModel.searchText, prompt: "Search contacts...")
+            .searchable(text: $viewModel.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search contacts...")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { Button { showAddContact = true } label: { Image(systemName: "plus") } }
                 ToolbarItem(placement: .automatic) {
@@ -147,6 +167,95 @@ struct ContactListView: View {
                     ContactFieldToggleSheet(contact: target.contact, column: target.column)
                 }
             }
+            .alert(
+                "Delete Contact?",
+                isPresented: Binding(
+                    get: { contactToDelete != nil },
+                    set: { if !$0 { contactToDelete = nil } }
+                ),
+                presenting: contactToDelete
+            ) { contact in
+                Button("Cancel", role: .cancel) { contactToDelete = nil }
+                Button("Delete", role: .destructive) {
+                    modelContext.delete(contact)
+                    try? modelContext.save()
+                    contactToDelete = nil
+                }
+            } message: { contact in
+                Text("Are you sure you want to delete \(contact.displayName)? This action cannot be undone.")
+            }
+            .alert(
+                "Hide Contact?",
+                isPresented: Binding(
+                    get: { contactToHide != nil },
+                    set: { if !$0 { contactToHide = nil } }
+                ),
+                presenting: contactToHide
+            ) { contact in
+                Button("Cancel", role: .cancel) { contactToHide = nil }
+                Button("Hide", role: .destructive) {
+                    contact.isHidden = true
+                    contact.updatedAt = Date()
+                    try? modelContext.save()
+                    contactToHide = nil
+                }
+            } message: { contact in
+                Text("\(contact.displayName) will be hidden from all lists. You can unhide them from Settings > Hidden Contacts.")
+            }
+    }
+
+    private func toggleFilter(_ key: String) {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            if expandedFilters.contains(key) {
+                expandedFilters.remove(key)
+            } else {
+                expandedFilters.insert(key)
+            }
+        }
+    }
+}
+
+// MARK: - Collapsible Filter Section
+
+struct CollapsibleFilterSection<Content: View>: View {
+    let title: String
+    let isExpanded: Bool
+    let activeCount: Int
+    let onToggle: () -> Void
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: onToggle) {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if activeCount > 0 {
+                        Text("\(activeCount)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppConstants.UI.accentGold, in: Capsule())
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                content
+                    .padding(.leading, 4)
+            }
+        }
     }
 }
 

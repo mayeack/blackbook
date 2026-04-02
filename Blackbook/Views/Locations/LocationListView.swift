@@ -66,19 +66,19 @@ struct LocationRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: location.icon)
-                .font(.title3)
+                .font(.body)
                 .foregroundStyle(.white)
-                .frame(width: AppConstants.UI.icon1Size, height: AppConstants.UI.icon1Size)
-                .background(location.color.gradient, in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 4) {
+                .frame(width: 36, height: 36)
+                .background(location.color.gradient, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
                 Text(location.name)
-                    .font(.title.weight(.bold))
+                    .font(.body.weight(.medium))
                 Text("\(location.contacts.count) contact\(location.contacts.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }

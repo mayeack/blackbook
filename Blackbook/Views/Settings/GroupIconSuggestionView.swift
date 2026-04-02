@@ -49,6 +49,9 @@ struct GroupIconSuggestionView: View {
                 await MainActor.run {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         suggestedIcons = results
+                        if let first = results.first {
+                            selectedIcon = first
+                        }
                     }
                 }
             }

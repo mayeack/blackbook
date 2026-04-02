@@ -89,7 +89,12 @@ final class BackupService {
             try Self.fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
 
             // Checkpoint WAL to consolidate data into main store file
-            try Self.checkpointWAL()
+            // Non-fatal: backup copies WAL+SHM files, so it's valid even without checkpoint
+            do {
+                try Self.checkpointWAL()
+            } catch {
+                logger.warning("WAL checkpoint skipped (non-fatal): \(error.localizedDescription)")
+            }
 
             // Copy store files
             try Self.copyStoreFiles(to: backupDir)
@@ -613,6 +618,16 @@ final class BackupService {
             }
         }
 
+        // Restore external storage support directory (SwiftData @Attribute(.externalStorage))
+        let currentSupport = storeDir.appending(path: ".default_SUPPORT")
+        if fm.fileExists(atPath: currentSupport.path) {
+            try fm.removeItem(at: currentSupport)
+        }
+        let backupSupport = backupDir.appendingPathComponent(".default_SUPPORT")
+        if fm.fileExists(atPath: backupSupport.path) {
+            try fm.copyItem(at: backupSupport, to: currentSupport)
+        }
+
         // Replace photos directory
         let currentPhotos = photosDirectory
         if fm.fileExists(atPath: currentPhotos.path) {
@@ -664,7 +679,7 @@ final class BackupService {
         }
 
         var errMsg: UnsafeMutablePointer<CChar>?
-        let execResult = sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, &errMsg)
+        let execResult = sqlite3_exec(db, "PRAGMA wal_checkpoint(PASSIVE)", nil, nil, &errMsg)
         let errorString = errMsg.flatMap { String(cString: $0) }
         sqlite3_free(errMsg)
         sqlite3_close(db)
@@ -687,6 +702,11 @@ final class BackupService {
             if fm.fileExists(atPath: src.path) {
                 try fm.copyItem(at: src, to: destination.appendingPathComponent("default.store\(suffix)"))
             }
+        }
+        // Copy external storage support directory (SwiftData @Attribute(.externalStorage))
+        let supportDir = storeDir.appending(path: ".default_SUPPORT")
+        if fm.fileExists(atPath: supportDir.path) {
+            try fm.copyItem(at: supportDir, to: destination.appendingPathComponent(".default_SUPPORT"))
         }
     }
 

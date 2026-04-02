@@ -25,6 +25,7 @@ final class Contact {
     var familyDetails: String?
     var linkedInURL: String?
     var twitterHandle: String?
+    var instagramHandle: String?
     var customFields: [String: String]
     var relationshipScore: Double
     var lastInteractionDate: Date?

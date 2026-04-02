@@ -25,6 +25,10 @@ final class LocalSyncServer: @unchecked Sendable {
     private var bonjourService: NetService?
     private(set) var isRunning = false
     private(set) var port: UInt16 = 0
+    private var configuredPort: UInt16 = LocalSyncProtocol.defaultPort
+    private var isStopping = false
+    private var restartDelay: TimeInterval = 1.0
+    private let maxRestartDelay: TimeInterval = 30.0
 
     init(container: ModelContainer, password: String) {
         self.container = container
@@ -38,6 +42,8 @@ final class LocalSyncServer: @unchecked Sendable {
 
     func start(port: UInt16 = LocalSyncProtocol.defaultPort) {
         guard !isRunning else { return }
+        isStopping = false
+        configuredPort = port
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
 
@@ -45,13 +51,23 @@ final class LocalSyncServer: @unchecked Sendable {
             let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
             self.listener = listener
             listener.stateUpdateHandler = { [weak self] state in
-                if case .ready = state {
+                switch state {
+                case .ready:
                     self?.port = listener.port?.rawValue ?? 0
                     self?.isRunning = true
+                    self?.restartDelay = 1.0
                     self?.publishBonjour(port: Int(self?.port ?? 0))
                     logger.info("Local sync server listening on port \(self?.port ?? 0)")
-                } else if case .failed(let error) = state {
+                case .failed(let error):
                     logger.error("Listener failed: \(error.localizedDescription)")
+                    self?.scheduleRestart()
+                case .cancelled:
+                    self?.isRunning = false
+                    self?.port = 0
+                case .waiting(let error):
+                    logger.warning("Listener waiting: \(error.localizedDescription)")
+                default:
+                    break
                 }
             }
             listener.newConnectionHandler = { [weak self] conn in
@@ -60,16 +76,35 @@ final class LocalSyncServer: @unchecked Sendable {
             listener.start(queue: queue)
         } catch {
             logger.error("Failed to start sync server: \(error.localizedDescription)")
+            scheduleRestart()
         }
     }
 
     func stop() {
+        isStopping = true
         listener?.cancel()
         listener = nil
         bonjourService?.stop()
         bonjourService = nil
         isRunning = false
         port = 0
+    }
+
+    private func scheduleRestart() {
+        guard !isStopping else { return }
+        listener?.cancel()
+        listener = nil
+        bonjourService?.stop()
+        bonjourService = nil
+        isRunning = false
+        port = 0
+        let delay = restartDelay
+        restartDelay = min(restartDelay * 2, maxRestartDelay)
+        logger.info("Scheduling server restart in \(delay)s")
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.isStopping else { return }
+            self.start(port: self.configuredPort)
+        }
     }
 
     private func publishBonjour(port: Int) {

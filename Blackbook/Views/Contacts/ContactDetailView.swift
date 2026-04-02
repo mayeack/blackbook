@@ -13,6 +13,8 @@ struct ContactDetailView: View {
     @State private var selectedSection: DetailSection = .overview
     @State private var showMetViaPicker = false
     @State private var showIntroducedToPicker = false
+    @State private var showDeleteConfirm = false
+    @State private var showHideConfirm = false
 
     enum DetailSection: String, CaseIterable, Identifiable {
         case overview = "Overview", interactions = "Interactions", notes = "Notes", reminders = "Reminders", ai = "AI"
@@ -55,16 +57,21 @@ struct ContactDetailView: View {
                     Button { viewModel.showMergeContact = true } label: {
                         Label("Merge with\u{2026}", systemImage: "arrow.triangle.merge")
                     }
+                    Divider()
                     Button {
-                        contact.isHidden.toggle()
-                        contact.updatedAt = Date()
-                        try? modelContext.save()
-                        if contact.isHidden { dismiss() }
+                        if contact.isHidden {
+                            contact.isHidden = false
+                            contact.updatedAt = Date()
+                            try? modelContext.save()
+                        } else {
+                            showHideConfirm = true
+                        }
                     } label: {
                         Label(contact.isHidden ? "Unhide Contact" : "Hide Contact",
                               systemImage: contact.isHidden ? "eye" : "eye.slash")
                     }
-                    Button(role: .destructive) { viewModel.deleteContact(contact, context: modelContext); dismiss() }
+                    Divider()
+                    Button(role: .destructive) { showDeleteConfirm = true }
                     label: { Label("Delete Contact", systemImage: "trash") }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
@@ -85,7 +92,7 @@ struct ContactDetailView: View {
             IntroducedToPickerView(contact: contact, allContacts: allContacts)
         }
         .sheet(isPresented: $viewModel.showMergeContact) {
-            MergeContactPickerView(primaryContact: contact) {
+            MergeContactPickerView(initialPrimary: contact) {
                 viewModel.showMergeContact = false
             }
         }
@@ -97,6 +104,26 @@ struct ContactDetailView: View {
         }
         .sheet(isPresented: $viewModel.showLocationPicker) {
             ContactLocationPickerView(contact: contact, allLocations: allLocations)
+        }
+        .alert("Delete Contact?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                viewModel.deleteContact(contact, context: modelContext)
+                dismiss()
+            }
+        } message: {
+            Text("Are you sure you want to delete \(contact.displayName)? This action cannot be undone.")
+        }
+        .alert("Hide Contact?", isPresented: $showHideConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Hide", role: .destructive) {
+                contact.isHidden = true
+                contact.updatedAt = Date()
+                try? modelContext.save()
+                dismiss()
+            }
+        } message: {
+            Text("\(contact.displayName) will be hidden from all lists. You can unhide them from Settings > Hidden Contacts.")
         }
     }
 
@@ -177,7 +204,7 @@ struct ContactDetailView: View {
             if !contact.phones.isEmpty { InfoBlock(title: "Phone", items: contact.phones, icon: "phone") }
             if !contact.emails.isEmpty { InfoBlock(title: "Email", items: contact.emails, icon: "envelope") }
             if !contact.addresses.isEmpty { InfoBlock(title: "Address", items: contact.addresses, icon: "mappin.and.ellipse") }
-            if let b = contact.birthday { DetailRow(icon: "gift", label: "Birthday", value: b.shortFormatted) }
+            if let b = contact.birthday { DetailRow(icon: "gift", label: "Birthday", value: b.birthdayFormatted) }
             if !contact.interests.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Interests", systemImage: "sparkles").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
@@ -212,11 +239,12 @@ struct ContactDetailView: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Label("Introduced to", systemImage: "person.2").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                if contact.metViaBacklinks.isEmpty {
+                let visibleBacklinks = contact.metViaBacklinks.filter { !$0.isHidden && !$0.isMergedAway }
+                if visibleBacklinks.isEmpty {
                     Text("None").font(.body).foregroundStyle(.tertiary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(contact.metViaBacklinks.sorted { $0.displayName < $1.displayName }) { linked in
+                        ForEach(visibleBacklinks.sorted { $0.displayName < $1.displayName }) { linked in
                             NavigationLink(value: ContactNavigationID(id: linked.id)) {
                                 HStack(spacing: 10) {
                                     ContactAvatarView(contact: linked, size: AppConstants.UI.metViaAvatarSize)
@@ -303,7 +331,9 @@ struct ContactDetailView: View {
                     }.foregroundStyle(AppConstants.UI.accentGold)
                 }.buttonStyle(.plain)
             }
-        }.padding(AppConstants.UI.sectionSpacing)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppConstants.UI.sectionSpacing)
     }
 
     private var interactionsSection: some View {
@@ -366,7 +396,7 @@ struct MetViaPickerView: View {
     @State private var searchText = ""
 
     private var eligible: [Contact] {
-        allContacts.filter { $0.id != contact.id }
+        allContacts.filter { $0.id != contact.id && !$0.isHidden && !$0.isMergedAway }
     }
 
     private var filtered: [Contact] {
@@ -440,7 +470,7 @@ struct IntroducedToPickerView: View {
     @State private var selectedIDs: Set<UUID> = []
 
     private var eligible: [Contact] {
-        allContacts.filter { $0.id != contact.id }
+        allContacts.filter { $0.id != contact.id && !$0.isHidden && !$0.isMergedAway }
     }
 
     private var filtered: [Contact] {
