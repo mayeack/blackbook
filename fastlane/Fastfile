@@ -119,6 +119,7 @@ platform :mac do
     build_mac_app(
       project: "Blackbook.xcodeproj",
       scheme: "Blackbook",
+      destination: "generic/platform=macOS",
       clean: true,
       export_method: "app-store"
     )
@@ -134,6 +135,7 @@ platform :mac do
     build_mac_app(
       project: "Blackbook.xcodeproj",
       scheme: "Blackbook",
+      destination: "generic/platform=macOS",
       clean: true,
       export_method: "app-store"
     )
