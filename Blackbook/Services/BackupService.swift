@@ -89,7 +89,12 @@ final class BackupService {
             try Self.fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
 
             // Checkpoint WAL to consolidate data into main store file
-            try Self.checkpointWAL()
+            // Non-fatal: backup copies WAL+SHM files, so it's valid even without checkpoint
+            do {
+                try Self.checkpointWAL()
+            } catch {
+                logger.warning("WAL checkpoint skipped (non-fatal): \(error.localizedDescription)")
+            }
 
             // Copy store files
             try Self.copyStoreFiles(to: backupDir)
@@ -664,7 +669,7 @@ final class BackupService {
         }
 
         var errMsg: UnsafeMutablePointer<CChar>?
-        let execResult = sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, &errMsg)
+        let execResult = sqlite3_exec(db, "PRAGMA wal_checkpoint(PASSIVE)", nil, nil, &errMsg)
         let errorString = errMsg.flatMap { String(cString: $0) }
         sqlite3_free(errMsg)
         sqlite3_close(db)
