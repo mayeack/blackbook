@@ -15,25 +15,23 @@ struct NetworkGraphView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            SwiftUI.Group {
-                if trees.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Connections", systemImage: "point.3.connected.trianglepath.dotted")
-                    } description: {
-                        Text("Set \"Met via\" on your contacts to see your relationship tree.")
-                    }
-                } else {
-                    treeCanvas
+        SwiftUI.Group {
+            if trees.isEmpty {
+                ContentUnavailableView {
+                    Label("No Connections", systemImage: "point.3.connected.trianglepath.dotted")
+                } description: {
+                    Text("Set \"Met via\" on your contacts to see your relationship tree.")
                 }
+            } else {
+                treeCanvas
             }
-            .navigationTitle("Network")
-            .navigationDestination(for: UUID.self) { id in
-                if let c = contactsByID[id] { ContactDetailView(contact: c) }
-            }
-            .onAppear { rebuildLayout() }
-            .onChange(of: allContacts.map(\.id)) { _, _ in rebuildLayout() }
         }
+        .navigationTitle("Network")
+        .navigationDestination(for: UUID.self) { id in
+            if let c = contactsByID[id] { ContactDetailView(contact: c) }
+        }
+        .onAppear { rebuildLayout() }
+        .onChange(of: allContacts.map(\.id)) { _, _ in rebuildLayout() }
     }
 
     private func rebuildLayout() {

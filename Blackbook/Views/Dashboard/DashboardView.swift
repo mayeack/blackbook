@@ -15,30 +15,28 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    weeklyStatsCard; prioritizeCard; fadingCard; remindersCard; aiCard; topContactsCard
-                }.padding()
+        ScrollView {
+            VStack(spacing: 20) {
+                weeklyStatsCard; prioritizeCard; fadingCard; remindersCard; aiCard; topContactsCard
+            }.padding()
+        }
+        .navigationTitle("Overview")
+        .navigationDestination(for: UUID.self) { id in
+            if let c = contactsByID[id] { ContactDetailView(contact: c) }
+        }
+        .onAppear {
+            weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
+            // Defer score recalculation to avoid SwiftData relationship
+            // faulting during initial view load which can crash.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [viewModel, modelContext] in
+                viewModel.recalculateScoresIfNeeded(context: modelContext)
             }
-            .navigationTitle("Overview")
-            .navigationDestination(for: UUID.self) { id in
-                if let c = contactsByID[id] { ContactDetailView(contact: c) }
-            }
-            .onAppear {
-                weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
-                // Defer score recalculation to avoid SwiftData relationship
-                // faulting during initial view load which can crash.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [viewModel, modelContext] in
-                    viewModel.recalculateScoresIfNeeded(context: modelContext)
-                }
-            }
-            .onChange(of: allContacts.count) { _, _ in
-                weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
-            }
-            .sheet(isPresented: $showingPrioritizePicker) {
-                PrioritizeContactPicker(contacts: contacts.filter { !$0.isPriority })
-            }
+        }
+        .onChange(of: allContacts.count) { _, _ in
+            weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
+        }
+        .sheet(isPresented: $showingPrioritizePicker) {
+            PrioritizeContactPicker(contacts: contacts.filter { !$0.isPriority })
         }
     }
 

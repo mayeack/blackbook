@@ -13,53 +13,51 @@ struct TagListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            SwiftUI.Group {
-                if filteredTags.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Tags", systemImage: "tag")
-                    } description: {
-                        Text("Create tags to organize your contacts.")
-                    } actions: {
-                        Button("New Tag") { showAddTag = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(AppConstants.UI.accentGold)
-                    }
-                } else {
-                    List {
-                        ForEach(filteredTags) { tag in
-                            NavigationLink(value: tag.id) {
-                                TagRowView(tag: tag)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    withAnimation {
-                                        modelContext.delete(tag)
-                                        try? modelContext.save()
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+        SwiftUI.Group {
+            if filteredTags.isEmpty {
+                ContentUnavailableView {
+                    Label("No Tags", systemImage: "tag")
+                } description: {
+                    Text("Create tags to organize your contacts.")
+                } actions: {
+                    Button("New Tag") { showAddTag = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppConstants.UI.accentGold)
+                }
+            } else {
+                List {
+                    ForEach(filteredTags) { tag in
+                        NavigationLink(value: tag.id) {
+                            TagRowView(tag: tag)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                withAnimation {
+                                    modelContext.delete(tag)
+                                    try? modelContext.save()
                                 }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
-                    .navigationDestination(for: UUID.self) { id in
-                        if let tag = tags.first(where: { $0.id == id }) {
-                            TagDetailView(tag: tag)
-                        }
+                }
+                .navigationDestination(for: UUID.self) { id in
+                    if let tag = tags.first(where: { $0.id == id }) {
+                        TagDetailView(tag: tag)
                     }
                 }
             }
-            .animation(.default, value: filteredTags.map(\.id))
-            .navigationTitle("Tags")
-            .searchable(text: $searchText, prompt: "Search tags...")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showAddTag = true } label: { Image(systemName: "plus") }
-                }
-            }
-            .sheet(isPresented: $showAddTag) { TagFormView(tag: nil) }
         }
+        .animation(.default, value: filteredTags.map(\.id))
+        .navigationTitle("Tags")
+        .searchable(text: $searchText, prompt: "Search tags...")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showAddTag = true } label: { Image(systemName: "plus") }
+            }
+        }
+        .sheet(isPresented: $showAddTag) { TagFormView(tag: nil) }
     }
 }
 

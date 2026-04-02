@@ -17,37 +17,35 @@ struct RemindersView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                Picker("Filter", selection: $filter) { ForEach(ReminderFilter.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).padding()
-                if filtered.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Reminders", systemImage: "bell.slash")
-                    } description: {
-                        Text("No \(filter.rawValue.lowercased()) reminders.")
-                    }
+        VStack(spacing: 0) {
+            Picker("Filter", selection: $filter) { ForEach(ReminderFilter.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).padding()
+            if filtered.isEmpty {
+                ContentUnavailableView {
+                    Label("No Reminders", systemImage: "bell.slash")
+                } description: {
+                    Text("No \(filter.rawValue.lowercased()) reminders.")
                 }
-                else {
-                    List {
-                        ForEach(filtered) { reminder in
-                            if let contact = reminder.contact {
-                                HStack(spacing: 12) {
-                                    Button { reminder.isCompleted.toggle(); try? modelContext.save() } label: {
-                                        Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle").font(.title3)
-                                            .foregroundStyle(reminder.isCompleted ? .green : reminder.isOverdue ? .red : .secondary)
-                                    }.buttonStyle(.plain)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(reminder.title).font(.subheadline.weight(.medium)).strikethrough(reminder.isCompleted)
-                                        HStack(spacing: 4) { ContactAvatarView(contact: contact, size: 18); Text(contact.displayName).font(.caption).foregroundStyle(.secondary) }
-                                    }; Spacer()
-                                    Text(reminder.dueDate.shortFormatted).font(.caption).foregroundStyle(reminder.isOverdue ? .red : .secondary)
-                                }.padding(.vertical, 4)
-                            }
-                        }.onDelete { offsets in for i in offsets { modelContext.delete(filtered[i]) }; try? modelContext.save() }
-                    }.listStyle(.plain)
-                }
-            }.navigationTitle("Reminders")
-        }
+            }
+            else {
+                List {
+                    ForEach(filtered) { reminder in
+                        if let contact = reminder.contact {
+                            HStack(spacing: 12) {
+                                Button { reminder.isCompleted.toggle(); try? modelContext.save() } label: {
+                                    Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle").font(.title3)
+                                        .foregroundStyle(reminder.isCompleted ? .green : reminder.isOverdue ? .red : .secondary)
+                                }.buttonStyle(.plain)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(reminder.title).font(.subheadline.weight(.medium)).strikethrough(reminder.isCompleted)
+                                    HStack(spacing: 4) { ContactAvatarView(contact: contact, size: 18); Text(contact.displayName).font(.caption).foregroundStyle(.secondary) }
+                                }; Spacer()
+                                Text(reminder.dueDate.shortFormatted).font(.caption).foregroundStyle(reminder.isOverdue ? .red : .secondary)
+                            }.padding(.vertical, 4)
+                        }
+                    }.onDelete { offsets in for i in offsets { modelContext.delete(filtered[i]) }; try? modelContext.save() }
+                }.listStyle(.plain)
+            }
+        }.navigationTitle("Reminders")
     }
 }
 

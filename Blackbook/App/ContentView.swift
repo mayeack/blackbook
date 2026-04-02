@@ -12,10 +12,10 @@ struct ContentView: View {
     var body: some View {
         #if os(iOS)
         TabView(selection: $selectedTab) {
-            DashboardView().tabItem { Label("Overview", systemImage: "square.grid.2x2") }.tag(AppTab.dashboard)
-            ContactListView().tabItem { Label("Contacts", systemImage: "person.crop.rectangle.stack") }.tag(AppTab.contacts)
-            ActivityListView().tabItem { Label("Activities", systemImage: "figure.run") }.tag(AppTab.activities)
-            TagListView().tabItem { Label("Tags", systemImage: "tag") }.tag(AppTab.tags)
+            NavigationStack { DashboardView() }.tabItem { Label("Overview", systemImage: "square.grid.2x2") }.tag(AppTab.dashboard)
+            NavigationStack { ContactListView() }.tabItem { Label("Contacts", systemImage: "person.crop.rectangle.stack") }.tag(AppTab.contacts)
+            NavigationStack { ActivityListView() }.tabItem { Label("Activities", systemImage: "figure.run") }.tag(AppTab.activities)
+            NavigationStack { TagListView() }.tabItem { Label("Tags", systemImage: "tag") }.tag(AppTab.tags)
             GroupListView().tabItem { Label("Groups", systemImage: "folder.fill") }.tag(AppTab.groups)
             LocationListView().tabItem { Label("Locations", systemImage: "mappin.and.ellipse") }.tag(AppTab.locations)
             NetworkGraphView().tabItem { Label("Network", systemImage: "point.3.connected.trianglepath.dotted") }.tag(AppTab.network)
@@ -49,16 +49,18 @@ struct ContentView: View {
 
     @ViewBuilder
     private func detailView(for tab: AppTab) -> some View {
-        switch tab {
-        case .dashboard: DashboardView()
-        case .contacts: ContactListView()
-        case .activities: ActivityListView()
-        case .tags: TagListView()
-        case .groups: GroupListView()
-        case .locations: LocationListView()
-        case .network: NetworkGraphView()
-        case .reminders: RemindersView()
-        case .settings: SettingsView()
+        NavigationStack {
+            switch tab {
+            case .dashboard: DashboardView()
+            case .contacts: ContactListView()
+            case .activities: ActivityListView()
+            case .tags: TagListView()
+            case .groups: GroupListView()
+            case .locations: LocationListView()
+            case .network: NetworkGraphView()
+            case .reminders: RemindersView()
+            case .settings: SettingsView()
+            }
         }
     }
 }

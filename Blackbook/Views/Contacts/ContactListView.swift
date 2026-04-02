@@ -43,9 +43,8 @@ struct ContactListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            let filtered = viewModel.filteredContacts(contacts, tags: tags, groups: groups, locations: locations)
-            SwiftUI.Group {
+        let filtered = viewModel.filteredContacts(contacts, tags: tags, groups: groups, locations: locations)
+        SwiftUI.Group {
                 if filtered.isEmpty {
                     ContentUnavailableView {
                         Label("No Contacts", systemImage: "person.crop.rectangle.stack")
@@ -203,7 +202,6 @@ struct ContactListView: View {
             } message: { contact in
                 Text("\(contact.displayName) will be hidden from all lists. You can unhide them from Settings > Hidden Contacts.")
             }
-        }
     }
 
     private func toggleFilter(_ key: String) {
