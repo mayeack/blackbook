@@ -41,13 +41,18 @@ platform :ios do
       scheme: "Blackbook",
       destination: "generic/platform=iOS",
       export_method: "app-store",
-      clean: true,
-      include_bitcode: false
+      clean: true
+    )
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_filepath: File.expand_path("~/private_keys/AuthKey_#{ENV['ASC_KEY_ID']}.p8")
     )
 
     upload_to_testflight(
-      skip_waiting_for_build_processing: true,
-      apple_id: ENV["APP_APPLE_ID"]
+      api_key: api_key,
+      skip_waiting_for_build_processing: true
     )
   end
 
@@ -64,8 +69,7 @@ platform :ios do
       project: "Blackbook.xcodeproj",
       scheme: "Blackbook",
       export_method: "app-store",
-      clean: true,
-      include_bitcode: false
+      clean: true
     )
 
     upload_to_app_store(
@@ -113,8 +117,10 @@ platform :mac do
       )
     end
 
-    # Use a different build number from iOS to avoid App Store Connect conflicts
-    mac_build = (ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")).to_s + "1"
+    # Use an offset build number from iOS to avoid App Store Connect conflicts
+    # iOS build 42 → macOS build 100042 (separate number space, collision-proof)
+    base = (ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")).to_i
+    mac_build = (base + 100_000).to_s
     increment_build_number(
       build_number: mac_build
     )
@@ -123,7 +129,7 @@ platform :mac do
     # Note: sh() runs from fastlane/ dir, so use ../Blackbook.xcodeproj
     project_root = File.expand_path("..", FastlaneCore::FastlaneFolder.path)
     project_path = File.join(project_root, "Blackbook.xcodeproj")
-    archive_path = File.expand_path("~/Library/Developer/Xcode/Archives/Blackbook.xcarchive")
+    archive_path = File.join(project_root, "build", "Blackbook.xcarchive")
     export_path = File.join(project_root, "build")
 
     sh("xcodebuild", "-scheme", "Blackbook", "-project", project_path,
@@ -141,6 +147,8 @@ platform :mac do
       <dict>
         <key>method</key>
         <string>app-store-connect</string>
+        <key>destination</key>
+        <string>upload</string>
         <key>signingStyle</key>
         <string>manual</string>
         <key>installerSigningCertificate</key>
@@ -155,35 +163,13 @@ platform :mac do
     PLIST
     export_plist.close
 
+    # Export and upload in one step via destination=upload in the plist.
+    # Authentication is provided by XCODEBUILD_AUTHENTICATION_KEY_* env vars (set in CI).
     sh("xcodebuild", "-exportArchive",
        "-archivePath", archive_path,
        "-exportPath", export_path,
-       "-exportOptionsPlist", export_plist.path)
-
-    pkg_path = Dir["#{export_path}/*.pkg"].first
-    UI.user_error!("No .pkg found in #{export_path}") unless pkg_path
-    UI.message("Found pkg at: #{pkg_path}")
-
-    # Upload via xcrun altool — Fastlane's upload_to_testflight has a known bug
-    # with macOS .pkg files, so we use Apple's tool directly
-    sh(
-      "xcrun", "altool", "--upload-app",
-      "-f", pkg_path,
-      "-t", "macos",
-      "-u", ENV["APPLE_ID"],
-      "-p", ENV.fetch("FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD")
-    )
-  end
-
-  desc "Build macOS app for distribution"
-  lane :build do
-    build_mac_app(
-      project: "Blackbook.xcodeproj",
-      scheme: "Blackbook",
-      destination: "generic/platform=macOS",
-      clean: true,
-      export_method: "app-store"
-    )
+       "-exportOptionsPlist", export_plist.path,
+       "-allowProvisioningUpdates")
   end
 
 end
