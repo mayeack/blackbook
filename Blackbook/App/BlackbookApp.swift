@@ -88,6 +88,9 @@ struct BlackbookApp: App {
                 .appendingPathExtension("store\(suffix)")
             try? FileManager.default.removeItem(at: fileURL)
         }
+        // Remove SwiftData external storage directory (@Attribute(.externalStorage))
+        let supportDir = URL.applicationSupportDirectory.appending(path: ".default_SUPPORT")
+        try? FileManager.default.removeItem(at: supportDir)
         UserDefaults.standard.set(currentSchemaVersion, forKey: key)
     }
 
@@ -129,6 +132,7 @@ struct BlackbookApp: App {
                 .appendingPathExtension("store\(suffix)")
             try? FileManager.default.removeItem(at: fileURL)
         }
+        try? FileManager.default.removeItem(at: storeDirectory.appending(path: ".default_SUPPORT"))
 
         do {
             let config = ModelConfiguration(
