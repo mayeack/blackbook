@@ -118,10 +118,13 @@ platform :mac do
     )
 
     # Archive and export macOS app manually to avoid Fastlane's IPA validation bug
+    # Note: sh() runs from fastlane/ dir, so use ../Blackbook.xcodeproj
+    project_root = File.expand_path("..", FastlaneCore::FastlaneFolder.path)
+    project_path = File.join(project_root, "Blackbook.xcodeproj")
     archive_path = File.expand_path("~/Library/Developer/Xcode/Archives/Blackbook.xcarchive")
-    export_path = File.expand_path("./build")
+    export_path = File.join(project_root, "build")
 
-    sh("xcodebuild", "-scheme", "Blackbook", "-project", "Blackbook.xcodeproj",
+    sh("xcodebuild", "-scheme", "Blackbook", "-project", project_path,
        "-destination", "generic/platform=macOS",
        "-archivePath", archive_path,
        "clean", "archive")
