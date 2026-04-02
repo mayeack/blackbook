@@ -249,10 +249,22 @@ struct PrioritizeContactPicker: View {
     let contacts: [Contact]
     @State private var searchText = ""
 
+    private var sorted: [Contact] {
+        contacts.filter { !$0.isHidden && !$0.isMergedAway }
+            .sorted {
+                let cmp = $0.lastName.localizedCaseInsensitiveCompare($1.lastName)
+                if cmp != .orderedSame { return cmp == .orderedAscending }
+                return $0.firstName.localizedCaseInsensitiveCompare($1.firstName) == .orderedAscending
+            }
+    }
+
     private var filtered: [Contact] {
-        if searchText.isEmpty { return contacts }
+        if searchText.isEmpty { return sorted }
         let query = searchText.lowercased()
-        return contacts.filter { $0.displayName.lowercased().contains(query) }
+        return sorted.filter {
+            $0.displayName.lowercased().contains(query) ||
+            ($0.company?.lowercased().contains(query) ?? false)
+        }
     }
 
     var body: some View {

@@ -137,6 +137,69 @@ final class ContactSyncService {
         isSyncing = false
     }
 
+    // MARK: - Fetch for Selective Import
+
+    /// Returns system contacts without importing. Must be called on main thread after authorization.
+    func fetchSystemContacts() -> [CNContact] {
+        guard authorizationStatus == .authorized else { return [] }
+        let keysToFetch: [CNKeyDescriptor] = [
+            CNContactGivenNameKey as CNKeyDescriptor,
+            CNContactFamilyNameKey as CNKeyDescriptor,
+            CNContactOrganizationNameKey as CNKeyDescriptor,
+            CNContactJobTitleKey as CNKeyDescriptor,
+            CNContactEmailAddressesKey as CNKeyDescriptor,
+            CNContactPhoneNumbersKey as CNKeyDescriptor,
+            CNContactBirthdayKey as CNKeyDescriptor,
+            CNContactThumbnailImageDataKey as CNKeyDescriptor,
+            CNContactIdentifierKey as CNKeyDescriptor,
+            CNContactSocialProfilesKey as CNKeyDescriptor,
+            CNContactPostalAddressesKey as CNKeyDescriptor
+        ]
+        let request = CNContactFetchRequest(keysToFetch: keysToFetch)
+        var results: [CNContact] = []
+        try? contactStore.enumerateContacts(with: request) { contact, _ in
+            results.append(contact)
+        }
+        return results.sorted {
+            let cmp = $0.familyName.localizedCaseInsensitiveCompare($1.familyName)
+            if cmp != .orderedSame { return cmp == .orderedAscending }
+            return $0.givenName.localizedCaseInsensitiveCompare($1.givenName) == .orderedAscending
+        }
+    }
+
+    /// Import specific system contacts by identifier.
+    func importSelected(_ identifiers: Set<String>, into modelContext: ModelContext) {
+        guard !isSyncing else { return }
+        isSyncing = true; syncError = nil
+        do {
+            let allSystem = fetchSystemContacts()
+            let selected = allSystem.filter { identifiers.contains($0.identifier) }
+            let existingDescriptor = FetchDescriptor<Contact>(
+                predicate: #Predicate { $0.cnContactIdentifier != nil }
+            )
+            let existingContacts = try modelContext.fetch(existingDescriptor)
+            let existingMap = Dictionary(
+                uniqueKeysWithValues: existingContacts.compactMap { c in
+                    c.cnContactIdentifier.map { ($0, c) }
+                }
+            )
+            for cnContact in selected {
+                if let existing = existingMap[cnContact.identifier] {
+                    updateContact(existing, from: cnContact)
+                } else {
+                    modelContext.insert(createContact(from: cnContact))
+                }
+            }
+            try modelContext.save()
+            lastSyncDate = Date()
+            logger.info("Selective import completed — \(selected.count) contacts imported")
+        } catch {
+            syncError = error.localizedDescription
+            logger.error("Selective import failed: \(error.localizedDescription)")
+        }
+        isSyncing = false
+    }
+
     // MARK: - Mapping
 
     private func createContact(from cn: CNContact) -> Contact {
@@ -174,6 +237,8 @@ final class ContactSyncService {
                 contact.linkedInURL = profile.value.urlString
             } else if service.localizedCaseInsensitiveContains("twitter") {
                 contact.twitterHandle = profile.value.username
+            } else if service.localizedCaseInsensitiveContains("instagram") {
+                contact.instagramHandle = profile.value.username
             }
         }
     }

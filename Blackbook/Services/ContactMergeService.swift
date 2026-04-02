@@ -51,6 +51,9 @@ final class ContactMergeService {
         if primary.twitterHandle == nil || primary.twitterHandle?.isEmpty == true {
             primary.twitterHandle = secondary.twitterHandle
         }
+        if primary.instagramHandle == nil || primary.instagramHandle?.isEmpty == true {
+            primary.instagramHandle = secondary.instagramHandle
+        }
         if primary.photoData == nil {
             primary.photoData = secondary.photoData
         }

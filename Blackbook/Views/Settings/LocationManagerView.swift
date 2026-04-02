@@ -79,9 +79,16 @@ struct LocationFormView: View {
                 } header: {
                     Text("Location Name")
                 }
-                Section("Icon") {
+                Section("Suggested Icons") {
                     LocationIconSuggestionView(
                         locationName: name,
+                        selectedIcon: $selectedIcon,
+                        accentColorHex: selectedColor
+                    )
+                }
+                Section("All Icons") {
+                    CollapsibleIconPicker(
+                        categories: AppConstants.Icons.groupCategories,
                         selectedIcon: $selectedIcon,
                         accentColorHex: selectedColor
                     )

@@ -33,7 +33,8 @@ struct ContactGroupPickerView: View {
     }
 
     private var filteredGroups: [Group] {
-        let base = allGroups.filter { !selectedIDs.contains($0.id) }
+        let suggestedIDs = searchText.isEmpty ? Set(suggestedGroups.map(\.id)) : []
+        let base = allGroups.filter { !selectedIDs.contains($0.id) && !suggestedIDs.contains($0.id) }
         if searchText.isEmpty { return base }
         return base.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
