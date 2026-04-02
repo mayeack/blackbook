@@ -164,15 +164,14 @@ platform :mac do
     UI.user_error!("No .pkg found in #{export_path}") unless pkg_path
     UI.message("Found pkg at: #{pkg_path}")
 
-    # Clear any IPA path from the iOS lane to avoid conflicts
-    ENV.delete("PILOT_IPA")
-    lane_context.delete(SharedValues::IPA_OUTPUT_PATH)
-
-    upload_to_testflight(
-      skip_waiting_for_build_processing: true,
-      apple_id: ENV["APP_APPLE_ID"],
-      pkg: pkg_path,
-      ipa: nil
+    # Upload via xcrun altool — Fastlane's upload_to_testflight has a known bug
+    # with macOS .pkg files, so we use Apple's tool directly
+    sh(
+      "xcrun", "altool", "--upload-app",
+      "-f", pkg_path,
+      "-t", "macos",
+      "-u", ENV["APPLE_ID"],
+      "-p", ENV.fetch("FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD")
     )
   end
 
