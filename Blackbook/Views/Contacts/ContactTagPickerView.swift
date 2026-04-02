@@ -37,7 +37,8 @@ struct ContactTagPickerView: View {
     }
 
     private var filteredTags: [Tag] {
-        let base = allTags.filter { !selectedIDs.contains($0.id) }
+        let suggestedIDs = searchText.isEmpty ? Set(suggestedTags.map(\.id)) : []
+        let base = allTags.filter { !selectedIDs.contains($0.id) && !suggestedIDs.contains($0.id) }
         if searchText.isEmpty { return base }
         return base.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }

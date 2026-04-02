@@ -7,6 +7,7 @@ struct ActivityListView: View {
     @Query private var rejectedEvents: [RejectedCalendarEvent]
     @State private var searchText = ""
     @State private var showAddActivity = false
+    @State private var showCalendarSetup = false
     @State private var calendarService = GoogleCalendarService()
 
     private var filteredActivities: [Activity] {
@@ -79,6 +80,9 @@ struct ActivityListView: View {
                 }
             }
             .sheet(isPresented: $showAddActivity) { ActivityFormView(activity: nil) }
+            .sheet(isPresented: $showCalendarSetup) {
+                GoogleClientIdEntryView(calendarService: calendarService)
+            }
             .task {
                 await calendarService.fetchCalendarList()
                 await calendarService.fetchEvents(rejectedEventIds: rejectedEventIds)
@@ -123,6 +127,18 @@ struct ActivityListView: View {
                     Label("Connect Google Calendar", systemImage: "calendar.badge.plus")
                 } description: {
                     Text("Sign in to Google Calendar in Settings to see activity suggestions from your events.")
+                } actions: {
+                    Button {
+                        if !calendarService.isConfigured {
+                            showCalendarSetup = true
+                        } else {
+                            Task { await calendarService.signIn() }
+                        }
+                    } label: {
+                        Text(calendarService.isConfigured ? "Sign In" : "Configure in Settings")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppConstants.UI.accentGold)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if calendarService.isLoading {

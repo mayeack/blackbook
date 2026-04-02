@@ -24,6 +24,14 @@ extension Date {
         return formatter.string(from: self)
     }
 
+    /// Long-style date without time, always includes the year (e.g. "March 27, 1990").
+    var birthdayFormatted: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        return formatter.string(from: self)
+    }
+
     /// Number of calendar days between this date and now (positive = past).
     var daysSinceNow: Int {
         Calendar.current.dateComponents([.day], from: self, to: Date()).day ?? 0

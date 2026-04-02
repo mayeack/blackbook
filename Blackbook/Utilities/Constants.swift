@@ -60,7 +60,8 @@ enum AppConstants {
         static let profileAvatarSize: CGFloat = 96
         static let scoreRingSize: CGFloat = 80
         static let interactionIconSize: CGFloat = 40
-        static let icon1Size: CGFloat = 48
+        /// Standard icon size for detail view headers (tags, groups, locations). Use 36pt consistently.
+        static let icon1Size: CGFloat = 36
         static let metViaAvatarSize: CGFloat = 36
         static let chipPaddingH: CGFloat = 10
         static let chipPaddingV: CGFloat = 5

@@ -54,6 +54,8 @@ struct SettingsView: View {
     @State private var calendarService = GoogleCalendarService()
     @State private var showGoogleClientIdEntry = false
     @State private var showSignOutConfirm = false
+    @State private var showImportOptions = false
+    @State private var showSelectiveImport = false
     #if os(macOS)
     @Environment(IMessageSyncService.self) private var iMessageService
     #endif
@@ -107,8 +109,7 @@ struct SettingsView: View {
             Button {
                 Task {
                     if await syncService.requestAccess() {
-                        syncService.importContacts(into: modelContext)
-                        syncService.startObservingChanges()
+                        showImportOptions = true
                     }
                 }
             } label: {
@@ -130,6 +131,19 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
             .disabled(syncService.isSyncing)
+            .confirmationDialog("Import Contacts", isPresented: $showImportOptions) {
+                Button("Import All") {
+                    syncService.importContacts(into: modelContext)
+                    syncService.startObservingChanges()
+                }
+                Button("Select Contacts") {
+                    showSelectiveImport = true
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .sheet(isPresented: $showSelectiveImport) {
+                ContactImportPickerView(syncService: syncService)
+            }
 
             if let err = syncService.syncError {
                 VStack(alignment: .leading, spacing: 4) {
@@ -159,7 +173,7 @@ struct SettingsView: View {
             return "Syncing..."
         }
         if let date = syncService.lastSyncDate {
-            return "Last synced: \(date.relativeDescription)"
+            return "Last synced: \(date.longFormatted)"
         }
         return "Not synced"
     }
@@ -718,14 +732,6 @@ struct HideContactsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    TextField("Search contacts\u{2026}", text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-                        #if os(macOS)
-                        .padding(.vertical, 4)
-                        #endif
-                }
-
                 Section(searchText.isEmpty ? "All Contacts" : "Results") {
                     if filteredContacts.isEmpty {
                         ContentUnavailableView {
@@ -742,6 +748,7 @@ struct HideContactsView: View {
                     }
                 }
             }
+            .searchable(text: $searchText, prompt: "Search contacts")
             .navigationTitle("Hide Contacts")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -942,5 +949,90 @@ struct APIKeyEntryView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Contact Import Picker
+
+import Contacts
+
+struct ContactImportPickerView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    var syncService: ContactSyncService
+    @State private var systemContacts: [CNContact] = []
+    @State private var selectedIDs: Set<String> = []
+    @State private var searchText = ""
+    @State private var isLoading = true
+
+    private var filtered: [CNContact] {
+        guard !searchText.isEmpty else { return systemContacts }
+        let query = searchText.lowercased()
+        return systemContacts.filter {
+            "\($0.givenName) \($0.familyName)".lowercased().contains(query) ||
+            $0.organizationName.lowercased().contains(query)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            SwiftUI.Group {
+                if isLoading {
+                    ProgressView("Loading contacts\u{2026}")
+                } else {
+                    List(filtered, id: \.identifier) { cn in
+                        Button {
+                            if selectedIDs.contains(cn.identifier) {
+                                selectedIDs.remove(cn.identifier)
+                            } else {
+                                selectedIDs.insert(cn.identifier)
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(cn.givenName) \(cn.familyName)")
+                                        .font(.body.weight(.medium))
+                                    if !cn.organizationName.isEmpty {
+                                        Text(cn.organizationName)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: selectedIDs.contains(cn.identifier) ? "checkmark.circle.fill" : "circle")
+                                    .font(.title3)
+                                    .foregroundStyle(selectedIDs.contains(cn.identifier) ? AppConstants.UI.accentGold : .secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .searchable(text: $searchText, prompt: "Search contacts")
+                }
+            }
+            .navigationTitle("Select Contacts")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import (\(selectedIDs.count))") {
+                        syncService.importSelected(selectedIDs, into: modelContext)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(selectedIDs.isEmpty)
+                }
+            }
+            .onAppear {
+                systemContacts = syncService.fetchSystemContacts()
+                isLoading = false
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 450, idealWidth: 500, minHeight: 500, idealHeight: 600)
+        #endif
     }
 }
