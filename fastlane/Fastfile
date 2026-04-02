@@ -141,6 +141,8 @@ platform :mac do
         <string>app-store-connect</string>
         <key>signingStyle</key>
         <string>manual</string>
+        <key>installerSigningCertificate</key>
+        <string>3rd Party Mac Developer Installer</string>
         <key>provisioningProfiles</key>
         <dict>
           <key>com.blackbookdevelopment.app</key>
