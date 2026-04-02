@@ -144,7 +144,11 @@ struct ContactListView: View {
                 }
             }
             .navigationTitle("Contacts")
+            #if os(iOS)
             .searchable(text: $viewModel.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search contacts...")
+            #else
+            .searchable(text: $viewModel.searchText, prompt: "Search contacts...")
+            #endif
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { Button { showAddContact = true } label: { Image(systemName: "plus") } }
                 ToolbarItem(placement: .automatic) {

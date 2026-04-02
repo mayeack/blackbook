@@ -51,7 +51,30 @@ jobs:
             -configuration Debug \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            -resultBundlePath TestResults \
+            -resultBundlePath TestResults-iOS \
+            | xcpretty
+
+      - name: Build (macOS)
+        run: |
+          xcodebuild build \
+            -project Blackbook.xcodeproj \
+            -scheme Blackbook \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            | xcpretty
+
+      - name: Test (macOS)
+        run: |
+          xcodebuild test \
+            -project Blackbook.xcodeproj \
+            -scheme BlackbookTests \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            -resultBundlePath TestResults-macOS \
             | xcpretty
 
       - name: Upload test results
@@ -59,7 +82,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: TestResults.xcresult
+          path: |
+            TestResults-iOS.xcresult
+            TestResults-macOS.xcresult
 
   deploy-testflight:
     name: Deploy to TestFlight
@@ -78,7 +103,7 @@ jobs:
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project Blackbook.xcodeproj -scheme Blackbook
 
-      - name: Deploy to TestFlight
+      - name: Deploy iOS to TestFlight
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APP_APPLE_ID: ${{ secrets.APP_APPLE_ID }}
@@ -90,3 +115,16 @@ jobs:
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
           BUILD_NUMBER: ${{ github.run_number }}
         run: fastlane ios beta
+
+      - name: Deploy macOS to TestFlight
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APP_APPLE_ID: ${{ secrets.APP_APPLE_ID }}
+          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.FASTLANE_APP_PASSWORD }}
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: fastlane mac beta

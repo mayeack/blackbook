@@ -91,6 +91,43 @@ platform :mac do
     )
   end
 
+  desc "Build and upload macOS app to TestFlight"
+  lane :beta do
+    setup_ci if is_ci
+
+    match(
+      type: "appstore",
+      platform: "macos",
+      readonly: is_ci
+    )
+
+    if is_ci
+      update_code_signing_settings(
+        use_automatic_signing: false,
+        path: "Blackbook.xcodeproj",
+        team_id: "37NR4Z7NT6",
+        profile_name: "match AppStore com.blackbookdevelopment.app macos",
+        code_sign_identity: "Apple Distribution"
+      )
+    end
+
+    increment_build_number(
+      build_number: ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M")
+    )
+
+    build_mac_app(
+      project: "Blackbook.xcodeproj",
+      scheme: "Blackbook",
+      clean: true,
+      export_method: "app-store"
+    )
+
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true,
+      apple_id: ENV["APP_APPLE_ID"]
+    )
+  end
+
   desc "Build macOS app for distribution"
   lane :build do
     build_mac_app(
