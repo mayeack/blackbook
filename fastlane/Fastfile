@@ -164,11 +164,15 @@ platform :mac do
     export_plist.close
 
     # Export and upload in one step via destination=upload in the plist.
-    # Authentication is provided by XCODEBUILD_AUTHENTICATION_KEY_* env vars (set in CI).
+    # Pass API key credentials explicitly so xcodebuild can authenticate with App Store Connect.
+    key_path = File.expand_path("~/private_keys/AuthKey_#{ENV['ASC_KEY_ID']}.p8")
     sh("xcodebuild", "-exportArchive",
        "-archivePath", archive_path,
        "-exportPath", export_path,
        "-exportOptionsPlist", export_plist.path,
+       "-authenticationKeyPath", key_path,
+       "-authenticationKeyID", ENV["ASC_KEY_ID"],
+       "-authenticationKeyIssuerID", ENV["ASC_ISSUER_ID"],
        "-allowProvisioningUpdates")
   end
 
