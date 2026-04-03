@@ -17,7 +17,6 @@ struct BlackbookApp: App {
     @State private var authService = AuthenticationService()
     #if os(macOS)
     @State private var iMessageService = IMessageSyncService()
-    @State private var localSyncServer: LocalSyncServer?
     #endif
 
     init() {
@@ -59,14 +58,6 @@ struct BlackbookApp: App {
                 .environment(iMessageService)
                 .onAppear {
                     iMessageService.startIfEnabled(with: modelContainer.mainContext)
-                    // Auto-start the sync server for centralized backups
-                    if localSyncServer == nil,
-                       let email = UserDefaults.standard.string(forKey: "auth.userEmail"), !email.isEmpty {
-                        let password = BackupService.derivePassword(from: email)
-                        let server = LocalSyncServer(container: modelContainer, password: password)
-                        server.start()
-                        localSyncServer = server
-                    }
                 }
                 #endif
         }
