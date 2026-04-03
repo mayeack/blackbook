@@ -48,6 +48,7 @@ targets:
         INFOPLIST_KEY_NSContactsUsageDescription: "Blackbook needs access to your contacts to help you track and enrich your relationships."
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Blackbook uses Face ID to protect your data."
         INFOPLIST_KEY_CFBundleDisplayName: Blackbook
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.lifestyle"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
