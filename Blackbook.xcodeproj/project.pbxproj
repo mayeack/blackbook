@@ -853,6 +853,7 @@
 				DEVELOPMENT_TEAM = 37NR4Z7NT6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Blackbook;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSContactsUsageDescription = "Blackbook needs access to your contacts to help you track and enrich your relationships.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Blackbook uses Face ID to protect your data.";
@@ -927,6 +928,7 @@
 				DEVELOPMENT_TEAM = 37NR4Z7NT6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Blackbook;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSContactsUsageDescription = "Blackbook needs access to your contacts to help you track and enrich your relationships.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Blackbook uses Face ID to protect your data.";

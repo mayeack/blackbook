@@ -163,24 +163,26 @@ final class BackupServer: @unchecked Sendable {
                 completion(HTTPRequest(method: req.method, path: req.path, query: req.query, headers: req.headers, body: body))
                 return
             }
-            self.receiveBody(connection: connection, accumulated: rest, need: contentLength - rest.count) { body in
+            self.receiveBody(connection: connection, accumulated: rest, remaining: contentLength - rest.count) { body in
                 completion(HTTPRequest(method: req.method, path: req.path, query: req.query, headers: req.headers, body: body))
             }
         }
     }
 
-    private func receiveBody(connection: NWConnection, accumulated: Data, need: Int, completion: @escaping (Data?) -> Void) {
-        if need <= 0 {
+    private func receiveBody(connection: NWConnection, accumulated: Data, remaining: Int, completion: @escaping (Data?) -> Void) {
+        if remaining <= 0 {
             completion(accumulated.isEmpty ? nil : accumulated)
             return
         }
-        connection.receive(minimumIncompleteLength: 1, maximumLength: min(need, 1048576)) { [weak self] data, _, _, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: min(remaining, 1048576)) { [weak self] data, _, _, error in
             var acc = accumulated
+            let received = data?.count ?? 0
             if let data = data { acc.append(data) }
-            if error != nil || acc.count >= need {
+            let newRemaining = remaining - received
+            if error != nil || newRemaining <= 0 {
                 completion(acc.isEmpty ? nil : acc)
             } else {
-                self?.receiveBody(connection: connection, accumulated: acc, need: need - acc.count, completion: completion)
+                self?.receiveBody(connection: connection, accumulated: acc, remaining: newRemaining, completion: completion)
             }
         }
     }
@@ -389,9 +391,9 @@ final class BackupServer: @unchecked Sendable {
         for (k, v) in response.headers {
             headerLines += "\(k): \(v)\r\n"
         }
-        if let body = response.body {
-            headerLines += "Content-Length: \(body.count)\r\n"
-        }
+        // Always include Content-Length so proxies (Cloudflare HTTP/2) and
+        // URLSession can determine when the response ends.
+        headerLines += "Content-Length: \(response.body?.count ?? 0)\r\n"
         headerLines += "\r\n"
         var data = (statusLine + headerLines).data(using: .utf8)!
         if let body = response.body { data.append(body) }
