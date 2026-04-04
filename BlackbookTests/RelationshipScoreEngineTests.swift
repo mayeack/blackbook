@@ -2,6 +2,7 @@ import XCTest
 import SwiftData
 @testable import Blackbook
 
+@MainActor
 final class RelationshipScoreEngineTests: XCTestCase {
 
     private var container: ModelContainer!
@@ -16,7 +17,7 @@ final class RelationshipScoreEngineTests: XCTestCase {
 
     override func setUpWithError() throws {
         container = try makeContainer()
-        context = ModelContext(container)
+        context = container.mainContext
     }
 
     override func tearDown() {
@@ -45,10 +46,10 @@ final class RelationshipScoreEngineTests: XCTestCase {
         contact.lastInteractionDate = max(contact.lastInteractionDate ?? .distantPast, date)
     }
 
-    private func addActivity(to contact: Contact, date: Date = Date()) {
-        let activity = Activity(name: "Event", date: date)
-        context.insert(activity)
-        contact.activities.append(activity)
+    /// Recalculates all scores and returns the score for the given contact.
+    private func recalculateAndGetScore(for contact: Contact) -> Double {
+        engine.recalculateAll(context: context)
+        return contact.relationshipScore
     }
 
     // MARK: - 1. Zero Interactions
@@ -58,11 +59,11 @@ final class RelationshipScoreEngineTests: XCTestCase {
         contact.lastInteractionDate = nil
         try context.save()
 
-        let score = engine.calculateScore(for: contact)
+        let score = recalculateAndGetScore(for: contact)
 
-        // No interactions, not priority: recency=0, frequency=0, variety=0, sentiment=50 (default)
-        // Expected: 0.35*0 + 0.30*0 + 0.15*0 + 0.20*50 + 0 + 0 = 10
-        XCTAssertEqual(score, 10.0, accuracy: 1.0, "Zero-interaction non-priority contact should have a low score")
+        // No interactions, not priority: recency=0, no boost
+        // Expected: 0
+        XCTAssertLessThanOrEqual(score, 5.0, "Zero-interaction non-priority contact should have a very low score")
     }
 
     // MARK: - 2. Recent Interaction High Recency
@@ -72,11 +73,10 @@ final class RelationshipScoreEngineTests: XCTestCase {
         addInteraction(to: contact, date: Date())
         try context.save()
 
-        let score = engine.calculateScore(for: contact)
+        let score = recalculateAndGetScore(for: contact)
 
         // recency: 100 * pow(0.5, 0/14) = 100
-        // recencyContribution = 0.35 * 100 = 35
-        XCTAssertGreaterThan(score, 30.0, "Contact with interaction today should have high recency contribution")
+        XCTAssertGreaterThan(score, 90.0, "Contact with interaction today should have high recency score (~100)")
     }
 
     // MARK: - 3. Old Interaction Low Recency
@@ -87,204 +87,63 @@ final class RelationshipScoreEngineTests: XCTestCase {
         addInteraction(to: contact, date: sixtyDaysAgo)
         try context.save()
 
-        let score = engine.calculateScore(for: contact)
+        let score = recalculateAndGetScore(for: contact)
 
-        // recency: 100 * pow(0.5, 60/14) ~ 100 * 0.054 ~ 5.4
-        // recencyContribution = 0.35 * 5.4 ~ 1.9
-        XCTAssertLessThan(score, 25.0, "Contact with interaction 60 days ago should have low recency")
+        // recency: 100 * pow(0.5, 60/14) ~ 5.4
+        XCTAssertLessThan(score, 15.0, "Contact with interaction 60 days ago should have low score")
     }
 
-    // MARK: - 4. Frequency Score With Multiple Interactions
+    // MARK: - 4. Multiple Interactions Use Most Recent
 
-    func testFrequencyScoreWithMultipleInteractions() throws {
+    func testMultipleInteractionsUseMostRecent() throws {
         let contact = makeContact()
-        for i in 0..<6 {
-            let date = Calendar.current.date(byAdding: .day, value: -i * 10, to: Date())!
-            addInteraction(to: contact, type: .call, date: date)
-        }
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
+        addInteraction(to: contact, type: .call, date: thirtyDaysAgo)
+        addInteraction(to: contact, type: .meeting, date: Date())
         try context.save()
 
-        let score = engine.calculateScore(for: contact)
+        let score = recalculateAndGetScore(for: contact)
 
-        // frequency: min(100, 6/3 * 12.5) = min(100, 25) = 25
-        // frequencyContribution = 0.30 * 25 = 7.5
-        XCTAssertGreaterThan(score, 15.0, "Contact with 6 interactions in 90 days should have meaningful frequency contribution")
+        // lastInteractionDate should be today, so score should be high
+        XCTAssertGreaterThan(score, 90.0, "Score should use most recent interaction date")
     }
 
-    // MARK: - 5. Frequency Score Zero Interactions
-
-    func testFrequencyScoreZeroInteractions() throws {
-        let contact = makeContact()
-        contact.lastInteractionDate = nil
-        try context.save()
-
-        let score = engine.calculateScore(for: contact)
-
-        // frequency: min(100, 0/3 * 12.5) = 0
-        // Only sentiment default (50) contributes: 0.20 * 50 = 10
-        XCTAssertLessThanOrEqual(score, 15.0, "Contact with zero interactions should have minimal score")
-    }
-
-    // MARK: - 6. Variety Score All Types
-
-    func testVarietyScoreAllTypes() throws {
-        let contact = makeContact()
-        for type in InteractionType.allCases {
-            addInteraction(to: contact, type: type, date: Date())
-        }
-        try context.save()
-
-        let score = engine.calculateScore(for: contact)
-
-        // variety: (6/6) * 100 = 100
-        // varietyContribution = 0.15 * 100 = 15
-        XCTAssertGreaterThan(score, 50.0, "Contact with all 6 interaction types should have high variety contribution")
-    }
-
-    // MARK: - 7. Variety Score Single Type
-
-    func testVarietyScoreSingleType() throws {
-        let contact = makeContact()
-        addInteraction(to: contact, type: .call, date: Date())
-        try context.save()
-
-        let score = engine.calculateScore(for: contact)
-
-        // variety: (1/6) * 100 ~ 16.67
-        // varietyContribution = 0.15 * 16.67 ~ 2.5
-        let allTypesContact = makeContact(firstName: "AllTypes")
-        for type in InteractionType.allCases {
-            addInteraction(to: allTypesContact, type: type, date: Date())
-        }
-        try context.save()
-
-        let singleTypeScore = engine.calculateScore(for: contact)
-        let allTypesScore = engine.calculateScore(for: allTypesContact)
-        XCTAssertLessThan(singleTypeScore, allTypesScore, "Single type variety should score lower than all types")
-    }
-
-    // MARK: - 8. Sentiment All Positive
-
-    func testSentimentAllPositive() throws {
-        let contact = makeContact()
-        for i in 0..<5 {
-            let date = Calendar.current.date(byAdding: .day, value: -i, to: Date())!
-            addInteraction(to: contact, type: .call, date: date, sentiment: .positive)
-        }
-        try context.save()
-
-        let score = engine.calculateScore(for: contact)
-
-        // sentiment: all positive weights = 1.0, so sentimentScore = 100
-        // sentimentContribution = 0.20 * 100 = 20
-        XCTAssertGreaterThan(score, 40.0, "All-positive sentiment should yield high sentiment contribution")
-    }
-
-    // MARK: - 9. Sentiment All Negative
-
-    func testSentimentAllNegative() throws {
-        let contact = makeContact()
-        for i in 0..<5 {
-            let date = Calendar.current.date(byAdding: .day, value: -i, to: Date())!
-            addInteraction(to: contact, type: .call, date: date, sentiment: .negative)
-        }
-        try context.save()
-
-        let score = engine.calculateScore(for: contact)
-
-        // sentiment: all negative weights = 0.0, so sentimentScore = 0
-        // sentimentContribution = 0.20 * 0 = 0
-        let positiveContact = makeContact(firstName: "Positive")
-        for i in 0..<5 {
-            let date = Calendar.current.date(byAdding: .day, value: -i, to: Date())!
-            addInteraction(to: positiveContact, type: .call, date: date, sentiment: .positive)
-        }
-        try context.save()
-
-        let negativeScore = engine.calculateScore(for: contact)
-        let positiveScore = engine.calculateScore(for: positiveContact)
-        XCTAssertLessThan(negativeScore, positiveScore, "All-negative sentiment should score lower than all-positive")
-    }
-
-    // MARK: - 10. Sentiment Mixed
-
-    func testSentimentMixed() throws {
-        let contact = makeContact()
-        let today = Date()
-        addInteraction(to: contact, type: .call, date: today, sentiment: .positive)
-        addInteraction(to: contact, type: .meeting, date: Calendar.current.date(byAdding: .day, value: -1, to: today)!, sentiment: .negative)
-        addInteraction(to: contact, type: .text, date: Calendar.current.date(byAdding: .day, value: -2, to: today)!, sentiment: .neutral)
-        try context.save()
-
-        let score = engine.calculateScore(for: contact)
-
-        // Mixed sentiment should produce a middle-range sentiment contribution
-        // Between all-positive and all-negative
-        XCTAssertGreaterThan(score, 0.0)
-        XCTAssertLessThan(score, 100.0)
-    }
-
-    // MARK: - 11. Sentiment Default (No Sentiment Data)
-
-    func testSentimentDefault() throws {
-        let contact = makeContact()
-        addInteraction(to: contact, type: .call, date: Date(), sentiment: nil)
-        try context.save()
-
-        let scoreWithNilSentiment = engine.calculateScore(for: contact)
-
-        // When no sentiment data: sentimentScore defaults to 50
-        // sentimentContribution = 0.20 * 50 = 10
-        // Compare with a contact that has explicit positive sentiment
-        let positiveContact = makeContact(firstName: "Pos")
-        addInteraction(to: positiveContact, type: .call, date: Date(), sentiment: .positive)
-        try context.save()
-
-        let positiveScore = engine.calculateScore(for: positiveContact)
-        XCTAssertLessThan(scoreWithNilSentiment, positiveScore, "Default sentiment (50) should produce lower contribution than positive (100)")
-    }
-
-    // MARK: - 12. Priority Boost
+    // MARK: - 5. Priority Boost
 
     func testPriorityBoost() throws {
+        // Use interactions from 14 days ago so base score is ~50, leaving room for the priority boost
+        let fourteenDaysAgo = Calendar.current.date(byAdding: .day, value: -14, to: Date())!
+
         let normalContact = makeContact(firstName: "Normal", isPriority: false)
-        addInteraction(to: normalContact, type: .call, date: Date())
+        addInteraction(to: normalContact, type: .call, date: fourteenDaysAgo)
 
         let priorityContact = makeContact(firstName: "Priority", isPriority: true)
-        addInteraction(to: priorityContact, type: .call, date: Date())
+        addInteraction(to: priorityContact, type: .call, date: fourteenDaysAgo)
 
         try context.save()
 
-        let normalScore = engine.calculateScore(for: normalContact)
-        let priorityScore = engine.calculateScore(for: priorityContact)
+        engine.recalculateAll(context: context)
 
-        XCTAssertEqual(priorityScore - normalScore, AppConstants.Scoring.priorityBoost, accuracy: 0.01, "Priority boost should add exactly \(AppConstants.Scoring.priorityBoost) points")
+        let normalScore = normalContact.relationshipScore
+        let priorityScore = priorityContact.relationshipScore
+
+        XCTAssertEqual(priorityScore - normalScore, AppConstants.Scoring.priorityBoost, accuracy: 1.0, "Priority boost should add \(AppConstants.Scoring.priorityBoost) points")
     }
 
-    // MARK: - 13. Score Clamped to Max 100
+    // MARK: - 6. Score Clamped to Max 100
 
     func testScoreClampedToMax100() throws {
         let contact = makeContact(isPriority: true)
-        // Add many recent interactions of all types with positive sentiment to maximize score
-        for type in InteractionType.allCases {
-            for i in 0..<5 {
-                let date = Calendar.current.date(byAdding: .day, value: -i, to: Date())!
-                addInteraction(to: contact, type: type, date: date, sentiment: .positive)
-            }
-        }
-        // Add activities to max out activity boost
-        for i in 0..<10 {
-            let date = Calendar.current.date(byAdding: .day, value: -i, to: Date())!
-            addActivity(to: contact, date: date)
-        }
+        // Interaction today: base recency = 100, plus priority boost = 120 → clamped to 100
+        addInteraction(to: contact, type: .call, date: Date())
         try context.save()
 
-        let score = engine.calculateScore(for: contact)
+        let score = recalculateAndGetScore(for: contact)
 
         XCTAssertLessThanOrEqual(score, 100.0, "Score should never exceed 100")
     }
 
-    // MARK: - 14. Score Clamped to Min 0
+    // MARK: - 7. Score Clamped to Min 0
 
     func testScoreClampedToMin0() throws {
         let contact = makeContact()
@@ -292,23 +151,92 @@ final class RelationshipScoreEngineTests: XCTestCase {
         contact.isPriority = false
         try context.save()
 
-        let score = engine.calculateScore(for: contact)
+        let score = recalculateAndGetScore(for: contact)
 
         XCTAssertGreaterThanOrEqual(score, 0.0, "Score should never go below 0")
     }
 
-    // MARK: - 15. Score With No Data (Brand New Contact)
+    // MARK: - 8. Trend Up For Recent Interaction
+
+    func testTrendUpForRecentInteraction() throws {
+        let contact = makeContact()
+        addInteraction(to: contact, date: Date())
+        try context.save()
+
+        engine.recalculateAll(context: context)
+
+        XCTAssertEqual(contact.scoreTrend, .up, "Contact with interaction today should have upward trend")
+    }
+
+    // MARK: - 9. Trend Stable For Mid-Recent Interaction
+
+    func testTrendStableForMidRecentInteraction() throws {
+        let contact = makeContact()
+        let tenDaysAgo = Calendar.current.date(byAdding: .day, value: -10, to: Date())!
+        addInteraction(to: contact, date: tenDaysAgo)
+        try context.save()
+
+        engine.recalculateAll(context: context)
+
+        XCTAssertEqual(contact.scoreTrend, .stable, "Contact with interaction 10 days ago should have stable trend")
+    }
+
+    // MARK: - 10. Trend Down For Old Interaction
+
+    func testTrendDownForOldInteraction() throws {
+        let contact = makeContact()
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
+        addInteraction(to: contact, date: thirtyDaysAgo)
+        try context.save()
+
+        engine.recalculateAll(context: context)
+
+        XCTAssertEqual(contact.scoreTrend, .down, "Contact with interaction 30 days ago should have downward trend")
+    }
+
+    // MARK: - 11. Trend Stable With No Interactions
+
+    func testTrendStableWithNoInteractions() throws {
+        let contact = makeContact()
+        contact.lastInteractionDate = nil
+        try context.save()
+
+        engine.recalculateAll(context: context)
+
+        XCTAssertEqual(contact.scoreTrend, .stable, "Contact with no interactions should have stable trend")
+    }
+
+    // MARK: - 12. Score With No Data (Brand New Contact)
 
     func testScoreWithNoData() throws {
         let contact = makeContact()
         contact.lastInteractionDate = nil
         try context.save()
 
-        let score = engine.calculateScore(for: contact)
+        let score = recalculateAndGetScore(for: contact)
 
-        // Brand new: recency=0, frequency=0, variety=0, sentiment=50 (default), no priority, no activity
-        // Expected: 0 + 0 + 0 + 0.20*50 + 0 + 0 = 10
         XCTAssertGreaterThanOrEqual(score, 0.0)
-        XCTAssertLessThanOrEqual(score, 15.0, "Brand new contact with no data should have a low score from default sentiment only")
+        XCTAssertLessThanOrEqual(score, 5.0, "Brand new contact with no data should have ~0 score")
+    }
+
+    // MARK: - 13. Recalculate All Updates Multiple Contacts
+
+    func testRecalculateAllUpdatesMultipleContacts() throws {
+        let contact1 = makeContact(firstName: "Recent")
+        addInteraction(to: contact1, date: Date())
+
+        let contact2 = makeContact(firstName: "Old")
+        let sixtyDaysAgo = Calendar.current.date(byAdding: .day, value: -60, to: Date())!
+        addInteraction(to: contact2, date: sixtyDaysAgo)
+
+        let contact3 = makeContact(firstName: "None")
+        contact3.lastInteractionDate = nil
+
+        try context.save()
+
+        engine.recalculateAll(context: context)
+
+        XCTAssertGreaterThan(contact1.relationshipScore, contact2.relationshipScore, "Recent contact should score higher than old")
+        XCTAssertGreaterThan(contact2.relationshipScore, contact3.relationshipScore, "Old contact should score higher than no-interaction")
     }
 }

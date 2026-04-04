@@ -193,4 +193,101 @@ final class ContactMergeServiceTests: XCTestCase {
 
         XCTAssertEqual(secondary.mergedIntoContact?.id, primary.id, "Secondary's mergedIntoContact should point to primary")
     }
+
+    // MARK: - 12. Tags Union
+
+    func testMergeUnionsTagMembership() throws {
+        let primary = makeContact(firstName: "Primary")
+        let secondary = makeContact(firstName: "Secondary")
+
+        let tag1 = Tag(name: "VIP")
+        let tag2 = Tag(name: "Work")
+        context.insert(tag1)
+        context.insert(tag2)
+
+        primary.tags.append(tag1)
+        secondary.tags.append(tag2)
+
+        try context.save()
+        try mergeService.merge(primary: primary, secondary: secondary, context: context)
+
+        let tagNames = Set(primary.tags.map(\.name))
+        XCTAssertTrue(tagNames.contains("VIP"), "Primary should keep its original tag")
+        XCTAssertTrue(tagNames.contains("Work"), "Primary should gain secondary's tag")
+    }
+
+    // MARK: - 13. Groups Union
+
+    func testMergeUnionsGroupMembership() throws {
+        let primary = makeContact(firstName: "Primary")
+        let secondary = makeContact(firstName: "Secondary")
+
+        let group1 = Group(name: "Team A")
+        let group2 = Group(name: "Team B")
+        context.insert(group1)
+        context.insert(group2)
+
+        primary.groups.append(group1)
+        secondary.groups.append(group2)
+
+        try context.save()
+        try mergeService.merge(primary: primary, secondary: secondary, context: context)
+
+        let groupNames = Set(primary.groups.map(\.name))
+        XCTAssertTrue(groupNames.contains("Team A"))
+        XCTAssertTrue(groupNames.contains("Team B"))
+    }
+
+    // MARK: - 14. Locations Union
+
+    func testMergeUnionsLocationMembership() throws {
+        let primary = makeContact(firstName: "Primary")
+        let secondary = makeContact(firstName: "Secondary")
+
+        let loc1 = Location(name: "NYC")
+        let loc2 = Location(name: "SF")
+        context.insert(loc1)
+        context.insert(loc2)
+
+        primary.locations.append(loc1)
+        secondary.locations.append(loc2)
+
+        try context.save()
+        try mergeService.merge(primary: primary, secondary: secondary, context: context)
+
+        let locationNames = Set(primary.locations.map(\.name))
+        XCTAssertTrue(locationNames.contains("NYC"))
+        XCTAssertTrue(locationNames.contains("SF"))
+    }
+
+    // MARK: - 15. MetVia Transfer
+
+    func testMergeTransfersMetViaBacklinks() throws {
+        let primary = makeContact(firstName: "Primary")
+        let secondary = makeContact(firstName: "Secondary")
+        let metViaContact = makeContact(firstName: "Connector")
+
+        metViaContact.metVia = secondary
+
+        try context.save()
+        try mergeService.merge(primary: primary, secondary: secondary, context: context)
+
+        XCTAssertEqual(metViaContact.metVia?.id, primary.id, "MetVia backlinks should be redirected to primary")
+    }
+
+    // MARK: - 16. MetVia Inheritance
+
+    func testMergeInheritsSecondaryMetVia() throws {
+        let primary = makeContact(firstName: "Primary")
+        let secondary = makeContact(firstName: "Secondary")
+        let connector = makeContact(firstName: "Connector")
+
+        secondary.metVia = connector
+        primary.metVia = nil
+
+        try context.save()
+        try mergeService.merge(primary: primary, secondary: secondary, context: context)
+
+        XCTAssertEqual(primary.metVia?.id, connector.id, "Primary should inherit secondary's metVia when primary has none")
+    }
 }
