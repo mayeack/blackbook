@@ -36,11 +36,11 @@ Locations organize contacts by place. They have a name, icon, and color. Locatio
 
 **File:** `Blackbook/Views/Locations/LocationListView.swift` (same file)
 
-Location row layout using **Icon 1** and **Header 1** styles:
+Standard collection row layout (consistent with Tags and Groups per CLAUDE.md):
 - `HStack(spacing: 12)`
-- Icon badge (Icon 1): `location.icon` in white `.title3` on `location.color.gradient`, 48×48 (`AppConstants.UI.icon1Size`), cornerRadius 10
-- VStack(spacing: 4): name (Header 1: `.title.weight(.bold)`), contact count (caption, secondary)
-- Vertical padding: 4
+- Icon badge: `location.icon` in white `.font(.body)` on `location.color.gradient`, 36×36, cornerRadius 8
+- VStack: name (body weight medium), contact count (caption, secondary)
+- Vertical padding: 2
 
 ---
 
@@ -54,7 +54,7 @@ Location row layout using **Icon 1** and **Header 1** styles:
 
 **Navigation title:** `location.name`, inline on iOS.
 
-**Header section:** Same layout as `LocationRowView` — Icon 1 badge (48×48) + name (Header 1: `.title.weight(.bold)`) + contact count, inside a `Section`.
+**Header section:** Same layout as `LocationRowView` — icon badge (36×36, `.font(.body)`, cornerRadius 8) + name + contact count, inside a `Section`.
 
 **Members section:**
 - Empty + no search: "Add Contacts" button (borderedProminent, accent gold, clear list row background)
@@ -118,10 +118,9 @@ Colors: 3498DB, E74C3C, 2ECC71, 9B59B6, E67E22, 1ABC9C, F39C12, E91E63, 607D8B, 
 - `suggestedContacts` — up to 5 contacts scored by location/group overlap with existing members
 - `filteredNonMembers` — search-filtered non-members
 
-**Layout:** `NavigationStack` > `List`:
-1. Search `TextField` in headerless section
-2. "Suggested" section (when suggestions exist and no search active)
-3. "All Contacts" / "Results" section with contact rows or empty state
+**Layout:** `NavigationStack` > `List` with `.searchable(text:prompt:)`:
+1. "Suggested" section (when suggestions exist and no search active)
+2. "All Contacts" / "Results" section with contact rows or empty state
 
 **Contact row:** Avatar (36) + name + company + selection circle (`checkmark.circle.fill` / `circle`, accent gold)
 
