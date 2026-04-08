@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var syncService = ContactSyncService()
     #if os(iOS)
     @State private var bonjourBrowser = BonjourBrowser()
+    @State private var serverSyncService = LocalServerSyncService()
     #endif
 
     var body: some View {
@@ -16,16 +17,21 @@ struct ContentView: View {
             NavigationStack { ContactListView() }.tabItem { Label("Contacts", systemImage: "person.crop.rectangle.stack") }.tag(AppTab.contacts)
             NavigationStack { ActivityListView() }.tabItem { Label("Activities", systemImage: "figure.run") }.tag(AppTab.activities)
             NavigationStack { TagListView() }.tabItem { Label("Tags", systemImage: "tag") }.tag(AppTab.tags)
-            GroupListView().tabItem { Label("Groups", systemImage: "folder.fill") }.tag(AppTab.groups)
-            LocationListView().tabItem { Label("Locations", systemImage: "mappin.and.ellipse") }.tag(AppTab.locations)
-            NetworkGraphView().tabItem { Label("Network", systemImage: "point.3.connected.trianglepath.dotted") }.tag(AppTab.network)
-            RemindersView().tabItem { Label("Reminders", systemImage: "bell") }.tag(AppTab.reminders)
-            SettingsView().tabItem { Label("Settings", systemImage: "gear") }.tag(AppTab.settings)
+            NavigationStack { GroupListView() }.tabItem { Label("Groups", systemImage: "folder.fill") }.tag(AppTab.groups)
+            NavigationStack { LocationListView() }.tabItem { Label("Locations", systemImage: "mappin.and.ellipse") }.tag(AppTab.locations)
+            NavigationStack { NetworkGraphView() }.tabItem { Label("Network", systemImage: "point.3.connected.trianglepath.dotted") }.tag(AppTab.network)
+            NavigationStack { RemindersView() }.tabItem { Label("Reminders", systemImage: "bell") }.tag(AppTab.reminders)
+            NavigationStack { SettingsView() }.tabItem { Label("Settings", systemImage: "gear") }.tag(AppTab.settings)
         }
         .tint(AppConstants.UI.accentGold)
         .onAppear {
             syncService.startAutoSync(with: modelContext)
             bonjourBrowser.configure()
+            serverSyncService.configure(with: modelContext)
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                await serverSyncService.performFullSync()
+            }
         }
         #else
         NavigationSplitView {

@@ -13,6 +13,7 @@ final class Group {
     @Relationship(inverse: \Activity.groups)
     var activities: [Activity]
 
+    var updatedAt: Date
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
@@ -27,5 +28,6 @@ final class Group {
         self.icon = icon
         self.contacts = []
         self.activities = []
+        self.updatedAt = Date()
     }
 }

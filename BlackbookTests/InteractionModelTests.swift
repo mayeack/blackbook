@@ -41,4 +41,30 @@ final class InteractionModelTests: XCTestCase {
     func testSentimentAllCasesCount() {
         XCTAssertEqual(Sentiment.allCases.count, 3)
     }
+
+    // MARK: - Additional Interaction Tests
+
+    @MainActor
+    func testInteractionTypeAllCases() throws {
+        let allCases = InteractionType.allCases
+        XCTAssertGreaterThanOrEqual(allCases.count, 6, "Should have at least 6 interaction types")
+    }
+
+    @MainActor
+    func testSentimentAllCases() throws {
+        let allCases = Sentiment.allCases
+        XCTAssertGreaterThanOrEqual(allCases.count, 3, "Should have at least 3 sentiment values")
+    }
+
+    @MainActor
+    func testInteractionContactRelationship() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let contact = TestHelpers.makeContact(in: context)
+        let interaction = TestHelpers.makeInteraction(contact: contact, in: context)
+        try context.save()
+
+        XCTAssertEqual(interaction.contact?.id, contact.id, "Interaction should be linked to the correct contact")
+        XCTAssertTrue(contact.interactions.contains(where: { $0.id == interaction.id }), "Contact should contain the interaction")
+    }
 }

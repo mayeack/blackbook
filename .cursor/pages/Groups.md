@@ -112,9 +112,10 @@ Colors: 3498DB, E74C3C, 2ECC71, 9B59B6, E67E22, 1ABC9C, F39C12, E91E63, 607D8B, 
 - `filteredNonMembers` — search-filtered non-members
 
 **Layout:** `NavigationStack` > `List`:
-1. Search `TextField` in headerless section
-2. "Suggested" section (when suggestions exist and no search active)
-3. "All Contacts" / "Results" section with contact rows or empty state
+1. "Suggested" section (when suggestions exist and no search active)
+2. "All Contacts" / "Results" section with contact rows or empty state
+
+**Search:** `.searchable(text:prompt:)` — "Search contacts…"
 
 **Contact row:** Avatar (36) + name + company + selection circle (`checkmark.circle.fill` / `circle`, accent gold)
 

@@ -36,7 +36,7 @@ enum BackupError: LocalizedError {
 final class BackupService {
     /// Canonical schema version shared with BlackbookApp.migrateStoreIfNeeded().
     /// Bump this when the SwiftData schema changes.
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
     private(set) var backups: [BackupMetadata] = []
     private(set) var remoteBackups: [BackupMetadata] = []
     private(set) var isCreatingBackup = false

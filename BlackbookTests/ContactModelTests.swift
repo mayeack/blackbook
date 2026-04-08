@@ -134,4 +134,92 @@ final class ContactModelTests: XCTestCase {
         XCTAssertFalse(contact.isHidden)
         XCTAssertFalse(contact.isMergedAway)
     }
+
+    // MARK: - Additional Tests
+
+    @MainActor
+    func testDisplayNameLastOnly() throws {
+        let container = try makeContainer()
+        let contact = makeContact(firstName: "", lastName: "Doe", in: container)
+        XCTAssertEqual(contact.displayName, "Doe")
+    }
+
+    @MainActor
+    func testScoreCategoryBoundary70() throws {
+        let container = try makeContainer()
+        let contact = makeContact(in: container)
+        contact.relationshipScore = 70
+        XCTAssertEqual(contact.scoreCategory, .strong, "Score of exactly 70 should be strong")
+    }
+
+    @MainActor
+    func testScoreCategoryBoundary40() throws {
+        let container = try makeContainer()
+        let contact = makeContact(in: container)
+        contact.relationshipScore = 40
+        XCTAssertEqual(contact.scoreCategory, .moderate, "Score of exactly 40 should be moderate")
+    }
+
+    @MainActor
+    func testScoreCategoryBoundary10() throws {
+        let container = try makeContainer()
+        let contact = makeContact(in: container)
+        contact.relationshipScore = 10
+        XCTAssertEqual(contact.scoreCategory, .fading, "Score of exactly 10 should be fading")
+    }
+
+    @MainActor
+    func testHiddenContactExcluded() throws {
+        let container = try makeContainer()
+        let visible = makeContact(firstName: "Visible", lastName: "V", in: container)
+        let hidden = makeContact(firstName: "Hidden", lastName: "H", in: container)
+        hidden.isHidden = true
+
+        let allContacts = [visible, hidden]
+        let filtered = allContacts.filter { !$0.isHidden && !$0.isMergedAway }
+
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(filtered.first?.firstName, "Visible")
+    }
+
+    @MainActor
+    func testMergedAwayExcluded() throws {
+        let container = try makeContainer()
+        let visible = makeContact(firstName: "Visible", lastName: "V", in: container)
+        let merged = makeContact(firstName: "Merged", lastName: "M", in: container)
+        merged.isMergedAway = true
+
+        let allContacts = [visible, merged]
+        let filtered = allContacts.filter { !$0.isHidden && !$0.isMergedAway }
+
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(filtered.first?.firstName, "Visible")
+    }
+
+    @MainActor
+    func testMetViaRelationship() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let alice = makeContact(firstName: "Alice", lastName: "A", in: container)
+        let bob = makeContact(firstName: "Bob", lastName: "B", in: container)
+
+        bob.metVia = alice
+        try context.save()
+
+        XCTAssertEqual(bob.metVia?.id, alice.id, "Bob should be connected via Alice")
+        XCTAssertTrue(alice.metViaBacklinks.contains(where: { $0.id == bob.id }), "Alice should have Bob in backlinks")
+    }
+
+    @MainActor
+    func testContactInitialValues() throws {
+        let container = try makeContainer()
+        let contact = makeContact(in: container)
+        XCTAssertTrue(contact.emails.isEmpty)
+        XCTAssertTrue(contact.phones.isEmpty)
+        XCTAssertTrue(contact.addresses.isEmpty)
+        XCTAssertTrue(contact.interests.isEmpty)
+        XCTAssertTrue(contact.tags.isEmpty)
+        XCTAssertTrue(contact.groups.isEmpty)
+        XCTAssertTrue(contact.locations.isEmpty)
+    }
 }

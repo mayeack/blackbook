@@ -221,14 +221,6 @@ struct AddContactsToLocationView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    TextField("Search contacts…", text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-                        #if os(macOS)
-                        .padding(.vertical, 4)
-                        #endif
-                }
-
                 if !suggestedContacts.isEmpty && searchText.isEmpty {
                     Section("Suggested") {
                         ForEach(suggestedContacts) { contact in
@@ -253,6 +245,7 @@ struct AddContactsToLocationView: View {
                     }
                 }
             }
+            .searchable(text: $searchText, prompt: "Search contacts…")
             .navigationTitle("Add to \(location.name)")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

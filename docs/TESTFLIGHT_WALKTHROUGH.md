@@ -1,4 +1,4 @@
-# TestFlight Walkthrough: Test Blackbook on Your iPhone
+# TestFlight Walkthrough: Test Blackbook on Your iPhone and Mac
 
 Follow these steps to install and test Blackbook on your iPhone via TestFlight.
 
@@ -43,11 +43,13 @@ Note the app’s **Apple ID** (numeric) on the app’s **App Information** page 
    ```
 5. When prompted, sign in with your **Apple ID** (developer account). Match will create the certificate and profile and store them in the repo.
 
-### 3. Create an app-specific password (for Fastlane)
+### 3. Create an App Store Connect API key
 
-1. Go to [appleid.apple.com](https://appleid.apple.com) → **Sign-In and Security** → **App-Specific Passwords**.
-2. Click **+** to generate a new password. Name it e.g. “Fastlane Blackbook”.
-3. Copy the generated password (you won’t see it again).
+1. Go to [App Store Connect](https://appstoreconnect.apple.com) → **Users and Access** → **Integrations** → **App Store Connect API**.
+2. Click **+** to create a new key. Name it e.g. “Fastlane Blackbook”. Choose **App Manager** role.
+3. Download the `.p8` file (you can only download it once).
+4. Note the **Key ID** and **Issuer ID** shown on the page.
+5. Place the `.p8` file at `~/private_keys/AuthKey_<KEY_ID>.p8` for local use.
 
 ### 4. Configure environment variables
 
@@ -57,20 +59,20 @@ Note the app’s **Apple ID** (numeric) on the app’s **App Information** page 
    ```
 2. Edit `.env` and set (do not commit `.env`):
    ```bash
-   APPLE_ID=your@email.com
-   APP_APPLE_ID=1234567890
+   ASC_KEY_ID=XXXXXXXXXX
+   ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
    ITC_TEAM_ID=123456789
    MATCH_GIT_URL=https://github.com/yourusername/blackbook-certificates.git
    MATCH_PASSWORD=your_match_encryption_password
    MATCH_GIT_BASIC_AUTHORIZATION=base64_username_token
-   FASTLANE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
    ```
-   - **APP_APPLE_ID:** The numeric Apple ID of the Blackbook app from App Store Connect (Step 1).
+   - **ASC_KEY_ID:** The Key ID from the App Store Connect API key you created (Step 3).
+   - **ASC_ISSUER_ID:** The Issuer ID shown on the API keys page.
    - **ITC_TEAM_ID:** In App Store Connect, go to **Users and Access** → **Keys** or your team; the Team ID is shown there (numeric).
    - **MATCH_PASSWORD:** A password you choose for Match (used to encrypt the certs repo). Remember it for future runs.
    - **MATCH_GIT_BASIC_AUTHORIZATION:** For private repo access. Generate with:
      ```bash
-     echo -n "your-github-username:ghp_YourPersonalAccessToken" | base64
+     echo -n “your-github-username:ghp_YourPersonalAccessToken” | base64
      ```
      Use a GitHub Personal Access Token with `repo` scope.
 
@@ -78,25 +80,32 @@ Note the app’s **Apple ID** (numeric) on the app’s **App Information** page 
 
 ## Part 2: Upload a build to TestFlight
 
-From the Blackbook project root in Terminal:
+From the Blackbook project root in Terminal, deploy both platforms:
 
 ```bash
 cd /Users/mayeack/Blackbook
-fastlane ios beta
+./scripts/deploy-testflight.sh
+```
+
+Or deploy individually:
+
+```bash
+fastlane ios beta    # iOS only
+fastlane mac beta    # macOS only
 ```
 
 What this does:
 
 1. Runs `match` to install the App Store certificate and provisioning profile.
-2. Increments the build number (date-based if not set).
+2. Increments the build number (date-based if not set; macOS uses an offset to avoid conflicts).
 3. Builds the app for **App Store distribution** (Release, signed).
 4. Uploads the build to App Store Connect for TestFlight.
 
 If something fails:
 
-- **“Could not find profile”** — Run `fastlane match appstore` again and ensure the repo and password are correct.
-- **“Invalid credentials”** — Check `APPLE_ID` and `FASTLANE_APP_PASSWORD` (app-specific password, not your normal Apple ID password).
-- **“No such file or directory”** — Ensure you’re in the project root and the Xcode project/scheme name is correct.
+- **”Could not find profile”** — Run `fastlane match appstore` (and `--platform macos` for macOS) again and ensure the repo and password are correct.
+- **”Invalid credentials”** — Check that `ASC_KEY_ID` and `ASC_ISSUER_ID` are correct and that the `.p8` file is at `~/private_keys/AuthKey_<KEY_ID>.p8`.
+- **”No such file or directory”** — Ensure you’re in the project root and the Xcode project/scheme name is correct.
 
 After a successful upload, the build appears in App Store Connect under **TestFlight** in a few minutes (sometimes 5–15).
 
@@ -120,7 +129,9 @@ You (and they) will get an email when a new build is available.
 
 ---
 
-## Part 4: Install on your iPhone
+## Part 4: Install on your devices
+
+### iPhone
 
 1. On your **iPhone**, open the **App Store** and install **TestFlight** (by Apple) if you don’t have it.
 2. Sign in to TestFlight with the **same Apple ID** you added as an internal tester.
@@ -128,7 +139,14 @@ You (and they) will get an email when a new build is available.
 4. Tap **Blackbook** → **Install**. Accept any prompts.
 5. When installation finishes, tap **Open** to launch Blackbook.
 
-You can now use the app like a normal install. Updates: upload a new build with `fastlane ios beta`; TestFlight will show an update for Blackbook when it’s processed.
+### Mac
+
+1. On your **Mac**, open the **App Store** and install **TestFlight** (by Apple) if you don’t have it (requires macOS 12+).
+2. Sign in to TestFlight with the **same Apple ID** you added as an internal tester.
+3. Open TestFlight and look for **Blackbook** under **Apps**.
+4. Click **Install** next to the macOS build.
+
+Both platforms receive updates when you upload new builds. Use `./scripts/deploy-testflight.sh` to deploy both at once.
 
 ---
 
@@ -136,8 +154,9 @@ You can now use the app like a normal install. Updates: upload a new build with 
 
 | Step | Action |
 |------|--------|
-| One-time | Create app in App Store Connect, run `match init` + `match appstore`, create app-specific password, fill `.env` |
-| Each build | `fastlane ios beta` from project root |
+| One-time | Create app in App Store Connect, run `match init` + `match appstore` (+ `--platform macos`), create API key, fill `.env` |
+| Each build | `./scripts/deploy-testflight.sh` from project root (or `fastlane ios beta` / `fastlane mac beta` individually) |
 | On iPhone | Install TestFlight app → sign in → install Blackbook from TestFlight |
+| On Mac | Install TestFlight from App Store → sign in → install Blackbook from TestFlight |
 
 For full deployment details (including macOS and release), see [DEPLOYMENT.md](../DEPLOYMENT.md).

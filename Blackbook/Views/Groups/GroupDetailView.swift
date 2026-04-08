@@ -248,14 +248,6 @@ struct AddContactsToGroupView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    TextField("Search contacts…", text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-                        #if os(macOS)
-                        .padding(.vertical, 4)
-                        #endif
-                }
-
                 if !suggestedContacts.isEmpty && searchText.isEmpty {
                     Section("Suggested") {
                         ForEach(suggestedContacts) { contact in
@@ -280,6 +272,7 @@ struct AddContactsToGroupView: View {
                     }
                 }
             }
+            .searchable(text: $searchText, prompt: "Search contacts…")
             .navigationTitle("Add to \(group.name)")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

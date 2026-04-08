@@ -1,12 +1,11 @@
-#if os(macOS)
 import Foundation
 import Network
-import SwiftData
+import CryptoKit
 import os
 
-private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "LocalSyncServer")
+private let logger = Logger(subsystem: "com.blackbookdevelopment.server", category: "BackupServer")
 
-/// Minimal HTTP request for the sync server.
+/// Minimal HTTP request parsed from raw TCP data.
 private struct HTTPRequest {
     let method: String
     let path: String
@@ -15,32 +14,36 @@ private struct HTTPRequest {
     let body: Data?
 }
 
-/// Runs a minimal HTTP sync server on the Mac (contacts pull/push, photos). macOS only.
-final class LocalSyncServer: @unchecked Sendable {
+/// Lightweight HTTP server that handles backup storage and retrieval.
+/// Uses Network.framework (NWListener) for TCP, publishes via Bonjour.
+final class BackupServer: @unchecked Sendable {
     private let password: String
-    private let photoDirectory: URL
-    private let container: ModelContainer
-    private let queue = DispatchQueue(label: "com.blackbookdevelopment.localsync.server")
+    private let queue = DispatchQueue(label: "com.blackbookdevelopment.backupserver")
     private var listener: NWListener?
     private var bonjourService: NetService?
     private(set) var isRunning = false
     private(set) var port: UInt16 = 0
-    private var configuredPort: UInt16 = LocalSyncProtocol.defaultPort
+    private var configuredPort: UInt16 = 8765
     private var isStopping = false
     private var restartDelay: TimeInterval = 1.0
     private let maxRestartDelay: TimeInterval = 30.0
 
-    init(container: ModelContainer, password: String) {
-        self.container = container
-        self.password = password
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("Blackbook", isDirectory: true)
-            .appendingPathComponent("Photos", isDirectory: true)
-        self.photoDirectory = dir
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    static let defaultPort: UInt16 = 8765
+    static let bonjourType = "_blackbook-sync._tcp"
+    static let passwordHeader = "X-Sync-Password"
+    static let userEmailHeader = "X-User-Email"
+
+    /// Derive a deterministic sync password from a user email using SHA256.
+    static func derivePassword(from email: String) -> String {
+        let hash = SHA256.hash(data: Data(email.utf8))
+        return Data(hash).prefix(24).base64EncodedString()
     }
 
-    func start(port: UInt16 = LocalSyncProtocol.defaultPort) {
+    init(password: String) {
+        self.password = password
+    }
+
+    func start(port: UInt16 = BackupServer.defaultPort) {
         guard !isRunning else { return }
         isStopping = false
         configuredPort = port
@@ -57,7 +60,7 @@ final class LocalSyncServer: @unchecked Sendable {
                     self?.isRunning = true
                     self?.restartDelay = 1.0
                     self?.publishBonjour(port: Int(self?.port ?? 0))
-                    logger.info("Local sync server listening on port \(self?.port ?? 0)")
+                    logger.info("Backup server listening on port \(self?.port ?? 0)")
                 case .failed(let error):
                     logger.error("Listener failed: \(error.localizedDescription)")
                     self?.scheduleRestart()
@@ -75,7 +78,7 @@ final class LocalSyncServer: @unchecked Sendable {
             }
             listener.start(queue: queue)
         } catch {
-            logger.error("Failed to start sync server: \(error.localizedDescription)")
+            logger.error("Failed to start backup server: \(error.localizedDescription)")
             scheduleRestart()
         }
     }
@@ -89,6 +92,8 @@ final class LocalSyncServer: @unchecked Sendable {
         isRunning = false
         port = 0
     }
+
+    // MARK: - Restart
 
     private func scheduleRestart() {
         guard !isStopping else { return }
@@ -107,11 +112,15 @@ final class LocalSyncServer: @unchecked Sendable {
         }
     }
 
+    // MARK: - Bonjour
+
     private func publishBonjour(port: Int) {
-        let service = NetService(domain: "local.", type: LocalSyncProtocol.bonjourType, name: "Blackbook", port: Int32(port))
+        let service = NetService(domain: "local.", type: Self.bonjourType, name: "Blackbook", port: Int32(port))
         bonjourService = service
         service.publish()
     }
+
+    // MARK: - Connection Handling
 
     private func handle(connection: NWConnection) {
         connection.start(queue: queue)
@@ -178,6 +187,8 @@ final class LocalSyncServer: @unchecked Sendable {
         }
     }
 
+    // MARK: - HTTP Parsing
+
     private func parseRequest(_ data: Data) -> HTTPRequest? {
         let sep = Data([0x0d, 0x0a, 0x0d, 0x0a])
         guard let idx = data.firstRange(of: sep) else { return nil }
@@ -218,6 +229,8 @@ final class LocalSyncServer: @unchecked Sendable {
         return (method, path, query, headers)
     }
 
+    // MARK: - Request Routing
+
     private func handle(request: HTTPRequest?) -> (status: Int, headers: [String: String], body: Data?) {
         guard let request else {
             return (400, [:], "Bad Request".data(using: .utf8))
@@ -227,269 +240,18 @@ final class LocalSyncServer: @unchecked Sendable {
             return (401, [:], "Unauthorized".data(using: .utf8))
         }
 
-        if request.method == "GET" && request.path.hasPrefix("/sync/changes") {
-            return handlePull(query: request.query)
+        guard request.path.hasPrefix("/backups") else {
+            return (404, [:], "Not Found".data(using: .utf8))
         }
-        if request.method == "POST" && request.path == "/sync/changes" {
-            return handlePush(body: request.body)
+
+        guard let email = request.headers["x-user-email"], !email.isEmpty else {
+            return (400, [:], "Missing X-User-Email header".data(using: .utf8))
         }
-        if request.method == "GET" && request.path.hasPrefix("/photo/") {
-            let id = String(request.path.dropFirst("/photo/".count))
-            return handleGetPhoto(contactId: id)
-        }
-        if request.method == "POST" && request.path.hasPrefix("/photo/") {
-            let id = String(request.path.dropFirst("/photo/".count))
-            return handlePostPhoto(contactId: id, body: request.body)
-        }
-        if request.method == "DELETE" && request.path.hasPrefix("/photo/") {
-            let id = String(request.path.dropFirst("/photo/".count))
-            return handleDeletePhoto(contactId: id)
-        }
-        // Backup endpoints
-        if request.path.hasPrefix("/backups") {
-            guard let email = request.headers["x-user-email"], !email.isEmpty else {
-                return (400, [:], "Missing X-User-Email header".data(using: .utf8))
-            }
-            return handleBackupRoute(request: request, userEmail: email)
-        }
-        return (404, [:], "Not Found".data(using: .utf8))
+
+        return handleBackupRoute(request: request, userEmail: email)
     }
 
-    private func handlePull(query: [String: String]) -> (status: Int, headers: [String: String], body: Data?) {
-        guard let sinceStr = query["since"],
-              let since = ISO8601DateFormatter().date(from: sinceStr) else {
-            return (400, [:], "Missing or invalid since".data(using: .utf8))
-        }
-        var json: [String: Any] = [:]
-        let sem = DispatchSemaphore(value: 0)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { sem.signal(); return }
-            let context = ModelContext(self.container)
-            do {
-                // Layer 0: Leaf entities (no foreign keys)
-                let tagPred = #Predicate<Tag> { $0.updatedAt > since }
-                var tagDesc = FetchDescriptor<Tag>(predicate: tagPred); tagDesc.fetchLimit = 2000
-                json["tags"] = try context.fetch(tagDesc).map { ModelSyncApply.tagToDict($0) }
-
-                let groupPred = #Predicate<Group> { $0.updatedAt > since }
-                var groupDesc = FetchDescriptor<Group>(predicate: groupPred); groupDesc.fetchLimit = 2000
-                json["groups"] = try context.fetch(groupDesc).map { ModelSyncApply.groupToDict($0) }
-
-                let locationPred = #Predicate<Location> { $0.updatedAt > since }
-                var locationDesc = FetchDescriptor<Location>(predicate: locationPred); locationDesc.fetchLimit = 2000
-                json["locations"] = try context.fetch(locationDesc).map { ModelSyncApply.locationToDict($0) }
-
-                let rejectedPred = #Predicate<RejectedCalendarEvent> { $0.updatedAt > since }
-                var rejectedDesc = FetchDescriptor<RejectedCalendarEvent>(predicate: rejectedPred); rejectedDesc.fetchLimit = 2000
-                json["rejectedCalendarEvents"] = try context.fetch(rejectedDesc).map { ModelSyncApply.rejectedEventToDict($0) }
-
-                // Layer 1: Activities (references Groups)
-                let activityPred = #Predicate<Activity> { $0.updatedAt > since }
-                var activityDesc = FetchDescriptor<Activity>(predicate: activityPred); activityDesc.fetchLimit = 2000
-                json["activities"] = try context.fetch(activityDesc).map { ModelSyncApply.activityToDict($0) }
-
-                // Layer 2: Contacts (references Tags, Groups, Locations, Activities)
-                let contactPred = #Predicate<Contact> { $0.updatedAt > since }
-                var contactDesc = FetchDescriptor<Contact>(predicate: contactPred); contactDesc.fetchLimit = 2000
-                json["contacts"] = try context.fetch(contactDesc).map { ContactSyncApply.contactToDict($0) }
-
-                // Layer 3: Child entities (reference Contacts)
-                let interactionPred = #Predicate<Interaction> { $0.updatedAt > since }
-                var interactionDesc = FetchDescriptor<Interaction>(predicate: interactionPred); interactionDesc.fetchLimit = 5000
-                json["interactions"] = try context.fetch(interactionDesc).map { ModelSyncApply.interactionToDict($0) }
-
-                let notePred = #Predicate<Note> { $0.updatedAt > since }
-                var noteDesc = FetchDescriptor<Note>(predicate: notePred); noteDesc.fetchLimit = 2000
-                json["notes"] = try context.fetch(noteDesc).map { ModelSyncApply.noteToDict($0) }
-
-                let reminderPred = #Predicate<Reminder> { $0.updatedAt > since }
-                var reminderDesc = FetchDescriptor<Reminder>(predicate: reminderPred); reminderDesc.fetchLimit = 2000
-                json["reminders"] = try context.fetch(reminderDesc).map { ModelSyncApply.reminderToDict($0) }
-
-                let relPred = #Predicate<ContactRelationship> { $0.updatedAt > since }
-                var relDesc = FetchDescriptor<ContactRelationship>(predicate: relPred); relDesc.fetchLimit = 2000
-                json["contactRelationships"] = try context.fetch(relDesc).map { ModelSyncApply.contactRelationshipToDict($0) }
-            } catch {
-                logger.error("Pull fetch failed: \(error.localizedDescription)")
-            }
-            sem.signal()
-        }
-        sem.wait()
-        guard let data = try? JSONSerialization.data(withJSONObject: json) else {
-            return (500, [:], nil)
-        }
-        return (200, ["Content-Type": "application/json"], data)
-    }
-
-    private func handlePush(body: Data?) -> (status: Int, headers: [String: String], body: Data?) {
-        guard let body,
-              let top = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
-            return (400, [:], "Invalid JSON body".data(using: .utf8))
-        }
-        let sem = DispatchSemaphore(value: 0)
-        var success = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { sem.signal(); return }
-            let context = ModelContext(self.container)
-            do {
-                // Apply in dependency order: leaf entities first
-
-                // Layer 0: Tags, Groups, Locations, RejectedCalendarEvents
-                if let tags = top["tags"] as? [[String: Any]] {
-                    for dict in tags { try ModelSyncApply.applyRemoteTag(dict, to: context) }
-                }
-                if let groups = top["groups"] as? [[String: Any]] {
-                    for dict in groups { try ModelSyncApply.applyRemoteGroup(dict, to: context) }
-                }
-                if let locations = top["locations"] as? [[String: Any]] {
-                    for dict in locations { try ModelSyncApply.applyRemoteLocation(dict, to: context) }
-                }
-                if let events = top["rejectedCalendarEvents"] as? [[String: Any]] {
-                    for dict in events { try ModelSyncApply.applyRemoteRejectedEvent(dict, to: context) }
-                }
-
-                // Layer 1: Activities (references Groups)
-                if let activities = top["activities"] as? [[String: Any]] {
-                    for dict in activities { try ModelSyncApply.applyRemoteActivity(dict, to: context) }
-                }
-
-                // Layer 2: Contacts (references Tags, Groups, Locations, Activities)
-                if let contacts = top["contacts"] as? [[String: Any]] {
-                    for dict in contacts { try ContactSyncApply.applyRemoteContact(dict, to: context) }
-                }
-
-                // Layer 3: Child entities (reference Contacts)
-                if let interactions = top["interactions"] as? [[String: Any]] {
-                    for dict in interactions { try ModelSyncApply.applyRemoteInteraction(dict, to: context) }
-                }
-                if let notes = top["notes"] as? [[String: Any]] {
-                    for dict in notes { try ModelSyncApply.applyRemoteNote(dict, to: context) }
-                }
-                if let reminders = top["reminders"] as? [[String: Any]] {
-                    for dict in reminders { try ModelSyncApply.applyRemoteReminder(dict, to: context) }
-                }
-                if let rels = top["contactRelationships"] as? [[String: Any]] {
-                    for dict in rels { try ModelSyncApply.applyRemoteContactRelationship(dict, to: context) }
-                }
-
-                // Handle deletes (structured per model type)
-                if let deletes = top["deletes"] as? [String: Any] {
-                    try Self.applyDeletes(deletes, to: context)
-                }
-                // Legacy: flat deletes array for backward compatibility (contact-only)
-                if let legacyDeletes = top["deletes"] as? [String] {
-                    for idStr in legacyDeletes {
-                        guard let id = UUID(uuidString: idStr) else { continue }
-                        let predicate = #Predicate<Contact> { $0.id == id }
-                        try context.delete(model: Contact.self, where: predicate)
-                    }
-                }
-
-                try context.save()
-            } catch {
-                logger.error("Push apply failed: \(error.localizedDescription)")
-                success = false
-            }
-            sem.signal()
-        }
-        sem.wait()
-        return (success ? 200 : 500, ["Content-Type": "application/json"], "{}".data(using: .utf8))
-    }
-
-    private static func applyDeletes(_ deletes: [String: Any], to context: ModelContext) throws {
-        if let ids = deletes["tags"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Tag> { $0.id == id }
-                try context.delete(model: Tag.self, where: pred)
-            }
-        }
-        if let ids = deletes["groups"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Group> { $0.id == id }
-                try context.delete(model: Group.self, where: pred)
-            }
-        }
-        if let ids = deletes["locations"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Location> { $0.id == id }
-                try context.delete(model: Location.self, where: pred)
-            }
-        }
-        if let ids = deletes["activities"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Activity> { $0.id == id }
-                try context.delete(model: Activity.self, where: pred)
-            }
-        }
-        if let ids = deletes["contacts"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Contact> { $0.id == id }
-                try context.delete(model: Contact.self, where: pred)
-            }
-        }
-        if let ids = deletes["interactions"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Interaction> { $0.id == id }
-                try context.delete(model: Interaction.self, where: pred)
-            }
-        }
-        if let ids = deletes["notes"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Note> { $0.id == id }
-                try context.delete(model: Note.self, where: pred)
-            }
-        }
-        if let ids = deletes["reminders"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<Reminder> { $0.id == id }
-                try context.delete(model: Reminder.self, where: pred)
-            }
-        }
-        if let ids = deletes["contactRelationships"] as? [String] {
-            for idStr in ids {
-                guard let id = UUID(uuidString: idStr) else { continue }
-                let pred = #Predicate<ContactRelationship> { $0.id == id }
-                try context.delete(model: ContactRelationship.self, where: pred)
-            }
-        }
-    }
-
-    private func handleGetPhoto(contactId: String) -> (status: Int, headers: [String: String], body: Data?) {
-        let fileURL = photoDirectory.appendingPathComponent("\(contactId).jpg")
-        guard FileManager.default.fileExists(atPath: fileURL.path),
-              let data = try? Data(contentsOf: fileURL) else {
-            return (404, [:], nil)
-        }
-        return (200, ["Content-Type": "image/jpeg"], data)
-    }
-
-    private func handlePostPhoto(contactId: String, body: Data?) -> (status: Int, headers: [String: String], body: Data?) {
-        guard let body, !body.isEmpty else { return (400, [:], nil) }
-        let fileURL = photoDirectory.appendingPathComponent("\(contactId).jpg")
-        do {
-            try body.write(to: fileURL)
-            return (200, [:], nil)
-        } catch {
-            logger.error("Photo write failed: \(error.localizedDescription)")
-            return (500, [:], nil)
-        }
-    }
-
-    private func handleDeletePhoto(contactId: String) -> (status: Int, headers: [String: String], body: Data?) {
-        let fileURL = photoDirectory.appendingPathComponent("\(contactId).jpg")
-        try? FileManager.default.removeItem(at: fileURL)
-        return (200, [:], nil)
-    }
-
-    // MARK: - Backup Endpoints
+    // MARK: - Backup Storage
 
     private var remoteBackupsDirectory: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -537,13 +299,12 @@ final class LocalSyncServer: @unchecked Sendable {
         }
 
         // Parse path segments: /backups/{id}/...
-        let segments = path.split(separator: "/").map(String.init) // ["backups", id, ...]
+        let segments = path.split(separator: "/").map(String.init)
         guard segments.count >= 2 else {
             return (404, [:], "Not Found".data(using: .utf8))
         }
         let backupId = segments[1]
 
-        // Validate backup ID (prevent path traversal)
         guard !backupId.contains(".."), !backupId.contains("/") else {
             return (400, [:], "Invalid backup ID".data(using: .utf8))
         }
@@ -630,6 +391,8 @@ final class LocalSyncServer: @unchecked Sendable {
         for (k, v) in response.headers {
             headerLines += "\(k): \(v)\r\n"
         }
+        // Always include Content-Length so proxies (Cloudflare HTTP/2) and
+        // URLSession can determine when the response ends.
         headerLines += "Content-Length: \(response.body?.count ?? 0)\r\n"
         headerLines += "\r\n"
         var data = (statusLine + headerLines).data(using: .utf8)!
@@ -647,6 +410,32 @@ final class LocalSyncServer: @unchecked Sendable {
         default: return "Unknown"
         }
     }
-}
 
-#endif
+    // MARK: - Stats
+
+    var backupCount: Int {
+        let fm = FileManager.default
+        let dir = remoteBackupsDirectory
+        guard let contents = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return 0 }
+        var count = 0
+        for userDir in contents where userDir.hasDirectoryPath {
+            if let backups = try? fm.contentsOfDirectory(at: userDir, includingPropertiesForKeys: nil) {
+                count += backups.filter { $0.hasDirectoryPath }.count
+            }
+        }
+        return count
+    }
+
+    var diskUsageBytes: Int64 {
+        let fm = FileManager.default
+        let dir = remoteBackupsDirectory
+        guard let enumerator = fm.enumerator(at: dir, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                total += Int64(size)
+            }
+        }
+        return total
+    }
+}

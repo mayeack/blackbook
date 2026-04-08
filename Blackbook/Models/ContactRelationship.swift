@@ -9,6 +9,7 @@ final class ContactRelationship {
     var label: String?
     var strength: Double?
 
+    var updatedAt: Date
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
@@ -23,5 +24,6 @@ final class ContactRelationship {
         self.toContact = to
         self.label = label
         self.strength = strength
+        self.updatedAt = Date()
     }
 }
