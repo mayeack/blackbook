@@ -10,6 +10,7 @@ final class RejectedCalendarEvent {
     var calendarName: String
     var rejectedAt: Date
 
+    var updatedAt: Date
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
@@ -25,5 +26,6 @@ final class RejectedCalendarEvent {
         self.eventDate = eventDate
         self.calendarName = calendarName
         self.rejectedAt = Date()
+        self.updatedAt = Date()
     }
 }

@@ -9,6 +9,7 @@ final class Tag {
     var colorHex: String
     var contacts: [Contact]
 
+    var updatedAt: Date
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
@@ -21,6 +22,7 @@ final class Tag {
         self.name = name
         self.colorHex = colorHex
         self.contacts = []
+        self.updatedAt = Date()
     }
 }
 

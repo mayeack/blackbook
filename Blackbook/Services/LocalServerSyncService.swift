@@ -90,16 +90,43 @@ final class LocalServerSyncService {
     }
 
     private func pushLocalChanges(context: ModelContext, baseURL: URL, password: String) async throws {
+        let syncedStatus = SyncStatus.synced.rawValue
+
+        // Fetch all pending records across all model types
+        let pendingTags = try context.fetch(FetchDescriptor<Tag>(predicate: #Predicate<Tag> { $0.syncStatus != syncedStatus }))
+        let pendingGroups = try context.fetch(FetchDescriptor<Group>(predicate: #Predicate<Group> { $0.syncStatus != syncedStatus }))
+        let pendingLocations = try context.fetch(FetchDescriptor<Location>(predicate: #Predicate<Location> { $0.syncStatus != syncedStatus }))
+        let pendingActivities = try context.fetch(FetchDescriptor<Activity>(predicate: #Predicate<Activity> { $0.syncStatus != syncedStatus }))
         let pendingContacts = try fetchPendingContacts(context: context)
-        logger.info("Pushing \(pendingContacts.count) contact(s)")
+        let pendingInteractions = try context.fetch(FetchDescriptor<Interaction>(predicate: #Predicate<Interaction> { $0.syncStatus != syncedStatus }))
+        let pendingNotes = try context.fetch(FetchDescriptor<Note>(predicate: #Predicate<Note> { $0.syncStatus != syncedStatus }))
+        let pendingReminders = try context.fetch(FetchDescriptor<Reminder>(predicate: #Predicate<Reminder> { $0.syncStatus != syncedStatus }))
+        let pendingRelationships = try context.fetch(FetchDescriptor<ContactRelationship>(predicate: #Predicate<ContactRelationship> { $0.syncStatus != syncedStatus }))
+
+        let totalPending = pendingTags.count + pendingGroups.count + pendingLocations.count +
+            pendingActivities.count + pendingContacts.count + pendingInteractions.count +
+            pendingNotes.count + pendingReminders.count + pendingRelationships.count
+        logger.info("Pushing \(totalPending) record(s)")
+
+        guard totalPending > 0 else { return }
 
         if !isConnected {
             for contact in pendingContacts { enqueueOfflineRecord(for: contact) }
             return
         }
 
-        let contactsPayload = pendingContacts.map { ContactSyncApply.contactToDict($0) }
-        let body: [String: Any] = ["contacts": contactsPayload]
+        // Build multi-model payload in dependency order
+        var body: [String: Any] = [:]
+        if !pendingTags.isEmpty { body["tags"] = pendingTags.map { ModelSyncApply.tagToDict($0) } }
+        if !pendingGroups.isEmpty { body["groups"] = pendingGroups.map { ModelSyncApply.groupToDict($0) } }
+        if !pendingLocations.isEmpty { body["locations"] = pendingLocations.map { ModelSyncApply.locationToDict($0) } }
+        if !pendingActivities.isEmpty { body["activities"] = pendingActivities.map { ModelSyncApply.activityToDict($0) } }
+        if !pendingContacts.isEmpty { body["contacts"] = pendingContacts.map { ContactSyncApply.contactToDict($0) } }
+        if !pendingInteractions.isEmpty { body["interactions"] = pendingInteractions.map { ModelSyncApply.interactionToDict($0) } }
+        if !pendingNotes.isEmpty { body["notes"] = pendingNotes.map { ModelSyncApply.noteToDict($0) } }
+        if !pendingReminders.isEmpty { body["reminders"] = pendingReminders.map { ModelSyncApply.reminderToDict($0) } }
+        if !pendingRelationships.isEmpty { body["contactRelationships"] = pendingRelationships.map { ModelSyncApply.contactRelationshipToDict($0) } }
+
         guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else { return }
 
         var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
@@ -116,11 +143,17 @@ final class LocalServerSyncService {
             throw NSError(domain: "LocalSync", code: -1, userInfo: [NSLocalizedDescriptionKey: "Server returned error"])
         }
 
-        for contact in pendingContacts {
-            contact.syncStatus = SyncStatus.synced.rawValue
-            contact.lastSyncedAt = Date()
-            contact.syncVersion += 1
-        }
+        // Mark all pushed records as synced
+        let now = Date()
+        for tag in pendingTags { tag.syncStatus = SyncStatus.synced.rawValue; tag.lastSyncedAt = now }
+        for group in pendingGroups { group.syncStatus = SyncStatus.synced.rawValue; group.lastSyncedAt = now }
+        for location in pendingLocations { location.syncStatus = SyncStatus.synced.rawValue; location.lastSyncedAt = now }
+        for activity in pendingActivities { activity.syncStatus = SyncStatus.synced.rawValue; activity.lastSyncedAt = now }
+        for contact in pendingContacts { contact.syncStatus = SyncStatus.synced.rawValue; contact.lastSyncedAt = now; contact.syncVersion += 1 }
+        for interaction in pendingInteractions { interaction.syncStatus = SyncStatus.synced.rawValue; interaction.lastSyncedAt = now }
+        for note in pendingNotes { note.syncStatus = SyncStatus.synced.rawValue; note.lastSyncedAt = now }
+        for reminder in pendingReminders { reminder.syncStatus = SyncStatus.synced.rawValue; reminder.lastSyncedAt = now }
+        for rel in pendingRelationships { rel.syncStatus = SyncStatus.synced.rawValue; rel.lastSyncedAt = now }
         try context.save()
     }
 
@@ -141,15 +174,57 @@ final class LocalServerSyncService {
             throw NSError(domain: "LocalSync", code: -1, userInfo: [NSLocalizedDescriptionKey: "Pull failed"])
         }
 
-        guard let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let contacts = top["contacts"] as? [[String: Any]] else {
-            return
-        }
-        logger.info("Pulled \(contacts.count) contact(s)")
+        guard let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
-        for dict in contacts {
-            try ContactSyncApply.applyRemoteContact(dict, to: context)
+        // Apply in dependency order: leaf entities first
+
+        // Layer 0: Tags, Groups, Locations, RejectedCalendarEvents
+        if let tags = top["tags"] as? [[String: Any]] {
+            logger.info("Pulled \(tags.count) tag(s)")
+            for dict in tags { try ModelSyncApply.applyRemoteTag(dict, to: context) }
         }
+        if let groups = top["groups"] as? [[String: Any]] {
+            logger.info("Pulled \(groups.count) group(s)")
+            for dict in groups { try ModelSyncApply.applyRemoteGroup(dict, to: context) }
+        }
+        if let locations = top["locations"] as? [[String: Any]] {
+            logger.info("Pulled \(locations.count) location(s)")
+            for dict in locations { try ModelSyncApply.applyRemoteLocation(dict, to: context) }
+        }
+        if let events = top["rejectedCalendarEvents"] as? [[String: Any]] {
+            for dict in events { try ModelSyncApply.applyRemoteRejectedEvent(dict, to: context) }
+        }
+
+        // Layer 1: Activities (references Groups)
+        if let activities = top["activities"] as? [[String: Any]] {
+            logger.info("Pulled \(activities.count) activity(ies)")
+            for dict in activities { try ModelSyncApply.applyRemoteActivity(dict, to: context) }
+        }
+
+        // Layer 2: Contacts (references Tags, Groups, Locations, Activities)
+        if let contacts = top["contacts"] as? [[String: Any]] {
+            logger.info("Pulled \(contacts.count) contact(s)")
+            for dict in contacts { try ContactSyncApply.applyRemoteContact(dict, to: context) }
+        }
+
+        // Layer 3: Child entities (reference Contacts)
+        if let interactions = top["interactions"] as? [[String: Any]] {
+            logger.info("Pulled \(interactions.count) interaction(s)")
+            for dict in interactions { try ModelSyncApply.applyRemoteInteraction(dict, to: context) }
+        }
+        if let notes = top["notes"] as? [[String: Any]] {
+            logger.info("Pulled \(notes.count) note(s)")
+            for dict in notes { try ModelSyncApply.applyRemoteNote(dict, to: context) }
+        }
+        if let reminders = top["reminders"] as? [[String: Any]] {
+            logger.info("Pulled \(reminders.count) reminder(s)")
+            for dict in reminders { try ModelSyncApply.applyRemoteReminder(dict, to: context) }
+        }
+        if let rels = top["contactRelationships"] as? [[String: Any]] {
+            logger.info("Pulled \(rels.count) relationship(s)")
+            for dict in rels { try ModelSyncApply.applyRemoteContactRelationship(dict, to: context) }
+        }
+
         try context.save()
     }
 

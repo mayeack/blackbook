@@ -22,6 +22,7 @@ final class Interaction {
         set { directionRaw = newValue?.rawValue }
     }
 
+    var updatedAt: Date
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
@@ -42,6 +43,7 @@ final class Interaction {
         self.summary = summary
         self.sentiment = sentiment
         self.createdAt = Date()
+        self.updatedAt = Date()
     }
 }
 

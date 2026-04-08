@@ -260,24 +260,61 @@ final class LocalSyncServer: @unchecked Sendable {
               let since = ISO8601DateFormatter().date(from: sinceStr) else {
             return (400, [:], "Missing or invalid since".data(using: .utf8))
         }
-        var contactsPayload: [[String: Any]] = []
+        var json: [String: Any] = [:]
         let sem = DispatchSemaphore(value: 0)
         DispatchQueue.main.async { [weak self] in
             guard let self else { sem.signal(); return }
             let context = ModelContext(self.container)
-            let predicate = #Predicate<Contact> { $0.updatedAt > since }
-            var descriptor = FetchDescriptor<Contact>(predicate: predicate)
-            descriptor.fetchLimit = 2000
             do {
-                let list = try context.fetch(descriptor)
-                contactsPayload = list.map { ContactSyncApply.contactToDict($0) }
+                // Layer 0: Leaf entities (no foreign keys)
+                let tagPred = #Predicate<Tag> { $0.updatedAt > since }
+                var tagDesc = FetchDescriptor<Tag>(predicate: tagPred); tagDesc.fetchLimit = 2000
+                json["tags"] = try context.fetch(tagDesc).map { ModelSyncApply.tagToDict($0) }
+
+                let groupPred = #Predicate<Group> { $0.updatedAt > since }
+                var groupDesc = FetchDescriptor<Group>(predicate: groupPred); groupDesc.fetchLimit = 2000
+                json["groups"] = try context.fetch(groupDesc).map { ModelSyncApply.groupToDict($0) }
+
+                let locationPred = #Predicate<Location> { $0.updatedAt > since }
+                var locationDesc = FetchDescriptor<Location>(predicate: locationPred); locationDesc.fetchLimit = 2000
+                json["locations"] = try context.fetch(locationDesc).map { ModelSyncApply.locationToDict($0) }
+
+                let rejectedPred = #Predicate<RejectedCalendarEvent> { $0.updatedAt > since }
+                var rejectedDesc = FetchDescriptor<RejectedCalendarEvent>(predicate: rejectedPred); rejectedDesc.fetchLimit = 2000
+                json["rejectedCalendarEvents"] = try context.fetch(rejectedDesc).map { ModelSyncApply.rejectedEventToDict($0) }
+
+                // Layer 1: Activities (references Groups)
+                let activityPred = #Predicate<Activity> { $0.updatedAt > since }
+                var activityDesc = FetchDescriptor<Activity>(predicate: activityPred); activityDesc.fetchLimit = 2000
+                json["activities"] = try context.fetch(activityDesc).map { ModelSyncApply.activityToDict($0) }
+
+                // Layer 2: Contacts (references Tags, Groups, Locations, Activities)
+                let contactPred = #Predicate<Contact> { $0.updatedAt > since }
+                var contactDesc = FetchDescriptor<Contact>(predicate: contactPred); contactDesc.fetchLimit = 2000
+                json["contacts"] = try context.fetch(contactDesc).map { ContactSyncApply.contactToDict($0) }
+
+                // Layer 3: Child entities (reference Contacts)
+                let interactionPred = #Predicate<Interaction> { $0.updatedAt > since }
+                var interactionDesc = FetchDescriptor<Interaction>(predicate: interactionPred); interactionDesc.fetchLimit = 5000
+                json["interactions"] = try context.fetch(interactionDesc).map { ModelSyncApply.interactionToDict($0) }
+
+                let notePred = #Predicate<Note> { $0.updatedAt > since }
+                var noteDesc = FetchDescriptor<Note>(predicate: notePred); noteDesc.fetchLimit = 2000
+                json["notes"] = try context.fetch(noteDesc).map { ModelSyncApply.noteToDict($0) }
+
+                let reminderPred = #Predicate<Reminder> { $0.updatedAt > since }
+                var reminderDesc = FetchDescriptor<Reminder>(predicate: reminderPred); reminderDesc.fetchLimit = 2000
+                json["reminders"] = try context.fetch(reminderDesc).map { ModelSyncApply.reminderToDict($0) }
+
+                let relPred = #Predicate<ContactRelationship> { $0.updatedAt > since }
+                var relDesc = FetchDescriptor<ContactRelationship>(predicate: relPred); relDesc.fetchLimit = 2000
+                json["contactRelationships"] = try context.fetch(relDesc).map { ModelSyncApply.contactRelationshipToDict($0) }
             } catch {
                 logger.error("Pull fetch failed: \(error.localizedDescription)")
             }
             sem.signal()
         }
         sem.wait()
-        let json: [String: Any] = ["contacts": contactsPayload]
         guard let data = try? JSONSerialization.data(withJSONObject: json) else {
             return (500, [:], nil)
         }
@@ -286,8 +323,7 @@ final class LocalSyncServer: @unchecked Sendable {
 
     private func handlePush(body: Data?) -> (status: Int, headers: [String: String], body: Data?) {
         guard let body,
-              let top = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let contacts = top["contacts"] as? [[String: Any]] else {
+              let top = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             return (400, [:], "Invalid JSON body".data(using: .utf8))
         }
         let sem = DispatchSemaphore(value: 0)
@@ -296,16 +332,59 @@ final class LocalSyncServer: @unchecked Sendable {
             guard let self else { sem.signal(); return }
             let context = ModelContext(self.container)
             do {
-                for dict in contacts {
-                    try ContactSyncApply.applyRemoteContact(dict, to: context)
+                // Apply in dependency order: leaf entities first
+
+                // Layer 0: Tags, Groups, Locations, RejectedCalendarEvents
+                if let tags = top["tags"] as? [[String: Any]] {
+                    for dict in tags { try ModelSyncApply.applyRemoteTag(dict, to: context) }
                 }
-                if let deletes = top["deletes"] as? [String] {
-                    for idStr in deletes {
+                if let groups = top["groups"] as? [[String: Any]] {
+                    for dict in groups { try ModelSyncApply.applyRemoteGroup(dict, to: context) }
+                }
+                if let locations = top["locations"] as? [[String: Any]] {
+                    for dict in locations { try ModelSyncApply.applyRemoteLocation(dict, to: context) }
+                }
+                if let events = top["rejectedCalendarEvents"] as? [[String: Any]] {
+                    for dict in events { try ModelSyncApply.applyRemoteRejectedEvent(dict, to: context) }
+                }
+
+                // Layer 1: Activities (references Groups)
+                if let activities = top["activities"] as? [[String: Any]] {
+                    for dict in activities { try ModelSyncApply.applyRemoteActivity(dict, to: context) }
+                }
+
+                // Layer 2: Contacts (references Tags, Groups, Locations, Activities)
+                if let contacts = top["contacts"] as? [[String: Any]] {
+                    for dict in contacts { try ContactSyncApply.applyRemoteContact(dict, to: context) }
+                }
+
+                // Layer 3: Child entities (reference Contacts)
+                if let interactions = top["interactions"] as? [[String: Any]] {
+                    for dict in interactions { try ModelSyncApply.applyRemoteInteraction(dict, to: context) }
+                }
+                if let notes = top["notes"] as? [[String: Any]] {
+                    for dict in notes { try ModelSyncApply.applyRemoteNote(dict, to: context) }
+                }
+                if let reminders = top["reminders"] as? [[String: Any]] {
+                    for dict in reminders { try ModelSyncApply.applyRemoteReminder(dict, to: context) }
+                }
+                if let rels = top["contactRelationships"] as? [[String: Any]] {
+                    for dict in rels { try ModelSyncApply.applyRemoteContactRelationship(dict, to: context) }
+                }
+
+                // Handle deletes (structured per model type)
+                if let deletes = top["deletes"] as? [String: Any] {
+                    try Self.applyDeletes(deletes, to: context)
+                }
+                // Legacy: flat deletes array for backward compatibility (contact-only)
+                if let legacyDeletes = top["deletes"] as? [String] {
+                    for idStr in legacyDeletes {
                         guard let id = UUID(uuidString: idStr) else { continue }
                         let predicate = #Predicate<Contact> { $0.id == id }
                         try context.delete(model: Contact.self, where: predicate)
                     }
                 }
+
                 try context.save()
             } catch {
                 logger.error("Push apply failed: \(error.localizedDescription)")
@@ -315,6 +394,72 @@ final class LocalSyncServer: @unchecked Sendable {
         }
         sem.wait()
         return (success ? 200 : 500, ["Content-Type": "application/json"], "{}".data(using: .utf8))
+    }
+
+    private static func applyDeletes(_ deletes: [String: Any], to context: ModelContext) throws {
+        if let ids = deletes["tags"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Tag> { $0.id == id }
+                try context.delete(model: Tag.self, where: pred)
+            }
+        }
+        if let ids = deletes["groups"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Group> { $0.id == id }
+                try context.delete(model: Group.self, where: pred)
+            }
+        }
+        if let ids = deletes["locations"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Location> { $0.id == id }
+                try context.delete(model: Location.self, where: pred)
+            }
+        }
+        if let ids = deletes["activities"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Activity> { $0.id == id }
+                try context.delete(model: Activity.self, where: pred)
+            }
+        }
+        if let ids = deletes["contacts"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Contact> { $0.id == id }
+                try context.delete(model: Contact.self, where: pred)
+            }
+        }
+        if let ids = deletes["interactions"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Interaction> { $0.id == id }
+                try context.delete(model: Interaction.self, where: pred)
+            }
+        }
+        if let ids = deletes["notes"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Note> { $0.id == id }
+                try context.delete(model: Note.self, where: pred)
+            }
+        }
+        if let ids = deletes["reminders"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<Reminder> { $0.id == id }
+                try context.delete(model: Reminder.self, where: pred)
+            }
+        }
+        if let ids = deletes["contactRelationships"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                let pred = #Predicate<ContactRelationship> { $0.id == id }
+                try context.delete(model: ContactRelationship.self, where: pred)
+            }
+        }
     }
 
     private func handleGetPhoto(contactId: String) -> (status: Int, headers: [String: String], body: Data?) {

@@ -62,10 +62,9 @@ enum ContactSyncApply {
 
         if let local = existing {
             if local.updatedAt > remoteUpdated && local.syncStatus != SyncStatus.synced.rawValue {
-                local.syncStatus = SyncStatus.conflict.rawValue
                 return
             }
-            applyDictToContact(dict, contact: local)
+            applyDictToContact(dict, contact: local, context: context)
             local.syncStatus = SyncStatus.synced.rawValue
             local.lastSyncedAt = Date()
         } else {
@@ -74,14 +73,14 @@ enum ContactSyncApply {
                 lastName: (dict["lastName"] as? String) ?? ""
             )
             contact.id = remoteId
-            applyDictToContact(dict, contact: contact)
+            applyDictToContact(dict, contact: contact, context: context)
             contact.syncStatus = SyncStatus.synced.rawValue
             contact.lastSyncedAt = Date()
             context.insert(contact)
         }
     }
 
-    private static func applyDictToContact(_ dict: [String: Any], contact: Contact) {
+    private static func applyDictToContact(_ dict: [String: Any], contact: Contact, context: ModelContext) {
         if let v = dict["firstName"] as? String { contact.firstName = v }
         if let v = dict["lastName"] as? String { contact.lastName = v }
         contact.company = dict["company"] as? String
@@ -108,6 +107,57 @@ enum ContactSyncApply {
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
             contact.customFields = obj
         }
-        // tagIds, groupIds, locationIds, activityIds: we don't resolve relationships in this apply (server stores flat; client may resolve later or we add in Phase 2)
+
+        // Resolve tag relationships
+        if let tagIdStrings = dict["tagIds"] as? [String] {
+            let tagIds = tagIdStrings.compactMap { UUID(uuidString: $0) }
+            var tags: [Tag] = []
+            for tid in tagIds {
+                let pred = #Predicate<Tag> { $0.id == tid }
+                if let tag = try? context.fetch(FetchDescriptor<Tag>(predicate: pred)).first {
+                    tags.append(tag)
+                }
+            }
+            contact.tags = tags
+        }
+
+        // Resolve group relationships
+        if let groupIdStrings = dict["groupIds"] as? [String] {
+            let groupIds = groupIdStrings.compactMap { UUID(uuidString: $0) }
+            var groups: [Group] = []
+            for gid in groupIds {
+                let pred = #Predicate<Group> { $0.id == gid }
+                if let group = try? context.fetch(FetchDescriptor<Group>(predicate: pred)).first {
+                    groups.append(group)
+                }
+            }
+            contact.groups = groups
+        }
+
+        // Resolve location relationships
+        if let locationIdStrings = dict["locationIds"] as? [String] {
+            let locationIds = locationIdStrings.compactMap { UUID(uuidString: $0) }
+            var locations: [Location] = []
+            for lid in locationIds {
+                let pred = #Predicate<Location> { $0.id == lid }
+                if let location = try? context.fetch(FetchDescriptor<Location>(predicate: pred)).first {
+                    locations.append(location)
+                }
+            }
+            contact.locations = locations
+        }
+
+        // Resolve activity relationships
+        if let activityIdStrings = dict["activityIds"] as? [String] {
+            let activityIds = activityIdStrings.compactMap { UUID(uuidString: $0) }
+            var activities: [Activity] = []
+            for aid in activityIds {
+                let pred = #Predicate<Activity> { $0.id == aid }
+                if let activity = try? context.fetch(FetchDescriptor<Activity>(predicate: pred)).first {
+                    activities.append(activity)
+                }
+            }
+            contact.activities = activities
+        }
     }
 }
