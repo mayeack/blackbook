@@ -34,6 +34,9 @@ enum BackupError: LocalizedError {
 
 @Observable
 final class BackupService {
+    /// Canonical schema version shared with BlackbookApp.migrateStoreIfNeeded().
+    /// Bump this when the SwiftData schema changes.
+    static let currentSchemaVersion = 4
     private(set) var backups: [BackupMetadata] = []
     private(set) var remoteBackups: [BackupMetadata] = []
     private(set) var isCreatingBackup = false
@@ -618,6 +621,25 @@ final class BackupService {
             }
         }
 
+        // Checkpoint the restored WAL into the main store file so SwiftData
+        // opens a consistent database without relying on WAL replay.
+        // No other process holds a connection at this point, so TRUNCATE is safe.
+        let restoredStorePath = storeDir.appending(path: "default.store").path
+        var db: OpaquePointer?
+        if sqlite3_open_v2(restoredStorePath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK {
+            sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
+            sqlite3_close(db)
+            logger.info("Post-restore WAL checkpoint completed")
+        } else {
+            sqlite3_close(db)
+            logger.warning("Could not open restored store for WAL checkpoint")
+        }
+        // Remove now-empty WAL and SHM files
+        for suffix in ["-wal", "-shm"] {
+            let fileURL = storeDir.appending(path: "default.store\(suffix)")
+            try? fm.removeItem(at: fileURL)
+        }
+
         // Restore external storage support directory (SwiftData @Attribute(.externalStorage))
         let currentSupport = storeDir.appending(path: ".default_SUPPORT")
         if fm.fileExists(atPath: currentSupport.path) {
@@ -650,7 +672,7 @@ final class BackupService {
 
         // Mark schema version as current so migrateStoreIfNeeded() doesn't
         // delete the restored database thinking it's from an old schema.
-        UserDefaults.standard.set(3, forKey: "SwiftDataSchemaVersion")
+        UserDefaults.standard.set(currentSchemaVersion, forKey: "SwiftDataSchemaVersion")
 
         // Delete sentinel
         try? fm.removeItem(at: sentinelURL)
