@@ -53,17 +53,22 @@ In the repo: **Settings → Secrets and variables → Actions**, add:
 
 | Secret | Description |
 |--------|-------------|
-| `APPLE_ID` | Apple Developer account email |
-| `APP_APPLE_ID` | Numeric App ID from App Store Connect |
+| `ASC_KEY_ID` | App Store Connect API Key ID |
+| `ASC_ISSUER_ID` | App Store Connect API Issuer ID |
+| `ASC_KEY_CONTENT` | Base64-encoded `.p8` API key file |
 | `ITC_TEAM_ID` | App Store Connect team ID |
 | `MATCH_GIT_URL` | URL of the private certificates repo |
 | `MATCH_PASSWORD` | Encryption password from `match init` |
 | `MATCH_GIT_BASIC_AUTHORIZATION` | Base64 of `username:personal_access_token` |
-| `FASTLANE_APP_PASSWORD` | App-specific password from appleid.apple.com |
 
 Generate base64 auth:
 ```bash
 echo -n "your-github-username:ghp_YourToken" | base64
+```
+
+Generate the API key: Go to [App Store Connect](https://appstoreconnect.apple.com) → Users and Access → Integrations → App Store Connect API → Create key with "App Manager" role. Base64-encode the `.p8` file:
+```bash
+base64 -i AuthKey_XXXXXXXXXX.p8
 ```
 
 ---
@@ -72,8 +77,8 @@ echo -n "your-github-username:ghp_YourToken" | base64
 
 ### Deploy to TestFlight
 
-- **CI (recommended):** Push to `main`. The workflow in `.github/workflows/ci.yml` runs tests, then builds, signs with Match, and uploads the iOS app to TestFlight. Ensure all GitHub Actions secrets (Phase 2) are set.
-- **Local:** From the project root, run `fastlane ios beta`. Requires Apple ID and Match credentials in the environment (or in `.env` if you use dotenv).
+- **CI (recommended):** Push to `main`. The workflow in `.github/workflows/ci.yml` runs tests, then builds and uploads both iOS and macOS to TestFlight. Ensure all GitHub Actions secrets (Phase 2) are set.
+- **Local:** From the project root, run `./scripts/deploy-testflight.sh` (or `fastlane ios beta` / `fastlane mac beta` individually). Requires ASC API key and Match credentials in the environment (or in `.env`).
 
 ### Test on TestFlight
 
@@ -92,11 +97,11 @@ In App Store Connect, complete the items in [APPLESTORE_CHECKLIST.md](APPLESTORE
 ### Submit for review
 
 1. **iOS:** Run `fastlane ios release` (builds, signs with Match, uploads to App Store Connect). In App Store Connect, select the new build for the version, complete any remaining metadata, and click **Submit for Review**.
-2. **macOS:** Run `fastlane mac build` to produce the signed app. In App Store Connect, open the macOS app, create a new version if needed, and upload the build (e.g. via Transporter or the web upload). Then submit for review.
+2. **macOS:** The macOS build is also uploaded via `fastlane mac beta`. For App Store submission, create a new version in App Store Connect, select the macOS build, and submit for review.
 
 ---
 
 ## Security
 
-- Do not commit Match password or Fastlane app-specific password.
+- Do not commit the `.p8` API key file or Match password.
 - See `.env.example` for a list of secrets used in CI/local (values are not stored in the repo).

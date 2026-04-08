@@ -103,28 +103,37 @@ jobs:
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project Blackbook.xcodeproj -scheme Blackbook
 
+      - name: Install App Store Connect API Key
+        env:
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          echo "$ASC_KEY_CONTENT" | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
       - name: Deploy iOS to TestFlight
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APP_APPLE_ID: ${{ secrets.APP_APPLE_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.FASTLANE_APP_PASSWORD }}
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
           BUILD_NUMBER: ${{ github.run_number }}
         run: fastlane ios beta
 
       - name: Deploy macOS to TestFlight
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APP_APPLE_ID: ${{ secrets.APP_APPLE_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.FASTLANE_APP_PASSWORD }}
+          XCODEBUILD_AUTHENTICATION_KEY_PATH: ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          XCODEBUILD_AUTHENTICATION_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          XCODEBUILD_AUTHENTICATION_KEY_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
           BUILD_NUMBER: ${{ github.run_number }}
         run: fastlane mac beta

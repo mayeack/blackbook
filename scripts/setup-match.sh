@@ -29,4 +29,5 @@ fastlane match appstore --platform macos
 echo ""
 echo "Match setup complete. Add these GitHub Actions secrets:"
 echo "  MATCH_GIT_URL, MATCH_PASSWORD, MATCH_GIT_BASIC_AUTHORIZATION"
-echo "  APPLE_ID, APP_APPLE_ID, ITC_TEAM_ID, FASTLANE_APP_PASSWORD"
+echo "  ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_CONTENT (base64-encoded .p8 file)"
+echo "  ITC_TEAM_ID"
