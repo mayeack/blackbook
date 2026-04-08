@@ -20,7 +20,16 @@ enum LocalSyncProtocol {
         static func backup(backupId: String) -> String { "/backups/\(backupId)" }
     }
 
-    /// GET /sync/changes?since=ISO8601 → response JSON: { "contacts": [ { ...contact... } ] }
+    /// GET /sync/changes?since=ISO8601 → response JSON:
+    /// {
+    ///   "tags": [...], "groups": [...], "locations": [...],
+    ///   "activities": [...], "contacts": [...],
+    ///   "interactions": [...], "notes": [...], "reminders": [...],
+    ///   "contactRelationships": [...], "rejectedCalendarEvents": [...]
+    /// }
+    /// POST /sync/changes → same structure for push, plus:
+    /// { ..., "deletes": { "tags": ["uuid"], "contacts": ["uuid"], ... } }
+    /// Ordering is dependency-aware: leaf entities first, then referencing entities.
     static func pullQuery(since: Date) -> String {
         let iso = ISO8601DateFormatter().string(from: since)
         let encoded = iso.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? iso

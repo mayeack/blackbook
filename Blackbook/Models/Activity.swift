@@ -16,6 +16,7 @@ final class Activity {
     var contacts: [Contact]
     var groups: [Group]
 
+    var updatedAt: Date
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 
@@ -46,6 +47,7 @@ final class Activity {
         self.endDate = endDate
         self.activityDescription = activityDescription
         self.createdAt = Date()
+        self.updatedAt = Date()
         self.contacts = []
         self.groups = []
     }

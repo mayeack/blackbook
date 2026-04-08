@@ -20,7 +20,9 @@
 		28092BCCCBD27C677F28E65F /* ContactMergeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */; };
 		28D30061B05714E65E0FAA2C /* ForgotPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23843A28716C56CF55E7614C /* ForgotPasswordView.swift */; };
 		3C97130622FF6D29BACDEA77 /* Activity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21445D604CF5DB4A2F69B7DF /* Activity.swift */; };
+		3D5BA26EDD7B1258E870B1D4 /* BonjourBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB12E01D4EB1C6E3A68182E /* BonjourBrowser.swift */; };
 		3F2A2AE985F300274A0AFE5B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 854F37F271CEC66B3F1BE876 /* Assets.xcassets */; };
+		3F8A392AE676AD3A604B9EC3 /* ModelSyncApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = B56B474D15D62192EC7F6305 /* ModelSyncApply.swift */; };
 		40C2890B8D20DC8BF540F2B1 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EDF5198B759D9C15B32C55 /* SubscriptionView.swift */; };
 		418089A77A3E793B504C88FB /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD02AD2B31E4BDFBABB04A9 /* LoginView.swift */; };
 		460F7B5C6218C225C8C7B812 /* GroupIconSuggestionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D43574664C82215699065AE /* GroupIconSuggestionView.swift */; };
@@ -41,6 +43,7 @@
 		69C167B283DF373F9AADEE03 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B4686D34DCC894416E2DB8D /* SettingsView.swift */; };
 		69E8237701B2BDD1763EEE1F /* ContactModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D95AA83A5437DFA01312E219 /* ContactModelTests.swift */; };
 		6EBB34A3DDBE871B6B3BF70E /* DateHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815CE74C56D359F1D0990254 /* DateHelpers.swift */; };
+		712B7AFBCF2FC20D64D203D6 /* ContactGroupPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 972BC195190AAFA50ABE3DC7 /* ContactGroupPickerView.swift */; };
 		72326B255067A794241B231C /* BackupMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */; };
 		72883A5C13AC7845998454E1 /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89AD54534AC73AD4F065D4D0 /* SubscriptionManager.swift */; };
 		72982030B4A88B5856E0BBF5 /* AuthStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D73B4693AF749AE8014A6606 /* AuthStateTests.swift */; };
@@ -48,15 +51,16 @@
 		74A5E0E803230F6D72D2E75B /* LocationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8F368EF8553F3DD542C10AE /* LocationDetailView.swift */; };
 		771CFACFB207D0ED960C9E33 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30BB4BA1E8738C1F076FF815 /* DashboardViewModel.swift */; };
 		7EAE471A3C0DEAE6F297474D /* LocalSyncServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E45E53C6F0C7F7A6808F6EE /* LocalSyncServer.swift */; };
+		7FD59E02711302FDE3365206 /* ContactLocationPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6331C25944672EB2F32005C /* ContactLocationPickerView.swift */; };
 		819102BFD7CD40272EA76C97 /* InteractionViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367B4A2B6BD57C86106A9103 /* InteractionViewModelTests.swift */; };
 		82E24EDF90B4FDD321E60DC3 /* AuthGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF1714EC74CED7F5A86E00E /* AuthGateView.swift */; };
 		85CAA10ED3DAFA0543157D28 /* ContactListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA97E98CA4C04E05A941276A /* ContactListViewModel.swift */; };
 		85EC2CFCD1D9D03FC6B07DCC /* PhotoStorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D046FD999BC660D58C26E32 /* PhotoStorageService.swift */; };
 		86C22352141194D6BE6A4D31 /* Tag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F7E74C7FFD8B03E32C1F7B /* Tag.swift */; };
 		8B2CB978D413E80BD9F38F3D /* ContactRelationship.swift in Sources */ = {isa = PBXBuildFile; fileRef = 364729C23FA9F3F62DDA06EF /* ContactRelationship.swift */; };
+		90834021AE7B9E22B64F9497 /* ContactTagPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17EC8523C36F3E4A2948A392 /* ContactTagPickerView.swift */; };
 		9365296C3F60B05F955EAA71 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A826F19906D36E4EB3A83908 /* ContentView.swift */; };
 		9A18735D7C1D616279A77B5E /* LocalServerSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */; };
-		CB92C975707A4C0F811EDDD9 /* BonjourBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EC6050191E6433E91D7A90F /* BonjourBrowser.swift */; };
 		9EF211A7D945367755381495 /* GroupManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8CEE510B1D768170F3FFF5E /* GroupManagerView.swift */; };
 		A303CE901664DED4348494BD /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB7F634E85EAB2589E6F041 /* KeychainServiceTests.swift */; };
 		A83BFC0E65269E8E57FE2EF7 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2877312225BA97E41E36D583 /* KeychainService.swift */; };
@@ -65,9 +69,6 @@
 		AC83AF34CB61E8BE2848B4F1 /* LocalSyncProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B8831D66944BBBD80A6E6E /* LocalSyncProtocol.swift */; };
 		ADD9B5E47EF47C5E5D0D23F3 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60CB33C4C83A483A548510B /* TestHelpers.swift */; };
 		AF1648E3FB295CF468ADB9D4 /* MergeContactPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45D3CC62965E709240EF206 /* MergeContactPickerView.swift */; };
-		AA1111111111111111111111 /* ContactTagPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1111111111111111111111 /* ContactTagPickerView.swift */; };
-		AA2222222222222222222222 /* ContactGroupPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB2222222222222222222222 /* ContactGroupPickerView.swift */; };
-		AA3333333333333333333333 /* ContactLocationPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3333333333333333333333 /* ContactLocationPickerView.swift */; };
 		AFC41BDFEE097478165A2D0D /* ContactDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F47D5E806EFA1DA2D5935A /* ContactDetailViewModelTests.swift */; };
 		B164427D17DE85E450AEA4C1 /* ActivityListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC2D7FC775E7A455AA78ABC /* ActivityListView.swift */; };
 		B383DE37B4755963A3BBD2FE /* SmartGroupsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6DFE9C279FB07636F49D37A /* SmartGroupsView.swift */; };
@@ -132,6 +133,7 @@
 /* Begin PBXFileReference section */
 		0C76007980526C6D096CFBD6 /* NetworkGraphViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModel.swift; sourceTree = "<group>"; };
 		0D88B14476C7E4A4574B1FB1 /* LogInteractionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogInteractionView.swift; sourceTree = "<group>"; };
+		17EC8523C36F3E4A2948A392 /* ContactTagPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactTagPickerView.swift; sourceTree = "<group>"; };
 		1837970957580D296D714FDF /* LocationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationListView.swift; sourceTree = "<group>"; };
 		1D046FD999BC660D58C26E32 /* PhotoStorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoStorageService.swift; sourceTree = "<group>"; };
 		1D43574664C82215699065AE /* GroupIconSuggestionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupIconSuggestionView.swift; sourceTree = "<group>"; };
@@ -195,6 +197,7 @@
 		9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModelTests.swift; sourceTree = "<group>"; };
 		950AC9FC1E76731546573DEA /* ReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderService.swift; sourceTree = "<group>"; };
 		970CC06BF6BA7D37D1C593DC /* InteractionLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLogView.swift; sourceTree = "<group>"; };
+		972BC195190AAFA50ABE3DC7 /* ContactGroupPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactGroupPickerView.swift; sourceTree = "<group>"; };
 		98155954680EC712B26CB05D /* ContactFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactFormView.swift; sourceTree = "<group>"; };
 		9AB0EEFC6BF1CA172898A5CC /* SFSymbolSearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFSymbolSearchServiceTests.swift; sourceTree = "<group>"; };
 		9C6BD1DE0B2466EA3DCFB985 /* ClaudeAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAPIService.swift; sourceTree = "<group>"; };
@@ -212,6 +215,7 @@
 		B10282AE3F76E876ADDB3A4A /* ReminderServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderServiceTests.swift; sourceTree = "<group>"; };
 		B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateHelpersTests.swift; sourceTree = "<group>"; };
 		B388096991E8F365A624F046 /* BackupDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupDetailView.swift; sourceTree = "<group>"; };
+		B56B474D15D62192EC7F6305 /* ModelSyncApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSyncApply.swift; sourceTree = "<group>"; };
 		BB300BB5DF41935C07BC4210 /* ActivityFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFormView.swift; sourceTree = "<group>"; };
 		BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPickerView.swift; sourceTree = "<group>"; };
 		BEE4CD8BE91D0E8284B87F31 /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
@@ -219,18 +223,16 @@
 		CC03CDCAD902D26F5F68C651 /* LocationManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManagerView.swift; sourceTree = "<group>"; };
 		CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupMetadata.swift; sourceTree = "<group>"; };
 		D45D3CC62965E709240EF206 /* MergeContactPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergeContactPickerView.swift; sourceTree = "<group>"; };
-		BB1111111111111111111111 /* ContactTagPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactTagPickerView.swift; sourceTree = "<group>"; };
-		BB2222222222222222222222 /* ContactGroupPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactGroupPickerView.swift; sourceTree = "<group>"; };
-		BB3333333333333333333333 /* ContactLocationPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactLocationPickerView.swift; sourceTree = "<group>"; };
 		D73B4693AF749AE8014A6606 /* AuthStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStateTests.swift; sourceTree = "<group>"; };
 		D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServerSyncService.swift; sourceTree = "<group>"; };
-		6EC6050191E6433E91D7A90F /* BonjourBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourBrowser.swift; sourceTree = "<group>"; };
 		D95AA83A5437DFA01312E219 /* ContactModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactModelTests.swift; sourceTree = "<group>"; };
 		DC159C3515CC1B41D178A551 /* ContactSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSyncService.swift; sourceTree = "<group>"; };
 		E45B9468F2B4B009B33B0122 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
 		E60CB33C4C83A483A548510B /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
+		E6331C25944672EB2F32005C /* ContactLocationPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactLocationPickerView.swift; sourceTree = "<group>"; };
 		EA16574DE27E1A8A48DC9564 /* NetworkGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphView.swift; sourceTree = "<group>"; };
 		EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAPIServiceTests.swift; sourceTree = "<group>"; };
+		EBB12E01D4EB1C6E3A68182E /* BonjourBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourBrowser.swift; sourceTree = "<group>"; };
 		ECBCBC491C2BFAA0AABA68B3 /* ContactListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactListViewModelTests.swift; sourceTree = "<group>"; };
 		EF98EBF38277BBA19D0BA8C7 /* TagManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagManagerView.swift; sourceTree = "<group>"; };
 		F00610DA298D9C87714AF36E /* RejectedCalendarEventsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RejectedCalendarEventsView.swift; sourceTree = "<group>"; };
@@ -287,10 +289,10 @@
 				B0BBA6EAAA528870946A9A68 /* AddNoteView.swift */,
 				6A1B74FC65BA5616AB9D302A /* ContactDetailView.swift */,
 				98155954680EC712B26CB05D /* ContactFormView.swift */,
+				972BC195190AAFA50ABE3DC7 /* ContactGroupPickerView.swift */,
 				2A3587C0EB93FB65A5DE6337 /* ContactListView.swift */,
-				BB1111111111111111111111 /* ContactTagPickerView.swift */,
-				BB2222222222222222222222 /* ContactGroupPickerView.swift */,
-				BB3333333333333333333333 /* ContactLocationPickerView.swift */,
+				E6331C25944672EB2F32005C /* ContactLocationPickerView.swift */,
+				17EC8523C36F3E4A2948A392 /* ContactTagPickerView.swift */,
 				D45D3CC62965E709240EF206 /* MergeContactPickerView.swift */,
 				A6DFE9C279FB07636F49D37A /* SmartGroupsView.swift */,
 			);
@@ -335,13 +337,13 @@
 				63C0BE4D5872D0BE63AD0569 /* AuthenticationService.swift */,
 				E45B9468F2B4B009B33B0122 /* BackupService.swift */,
 				FD10DDF37FAF1C8813B6C033 /* BiometricService.swift */,
+				EBB12E01D4EB1C6E3A68182E /* BonjourBrowser.swift */,
 				9C6BD1DE0B2466EA3DCFB985 /* ClaudeAPIService.swift */,
 				67485481A0ED6072989C3A0D /* ContactMergeService.swift */,
 				DC159C3515CC1B41D178A551 /* ContactSyncService.swift */,
 				2382E25FE6BDF339DA44560D /* GoogleCalendarService.swift */,
 				51B78E4C7B87A207BBC1A65A /* IMessageSyncService.swift */,
 				D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */,
-				6EC6050191E6433E91D7A90F /* BonjourBrowser.swift */,
 				4E45E53C6F0C7F7A6808F6EE /* LocalSyncServer.swift */,
 				682862BCC7F0F257DF35CEB8 /* NetworkGraphEngine.swift */,
 				1D046FD999BC660D58C26E32 /* PhotoStorageService.swift */,
@@ -528,6 +530,7 @@
 				C0BF1D07C08681789AF0CC48 /* FeatureGating.swift */,
 				2877312225BA97E41E36D583 /* KeychainService.swift */,
 				61B8831D66944BBBD80A6E6E /* LocalSyncProtocol.swift */,
+				B56B474D15D62192EC7F6305 /* ModelSyncApply.swift */,
 				F49D100318268DC2B37475CA /* SyncTypes.swift */,
 			);
 			path = Utilities;
@@ -639,6 +642,7 @@
 				DC5C013A5E266CB281B39ECE /* BiometricLockView.swift in Sources */,
 				50BD69069FD89739B57C0CC1 /* BiometricService.swift in Sources */,
 				5B25E6A217BDD962CF4A1D7D /* BlackbookApp.swift in Sources */,
+				3D5BA26EDD7B1258E870B1D4 /* BonjourBrowser.swift in Sources */,
 				EC143B5E71184A068145E022 /* CalendarPickerView.swift in Sources */,
 				E23C995575B214F0121D17BB /* ClaudeAPIService.swift in Sources */,
 				DBC956BA2FE9278379FE74AB /* ConfirmEmailView.swift in Sources */,
@@ -647,12 +651,15 @@
 				DDAFD6B9A529CE851DF69694 /* ContactDetailView.swift in Sources */,
 				D686046C1D26C20526E7F2EC /* ContactDetailViewModel.swift in Sources */,
 				B8795D426E8414EDC3028C87 /* ContactFormView.swift in Sources */,
+				712B7AFBCF2FC20D64D203D6 /* ContactGroupPickerView.swift in Sources */,
 				5BFD52271FC1D4063C45F87D /* ContactListView.swift in Sources */,
 				85CAA10ED3DAFA0543157D28 /* ContactListViewModel.swift in Sources */,
+				7FD59E02711302FDE3365206 /* ContactLocationPickerView.swift in Sources */,
 				138F6CF8015FD8C3F5728519 /* ContactMergeService.swift in Sources */,
 				8B2CB978D413E80BD9F38F3D /* ContactRelationship.swift in Sources */,
 				FE2725ADA73D3CD058F2D403 /* ContactSyncApply.swift in Sources */,
 				DB5A2A585D046B17B96EA4E2 /* ContactSyncService.swift in Sources */,
+				90834021AE7B9E22B64F9497 /* ContactTagPickerView.swift in Sources */,
 				9365296C3F60B05F955EAA71 /* ContentView.swift in Sources */,
 				627F00BB1C55B4CD93AD362C /* DashboardView.swift in Sources */,
 				771CFACFB207D0ED960C9E33 /* DashboardViewModel.swift in Sources */,
@@ -672,7 +679,6 @@
 				C386A3D91B842AB5512D4B09 /* InteractionViewModel.swift in Sources */,
 				A83BFC0E65269E8E57FE2EF7 /* KeychainService.swift in Sources */,
 				9A18735D7C1D616279A77B5E /* LocalServerSyncService.swift in Sources */,
-				CB92C975707A4C0F811EDDD9 /* BonjourBrowser.swift in Sources */,
 				AC83AF34CB61E8BE2848B4F1 /* LocalSyncProtocol.swift in Sources */,
 				7EAE471A3C0DEAE6F297474D /* LocalSyncServer.swift in Sources */,
 				480F4AB91090F3D31E17B0D2 /* Location.swift in Sources */,
@@ -683,9 +689,7 @@
 				695359244DF1D6CE13710E37 /* LogInteractionView.swift in Sources */,
 				418089A77A3E793B504C88FB /* LoginView.swift in Sources */,
 				AF1648E3FB295CF468ADB9D4 /* MergeContactPickerView.swift in Sources */,
-				AA1111111111111111111111 /* ContactTagPickerView.swift in Sources */,
-				AA2222222222222222222222 /* ContactGroupPickerView.swift in Sources */,
-				AA3333333333333333333333 /* ContactLocationPickerView.swift in Sources */,
+				3F8A392AE676AD3A604B9EC3 /* ModelSyncApply.swift in Sources */,
 				1F15A9907F62206EA97F4555 /* NetworkGraphEngine.swift in Sources */,
 				264F82AF586E5CA45E98051A /* NetworkGraphView.swift in Sources */,
 				F363626541A0478C9B36D5FC /* NetworkGraphViewModel.swift in Sources */,
@@ -764,7 +768,6 @@
 				DEVELOPMENT_TEAM = 37NR4Z7NT6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Blackbook;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSContactsUsageDescription = "Blackbook needs access to your contacts to help you track and enrich your relationships.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Blackbook uses Face ID to protect your data.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -774,7 +777,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.6;
+				MARKETING_VERSION = 1.1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.blackbookdevelopment.app;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -838,7 +841,6 @@
 				DEVELOPMENT_TEAM = 37NR4Z7NT6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Blackbook;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSContactsUsageDescription = "Blackbook needs access to your contacts to help you track and enrich your relationships.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Blackbook uses Face ID to protect your data.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -848,7 +850,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.6;
+				MARKETING_VERSION = 1.1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.blackbookdevelopment.app;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";

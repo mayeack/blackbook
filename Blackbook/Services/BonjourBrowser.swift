@@ -16,25 +16,13 @@ final class BonjourBrowser {
     private(set) var serverEndpoint: String?
 
     /// Configures the sync server credentials.
-    /// First tries the public URL, then falls back to Bonjour LAN discovery.
+    /// Always re-derives the password from the current email to stay in sync.
     func configure() {
         guard let email = UserDefaults.standard.string(forKey: "auth.userEmail"), !email.isEmpty else {
             logger.info("No user email — skipping server config")
             return
         }
 
-        // Check if already configured
-        if let existing = KeychainService.retrieve(
-            service: AppConstants.LocalSync.keychainServiceName,
-            account: AppConstants.LocalSync.keychainServerURLAccount
-        ), !existing.isEmpty {
-            serverEndpoint = existing
-            isConfigured = true
-            logger.info("Sync server already configured: \(existing)")
-            return
-        }
-
-        // Auto-configure with the public Cloudflare Tunnel URL
         let url = AppConstants.LocalSync.serverURL
         let password = BackupService.derivePassword(from: email)
 
@@ -51,7 +39,7 @@ final class BonjourBrowser {
 
         serverEndpoint = url
         isConfigured = true
-        logger.info("Auto-configured sync server: \(url)")
+        logger.info("Configured sync server: \(url) for \(email)")
     }
 }
 #endif

@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var syncService = ContactSyncService()
     #if os(iOS)
     @State private var bonjourBrowser = BonjourBrowser()
+    @State private var serverSyncService = LocalServerSyncService()
     #endif
 
     var body: some View {
@@ -26,6 +27,11 @@ struct ContentView: View {
         .onAppear {
             syncService.startAutoSync(with: modelContext)
             bonjourBrowser.configure()
+            serverSyncService.configure(with: modelContext)
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                await serverSyncService.performFullSync()
+            }
         }
         #else
         NavigationSplitView {
