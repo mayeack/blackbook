@@ -9,7 +9,7 @@ private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category:
 /// When the running version doesn't match the value stored in UserDefaults the
 /// existing store is deleted before SwiftData tries to open it, preventing a
 /// fatal crash inside `DefaultStore.fulfill`.
-private let currentSchemaVersion = 3
+private let currentSchemaVersion = BackupService.currentSchemaVersion
 
 @main
 struct BlackbookApp: App {
@@ -110,14 +110,10 @@ struct BlackbookApp: App {
                 cloudKitDatabase: .none
             )
             let container = try ModelContainer(for: schema, configurations: [config])
-            // Materialize a real object (not just count) to catch schema mismatches
-            // that only surface during property access.
+            // Validate the store is readable by running a fetch.
             var descriptor = FetchDescriptor<Contact>()
             descriptor.fetchLimit = 1
-            let probe = try container.mainContext.fetch(descriptor)
-            if let contact = probe.first {
-                _ = contact.firstName
-            }
+            _ = try container.mainContext.fetch(descriptor)
             logger.info("SwiftData local store ready")
             return container
         } catch {
