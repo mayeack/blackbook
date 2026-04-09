@@ -9,7 +9,7 @@ final class Note {
     var content: String
     var category: NoteCategory?
     var createdAt: Date
-    var updatedAt: Date
+    var updatedAt: Date = Date()
 
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?

@@ -22,7 +22,7 @@ final class Interaction {
         set { directionRaw = newValue?.rawValue }
     }
 
-    var updatedAt: Date
+    var updatedAt: Date = Date()
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 

@@ -611,9 +611,10 @@ final class BackupService {
 
         // Copy backup store files
         let backupStore = backupDir.appendingPathComponent("default.store")
-        if fm.fileExists(atPath: backupStore.path) {
-            try fm.copyItem(at: backupStore, to: storeDir.appending(path: "default.store"))
+        guard fm.fileExists(atPath: backupStore.path) else {
+            throw BackupError.restoreFailed("Backup does not contain a database file")
         }
+        try fm.copyItem(at: backupStore, to: storeDir.appending(path: "default.store"))
         for suffix in ["-wal", "-shm"] {
             let src = backupDir.appendingPathComponent("default.store\(suffix)")
             if fm.fileExists(atPath: src.path) {
@@ -624,20 +625,28 @@ final class BackupService {
         // Checkpoint the restored WAL into the main store file so SwiftData
         // opens a consistent database without relying on WAL replay.
         // No other process holds a connection at this point, so TRUNCATE is safe.
+        var walCheckpointSucceeded = false
         let restoredStorePath = storeDir.appending(path: "default.store").path
         var db: OpaquePointer?
         if sqlite3_open_v2(restoredStorePath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK {
-            sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
+            let rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
+            if rc == SQLITE_OK {
+                walCheckpointSucceeded = true
+                logger.info("Post-restore WAL checkpoint completed")
+            } else {
+                logger.warning("WAL checkpoint returned \(rc) — keeping WAL for SwiftData replay")
+            }
             sqlite3_close(db)
-            logger.info("Post-restore WAL checkpoint completed")
         } else {
             sqlite3_close(db)
             logger.warning("Could not open restored store for WAL checkpoint")
         }
-        // Remove now-empty WAL and SHM files
-        for suffix in ["-wal", "-shm"] {
-            let fileURL = storeDir.appending(path: "default.store\(suffix)")
-            try? fm.removeItem(at: fileURL)
+        // Only remove WAL/SHM if checkpoint succeeded; otherwise let SwiftData replay them
+        if walCheckpointSucceeded {
+            for suffix in ["-wal", "-shm"] {
+                let fileURL = storeDir.appending(path: "default.store\(suffix)")
+                try? fm.removeItem(at: fileURL)
+            }
         }
 
         // Restore external storage support directory (SwiftData @Attribute(.externalStorage))

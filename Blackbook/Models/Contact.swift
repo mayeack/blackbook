@@ -33,7 +33,7 @@ final class Contact {
     var isHidden: Bool
     var isMergedAway: Bool
     var createdAt: Date
-    var updatedAt: Date
+    var updatedAt: Date = Date()
 
     // Sync tracking
     var syncStatus: String = SyncStatus.pending.rawValue
