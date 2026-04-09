@@ -16,7 +16,7 @@ final class Activity {
     var contacts: [Contact]
     var groups: [Group]
 
-    var updatedAt: Date
+    var updatedAt: Date = Date()
     var syncStatus: String = SyncStatus.pending.rawValue
     var lastSyncedAt: Date?
 

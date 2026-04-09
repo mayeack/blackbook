@@ -27,6 +27,8 @@ struct BlackbookApp: App {
                 logger.info("Database restored from backup: \(backupDir.lastPathComponent)")
             } catch {
                 logger.error("Restore failed: \(error.localizedDescription)")
+                // Remove sentinel so a failed restore doesn't retry on every launch
+                try? FileManager.default.removeItem(at: BackupService.sentinelURL)
             }
         }
 
