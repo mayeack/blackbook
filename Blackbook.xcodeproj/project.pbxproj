@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		00472C80538C99F1495159EF /* RemindersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D6B0E21BC4E51F37008592 /* RemindersView.swift */; };
 		0143CB904AAF1E6B53CCBAD1 /* FeatureGatingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DCA116B785721C8942FD325 /* FeatureGatingTests.swift */; };
+		03915555188215A47C2FFBAF /* DuplicateScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED64DF1DD19F6ADC3991B97A /* DuplicateScanView.swift */; };
 		047D658F5CE553E21B993DF3 /* InteractionLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970CC06BF6BA7D37D1C593DC /* InteractionLogView.swift */; };
 		09159275BC5943BE485081DD /* GoogleCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2382E25FE6BDF339DA44560D /* GoogleCalendarService.swift */; };
 		138F6CF8015FD8C3F5728519 /* ContactMergeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67485481A0ED6072989C3A0D /* ContactMergeService.swift */; };
@@ -34,6 +35,7 @@
 		4C3D1916E136273E51B765F7 /* ActivityModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A957B9FB7B917D47692C060D /* ActivityModelTests.swift */; };
 		507574451EDCC85EEB536E60 /* ServerStatusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9D910910FBACB1A4CF56B3 /* ServerStatusModel.swift */; };
 		50BD69069FD89739B57C0CC1 /* BiometricService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD10DDF37FAF1C8813B6C033 /* BiometricService.swift */; };
+		5234FEAA3AF2A4130D84AFAB /* UserActionLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CA28E6E954153EB857D2D17 /* UserActionLogger.swift */; };
 		524351AEBFA3CE90BB4A75C7 /* SignUpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E2950E1BC23195EB252E6C1 /* SignUpView.swift */; };
 		55E07EAEBFC82392133172C8 /* DashboardViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8211A08153FF7DE2A707EB06 /* DashboardViewModelTests.swift */; };
 		56A7A484B95A560F451576D7 /* Note.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DEB9EAD5765D5804DC385CA /* Note.swift */; };
@@ -45,6 +47,7 @@
 		63AED38B279341EDDCFAA16A /* GroupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F85542EF75DA29ECB0FBC2 /* GroupDetailView.swift */; };
 		65B286D2AE249F7934A9E5BB /* ReminderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 950AC9FC1E76731546573DEA /* ReminderService.swift */; };
 		6688C7483298E8104B4AB117 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E45B9468F2B4B009B33B0122 /* BackupService.swift */; };
+		66BE88AB7FD6619EFFB449D7 /* ContactDeduplicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C395757BFF2A510337F73D5 /* ContactDeduplicationService.swift */; };
 		695359244DF1D6CE13710E37 /* LogInteractionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D88B14476C7E4A4574B1FB1 /* LogInteractionView.swift */; };
 		69C167B283DF373F9AADEE03 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B4686D34DCC894416E2DB8D /* SettingsView.swift */; };
 		69E8237701B2BDD1763EEE1F /* ContactModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D95AA83A5437DFA01312E219 /* ContactModelTests.swift */; };
@@ -172,6 +175,8 @@
 		367B4A2B6BD57C86106A9103 /* InteractionViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionViewModelTests.swift; sourceTree = "<group>"; };
 		367F11DDCEA44032C3674833 /* Reminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reminder.swift; sourceTree = "<group>"; };
 		3744DE7F4CFD2EF1B4D4067B /* Blackbook.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Blackbook.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3C395757BFF2A510337F73D5 /* ContactDeduplicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDeduplicationService.swift; sourceTree = "<group>"; };
+		3CA28E6E954153EB857D2D17 /* UserActionLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserActionLogger.swift; sourceTree = "<group>"; };
 		4353ABA45B9630F4CF7DBF0C /* ReminderModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderModelTests.swift; sourceTree = "<group>"; };
 		450B014084ADF659A27C3F58 /* SFSymbolSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFSymbolSearchService.swift; sourceTree = "<group>"; };
 		45D6B0E21BC4E51F37008592 /* RemindersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersView.swift; sourceTree = "<group>"; };
@@ -257,6 +262,7 @@
 		EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAPIServiceTests.swift; sourceTree = "<group>"; };
 		EBB12E01D4EB1C6E3A68182E /* BonjourBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourBrowser.swift; sourceTree = "<group>"; };
 		ECBCBC491C2BFAA0AABA68B3 /* ContactListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactListViewModelTests.swift; sourceTree = "<group>"; };
+		ED64DF1DD19F6ADC3991B97A /* DuplicateScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateScanView.swift; sourceTree = "<group>"; };
 		EF98EBF38277BBA19D0BA8C7 /* TagManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagManagerView.swift; sourceTree = "<group>"; };
 		F00610DA298D9C87714AF36E /* RejectedCalendarEventsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RejectedCalendarEventsView.swift; sourceTree = "<group>"; };
 		F3DBA07B5E3D5EAA2BFA3446 /* BlackbookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlackbookApp.swift; sourceTree = "<group>"; };
@@ -385,6 +391,7 @@
 				FD10DDF37FAF1C8813B6C033 /* BiometricService.swift */,
 				EBB12E01D4EB1C6E3A68182E /* BonjourBrowser.swift */,
 				9C6BD1DE0B2466EA3DCFB985 /* ClaudeAPIService.swift */,
+				3C395757BFF2A510337F73D5 /* ContactDeduplicationService.swift */,
 				67485481A0ED6072989C3A0D /* ContactMergeService.swift */,
 				DC159C3515CC1B41D178A551 /* ContactSyncService.swift */,
 				2382E25FE6BDF339DA44560D /* GoogleCalendarService.swift */,
@@ -398,6 +405,7 @@
 				450B014084ADF659A27C3F58 /* SFSymbolSearchService.swift */,
 				3389D37BC55476F3FB56F529 /* SocialEnrichmentService.swift */,
 				89AD54534AC73AD4F065D4D0 /* SubscriptionManager.swift */,
+				3CA28E6E954153EB857D2D17 /* UserActionLogger.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -516,6 +524,7 @@
 				B388096991E8F365A624F046 /* BackupDetailView.swift */,
 				8B1C638B4A31E4A23207C6E0 /* BackupRestoreView.swift */,
 				BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */,
+				ED64DF1DD19F6ADC3991B97A /* DuplicateScanView.swift */,
 				1D43574664C82215699065AE /* GroupIconSuggestionView.swift */,
 				A8CEE510B1D768170F3FFF5E /* GroupManagerView.swift */,
 				8C76958AF5D1BEA2F22D389A /* IconAndColorPickers.swift */,
@@ -740,6 +749,7 @@
 				DBC956BA2FE9278379FE74AB /* ConfirmEmailView.swift in Sources */,
 				DC147BAC318DBB92A21F1981 /* Constants.swift in Sources */,
 				F90B2184862AC79EBA241556 /* Contact.swift in Sources */,
+				66BE88AB7FD6619EFFB449D7 /* ContactDeduplicationService.swift in Sources */,
 				DDAFD6B9A529CE851DF69694 /* ContactDetailView.swift in Sources */,
 				D686046C1D26C20526E7F2EC /* ContactDetailViewModel.swift in Sources */,
 				B8795D426E8414EDC3028C87 /* ContactFormView.swift in Sources */,
@@ -756,6 +766,7 @@
 				627F00BB1C55B4CD93AD362C /* DashboardView.swift in Sources */,
 				771CFACFB207D0ED960C9E33 /* DashboardViewModel.swift in Sources */,
 				6EBB34A3DDBE871B6B3BF70E /* DateHelpers.swift in Sources */,
+				03915555188215A47C2FFBAF /* DuplicateScanView.swift in Sources */,
 				1D5E32E9EE0B56EA56D2D7EC /* FeatureGating.swift in Sources */,
 				28D30061B05714E65E0FAA2C /* ForgotPasswordView.swift in Sources */,
 				09159275BC5943BE485081DD /* GoogleCalendarService.swift in Sources */,
@@ -805,6 +816,7 @@
 				CC26CF0556D6D39776B42471 /* TagDetailView.swift in Sources */,
 				AADE6DA4DB134D860275385E /* TagListView.swift in Sources */,
 				C74893AB18E667372442D564 /* TagManagerView.swift in Sources */,
+				5234FEAA3AF2A4130D84AFAB /* UserActionLogger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -144,6 +144,7 @@ struct ContactFormView: View {
     }
 
     private func save() {
+        let isNew = contact == nil
         let t = contact ?? { let c = Contact(firstName: firstName, lastName: lastName); modelContext.insert(c); return c }()
         t.firstName = firstName; t.lastName = lastName
         t.company = company.isEmpty ? nil : company; t.jobTitle = jobTitle.isEmpty ? nil : jobTitle
@@ -161,6 +162,13 @@ struct ContactFormView: View {
         t.groups = allGroups.filter { selectedGroupIds.contains($0.id) }
         t.locations = allLocations.filter { selectedLocationIds.contains($0.id) }
         t.metVia = allContacts.first { $0.id == metViaContactId }
-        try? modelContext.save(); dismiss()
+        try? modelContext.save()
+        Log.action(isNew ? "contact.create" : "contact.edit", metadata: [
+            "contactId": t.id.uuidString,
+            "displayName": t.displayName,
+            "emails": t.emails.joined(separator: ","),
+            "phones": t.phones.joined(separator: ",")
+        ], success: true)
+        dismiss()
     }
 }

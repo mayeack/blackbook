@@ -240,15 +240,104 @@ final class BackupServer: @unchecked Sendable {
             return (401, [:], "Unauthorized".data(using: .utf8))
         }
 
-        guard request.path.hasPrefix("/backups") else {
-            return (404, [:], "Not Found".data(using: .utf8))
-        }
-
         guard let email = request.headers["x-user-email"], !email.isEmpty else {
             return (400, [:], "Missing X-User-Email header".data(using: .utf8))
         }
 
+        if request.path.hasPrefix("/logs") {
+            return handleLogsRoute(request: request, userEmail: email)
+        }
+
+        guard request.path.hasPrefix("/backups") else {
+            return (404, [:], "Not Found".data(using: .utf8))
+        }
+
         return handleBackupRoute(request: request, userEmail: email)
+    }
+
+    // MARK: - Logs Storage
+
+    private func userLogsDir(_ email: String) -> URL {
+        let dir = userBackupDir(email).appendingPathComponent("Logs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func isValidLogFilename(_ name: String) -> Bool {
+        // Daily: actions-YYYY-MM-DD.jsonl  (28 chars total)
+        // Rotated: actions-YYYY-MM-DD-HHmmss.jsonl  (35 chars total)
+        guard name.hasPrefix("actions-"), name.hasSuffix(".jsonl") else { return false }
+        guard !name.contains(".."), !name.contains("/") else { return false }
+        let stem = String(name.dropFirst("actions-".count).dropLast(".jsonl".count))
+        return stem.count == 10 || stem.count == 17
+    }
+
+    private func handleLogsRoute(request: HTTPRequest, userEmail: String) -> (status: Int, headers: [String: String], body: Data?) {
+        let path = request.path
+        let segments = path.split(separator: "/").map(String.init)
+        let fm = FileManager.default
+
+        // GET /logs — list all log files for user
+        if request.method == "GET" && segments.count == 1 {
+            let dir = userLogsDir(userEmail)
+            guard let contents = try? fm.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]) else {
+                return (200, ["Content-Type": "application/json"], "[]".data(using: .utf8))
+            }
+            var entries: [[String: Any]] = []
+            for url in contents where !url.hasDirectoryPath {
+                let name = url.lastPathComponent
+                guard name.hasSuffix(".jsonl") else { continue }
+                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+                let size = values?.fileSize ?? 0
+                let modified = values?.contentModificationDate ?? Date()
+                let formatter = ISO8601DateFormatter()
+                entries.append([
+                    "name": name,
+                    "size": size,
+                    "modified": formatter.string(from: modified)
+                ])
+            }
+            entries.sort { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
+            guard let json = try? JSONSerialization.data(withJSONObject: entries) else {
+                return (500, [:], nil)
+            }
+            return (200, ["Content-Type": "application/json"], json)
+        }
+
+        // POST /logs/{filename} — overwrite log file
+        if request.method == "POST" && segments.count == 2 {
+            let filename = segments[1]
+            guard isValidLogFilename(filename) else {
+                return (400, [:], "Invalid log filename".data(using: .utf8))
+            }
+            guard let body = request.body else {
+                return (400, [:], "Missing body".data(using: .utf8))
+            }
+            let fileURL = userLogsDir(userEmail).appendingPathComponent(filename)
+            do {
+                try body.write(to: fileURL)
+                logger.info("Saved log file \(filename) for \(userEmail) (\(body.count) bytes)")
+                return (200, [:], nil)
+            } catch {
+                return (500, [:], "Write failed".data(using: .utf8))
+            }
+        }
+
+        // GET /logs/{filename} — download log file
+        if request.method == "GET" && segments.count == 2 {
+            let filename = segments[1]
+            guard isValidLogFilename(filename) else {
+                return (400, [:], "Invalid log filename".data(using: .utf8))
+            }
+            let fileURL = userLogsDir(userEmail).appendingPathComponent(filename)
+            guard let data = try? Data(contentsOf: fileURL) else {
+                return (404, [:], "File not found".data(using: .utf8))
+            }
+            return (200, ["Content-Type": "application/x-ndjson"], data)
+        }
+
+        return (404, [:], "Not Found".data(using: .utf8))
     }
 
     // MARK: - Backup Storage
