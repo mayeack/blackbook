@@ -5,6 +5,8 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var selectedTab: AppTab = .dashboard
     @State private var syncService = ContactSyncService()
+    @State private var dedupeService = ContactDeduplicationService()
+    @State private var mergeService = ContactMergeService()
     #if os(iOS)
     @State private var bonjourBrowser = BonjourBrowser()
     @State private var serverSyncService = LocalServerSyncService()
@@ -28,9 +30,11 @@ struct ContentView: View {
             syncService.startAutoSync(with: modelContext)
             bonjourBrowser.configure()
             serverSyncService.configure(with: modelContext)
+            runDedupAfterRestoreIfNeeded()
             Task {
                 try? await Task.sleep(for: .seconds(1))
                 await serverSyncService.performFullSync()
+                await UserActionLogger.shared.uploadPending()
             }
         }
         #else
@@ -49,8 +53,27 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 500)
         .onAppear {
             syncService.startAutoSync(with: modelContext)
+            runDedupAfterRestoreIfNeeded()
+            Task { await UserActionLogger.shared.uploadPending() }
         }
         #endif
+    }
+
+    private func runDedupAfterRestoreIfNeeded() {
+        let key = "dedup.runAfterNextLaunch"
+        guard UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(false, forKey: key)
+        let context = modelContext
+        let dedup = dedupeService
+        let merger = mergeService
+        Task.detached {
+            do {
+                let merged = try dedup.mergeAll(using: merger, in: context)
+                Log.action("contacts.dedupe.afterRestore", metadata: ["mergedCount": "\(merged)"], success: true)
+            } catch {
+                Log.action("contacts.dedupe.afterRestore", success: false, error: error.localizedDescription)
+            }
+        }
     }
 
     @ViewBuilder

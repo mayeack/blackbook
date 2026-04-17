@@ -27,6 +27,14 @@ final class ContactMergeService {
 
         try context.save()
         logger.info("Merged '\(secondary.displayName)' into '\(primary.displayName)'")
+        Log.action("contact.merge", metadata: [
+            "primaryId": primary.id.uuidString,
+            "primaryName": primary.displayName,
+            "secondaryId": secondary.id.uuidString,
+            "secondaryName": secondary.displayName,
+            "primaryEmails": primary.emails.joined(separator: ","),
+            "primaryPhones": primary.phones.joined(separator: ",")
+        ], success: true)
     }
 
     // MARK: - Scalar Fields

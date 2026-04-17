@@ -70,8 +70,10 @@ final class AuthenticationService {
     func checkCurrentSession() async {
         if let email = UserDefaults.standard.string(forKey: "auth.userEmail"), !email.isEmpty {
             self.userEmail = email
+            UserActionLogger.shared.setUserEmail(email)
             authState = .signedIn(userId: "local")
             logger.info("Restored local session for \(email)")
+            Log.action("auth.session.restored", metadata: ["email": email])
         } else {
             authState = .signedOut
             logger.info("No previous session — showing login")
@@ -88,8 +90,10 @@ final class AuthenticationService {
 
         self.userEmail = email
         UserDefaults.standard.set(email, forKey: "auth.userEmail")
+        UserActionLogger.shared.setUserEmail(email)
         authState = .signedIn(userId: "local")
         logger.info("Local sign-in succeeded")
+        Log.action("auth.signIn", metadata: ["email": email, "method": "password"], success: true)
     }
 
     // MARK: - Email/Password Sign Up
@@ -102,8 +106,10 @@ final class AuthenticationService {
 
         self.userEmail = email
         UserDefaults.standard.set(email, forKey: "auth.userEmail")
+        UserActionLogger.shared.setUserEmail(email)
         authState = .signedIn(userId: "local")
         logger.info("Local sign-up succeeded")
+        Log.action("auth.signUp", metadata: ["email": email], success: true)
     }
 
     // MARK: - Confirm Sign Up
@@ -156,8 +162,10 @@ final class AuthenticationService {
         let email = "apple-user"
         self.userEmail = email
         UserDefaults.standard.set(email, forKey: "auth.userEmail")
+        UserActionLogger.shared.setUserEmail(email)
         authState = .signedIn(userId: "local")
         logger.info("Apple sign-in succeeded (local mode)")
+        Log.action("auth.signIn", metadata: ["email": email, "method": "apple"], success: true)
     }
 
     // MARK: - Sign Out
@@ -168,8 +176,12 @@ final class AuthenticationService {
         self.error = nil
         defer { isProcessing = false }
 
+        let priorEmail = self.userEmail
+        Log.action("auth.signOut", metadata: ["email": priorEmail ?? ""])
+        await UserActionLogger.shared.uploadPending()
         self.userEmail = nil
         UserDefaults.standard.removeObject(forKey: "auth.userEmail")
+        UserActionLogger.shared.setUserEmail(nil)
         authState = .signedOut
         logger.info("Sign-out complete")
     }

@@ -20,17 +20,27 @@ struct BlackbookApp: App {
     #endif
 
     init() {
+        UserActionLogger.shared.setUserEmail(UserDefaults.standard.string(forKey: "auth.userEmail"))
+
         // Check for a pending restore before opening the store
         if let backupDir = BackupService.checkPendingRestore() {
             do {
                 try BackupService.performRestore(from: backupDir)
                 logger.info("Database restored from backup: \(backupDir.lastPathComponent)")
+                Log.action("backup.restore.complete", metadata: ["backupDir": backupDir.lastPathComponent], success: true)
+                UserDefaults.standard.set(true, forKey: "dedup.runAfterNextLaunch")
             } catch {
                 logger.error("Restore failed: \(error.localizedDescription)")
+                Log.action("backup.restore.complete", success: false, error: error.localizedDescription)
                 // Remove sentinel so a failed restore doesn't retry on every launch
                 try? FileManager.default.removeItem(at: BackupService.sentinelURL)
             }
         }
+
+        Log.action("app.launch", metadata: [
+            "platform": Self.platformName,
+            "version": (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
+        ])
 
         let schema = Schema([
             Contact.self,
@@ -64,6 +74,16 @@ struct BlackbookApp: App {
                 #endif
         }
         .modelContainer(modelContainer)
+    }
+
+    private static var platformName: String {
+        #if os(iOS)
+        return "iOS"
+        #elseif os(macOS)
+        return "macOS"
+        #else
+        return "unknown"
+        #endif
     }
 
     /// Deletes the on-disk store when the persisted schema version doesn't match

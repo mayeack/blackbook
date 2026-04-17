@@ -69,6 +69,7 @@ struct SettingsView: View {
             hiddenContactsSection
             securitySection
             dataSection
+            maintenanceSection
             aiSection
             googleCalendarSection
             scoringSection
@@ -279,6 +280,27 @@ struct SettingsView: View {
             }
         } header: {
             Text("Data")
+        }
+    }
+
+    // MARK: Maintenance
+
+    private var maintenanceSection: some View {
+        Section {
+            NavigationLink {
+                DuplicateScanView()
+            } label: {
+                SettingsRow(
+                    icon: "person.2.slash",
+                    iconColor: .orange,
+                    title: "Find & Merge Duplicate Contacts",
+                    subtitle: "Cleans up duplicates from imports or restores"
+                ) {
+                    EmptyView()
+                }
+            }
+        } header: {
+            Text("Maintenance")
         }
     }
 

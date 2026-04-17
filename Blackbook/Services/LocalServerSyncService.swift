@@ -71,22 +71,46 @@ final class LocalServerSyncService {
         guard let modelContext, !isSyncing else { return }
         guard let baseURL, let password, let url = URL(string: baseURL), !baseURL.isEmpty else {
             syncError = "Sync server not configured. Add server URL and password in Settings."
+            Log.action("sync.local", success: false, error: "server not configured")
             return
         }
         isSyncing = true
         syncError = nil
         defer { isSyncing = false }
 
+        let started = Date()
+        let pushedCount = pushPendingCount(context: modelContext)
+        Log.action("sync.local.start", metadata: ["pushPending": "\(pushedCount)"])
         do {
             try await pushLocalChanges(context: modelContext, baseURL: url, password: password)
             try await pullRemoteChanges(context: modelContext, baseURL: url, password: password)
             lastSyncDate = Date()
             saveLastSyncDate()
             logger.info("Local sync completed")
+            let durationMs = Int(Date().timeIntervalSince(started) * 1000)
+            Log.action("sync.local", metadata: ["pushed": "\(pushedCount)"], durationMs: durationMs, success: true)
         } catch {
             syncError = error.localizedDescription
             logger.error("Local sync failed: \(error.localizedDescription)")
+            Log.action("sync.local", success: false, error: error.localizedDescription)
         }
+        await UserActionLogger.shared.uploadPending()
+    }
+
+    private func pushPendingCount(context: ModelContext) -> Int {
+        let synced = SyncStatus.synced.rawValue
+        let counts = [
+            (try? context.fetchCount(FetchDescriptor<Tag>(predicate: #Predicate<Tag> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<Group>(predicate: #Predicate<Group> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<Location>(predicate: #Predicate<Location> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<Activity>(predicate: #Predicate<Activity> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<Contact>(predicate: #Predicate<Contact> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<Interaction>(predicate: #Predicate<Interaction> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<Note>(predicate: #Predicate<Note> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<Reminder>(predicate: #Predicate<Reminder> { $0.syncStatus != synced }))) ?? 0,
+            (try? context.fetchCount(FetchDescriptor<ContactRelationship>(predicate: #Predicate<ContactRelationship> { $0.syncStatus != synced }))) ?? 0
+        ]
+        return counts.reduce(0, +)
     }
 
     private func pushLocalChanges(context: ModelContext, baseURL: URL, password: String) async throws {

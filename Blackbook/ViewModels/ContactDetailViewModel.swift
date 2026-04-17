@@ -31,7 +31,17 @@ final class ContactDetailViewModel {
 
     /// Permanently deletes the contact from the model context.
     func deleteContact(_ contact: Contact, context: ModelContext) {
+        let id = contact.id.uuidString
+        let displayName = contact.displayName
+        let emails = contact.emails.joined(separator: ",")
+        let phones = contact.phones.joined(separator: ",")
         context.delete(contact); try? context.save()
+        Log.action("contact.delete", metadata: [
+            "contactId": id,
+            "displayName": displayName,
+            "emails": emails,
+            "phones": phones
+        ], success: true)
     }
 }
 

@@ -143,10 +143,17 @@ final class BackupService {
                 Task { await uploadBackupToServer(metadata: metadata) }
             }
 
+            Log.action("backup.create", metadata: [
+                "directory": dirName,
+                "type": "\(type)",
+                "sizeBytes": "\(size)",
+                "label": label ?? ""
+            ], success: true)
             return metadata
         } catch {
             lastError = error.localizedDescription
             logger.error("Backup creation failed: \(error.localizedDescription)")
+            Log.action("backup.create", success: false, error: error.localizedDescription)
             return nil
         }
     }
@@ -190,9 +197,12 @@ final class BackupService {
             try Self.fm.removeItem(at: dir)
             loadBackups()
             logger.info("Backup deleted: \(backup.directoryName)")
+            Log.action("backup.delete", metadata: ["directory": backup.directoryName], success: true)
         } catch {
             lastError = error.localizedDescription
             logger.error("Failed to delete backup: \(error.localizedDescription)")
+            Log.action("backup.delete", metadata: ["directory": backup.directoryName],
+                       success: false, error: error.localizedDescription)
         }
     }
 
@@ -243,10 +253,15 @@ final class BackupService {
             try Self.fm.createDirectory(at: Self.backupsDirectory, withIntermediateDirectories: true)
             try backup.directoryName.write(to: Self.sentinelURL, atomically: true, encoding: .utf8)
             logger.info("Restore sentinel written for: \(backup.directoryName)")
+            Log.action("backup.restore.prepare", metadata: [
+                "directory": backup.directoryName,
+                "label": backup.label ?? ""
+            ], success: true)
             return true
         } catch {
             lastError = "Failed to write restore sentinel: \(error.localizedDescription)"
             logger.error("Sentinel write failed: \(error.localizedDescription)")
+            Log.action("backup.restore.prepare", success: false, error: error.localizedDescription)
             return false
         }
     }
@@ -295,7 +310,7 @@ final class BackupService {
         #endif
     }
 
-    private static func sanitizeEmail(_ email: String) -> String {
+    static func sanitizeEmail(_ email: String) -> String {
         email.replacingOccurrences(of: "@", with: "_at_")
             .replacingOccurrences(of: ".", with: "_")
     }
@@ -501,8 +516,14 @@ final class BackupService {
             _ = try await makeServerRequest(path: metaPath, method: "POST", body: finalData)
             uploadProgress = 1.0
             logger.info("Backup uploaded to server: \(metadata.directoryName)")
+            Log.action("backup.upload", metadata: [
+                "directory": metadata.directoryName,
+                "fileCount": "\(files.count)"
+            ], success: true)
         } catch {
             logger.error("Backup upload failed: \(error.localizedDescription)")
+            Log.action("backup.upload", metadata: ["directory": metadata.directoryName],
+                       success: false, error: error.localizedDescription)
         }
     }
 
@@ -563,9 +584,15 @@ final class BackupService {
 
             downloadProgress = 1.0
             loadBackups()
+            Log.action("backup.download", metadata: [
+                "directory": metadata.directoryName,
+                "fileCount": "\(files.count)"
+            ], success: true)
             return true
         } catch {
             lastError = "Download failed: \(error.localizedDescription)"
+            Log.action("backup.download", metadata: ["directory": metadata.directoryName],
+                       success: false, error: error.localizedDescription)
             return false
         }
     }
