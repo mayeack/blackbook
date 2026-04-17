@@ -279,7 +279,7 @@ final class ContactSyncService {
                                    phoneIndex: [String: Contact],
                                    liveIdentifiers: Set<String>) -> Contact? {
         let key = Self.nameKey(first: cn.givenName, last: cn.familyName)
-        var byName: [Contact] = nameIndex[key] ?? []
+        let byName: [Contact] = nameIndex[key] ?? []
 
         // Scan emails / phones for direct hits.
         var byEmailOrPhone: [Contact] = []

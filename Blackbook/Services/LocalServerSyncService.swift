@@ -99,18 +99,26 @@ final class LocalServerSyncService {
 
     private func pushPendingCount(context: ModelContext) -> Int {
         let synced = SyncStatus.synced.rawValue
-        let counts = [
-            (try? context.fetchCount(FetchDescriptor<Tag>(predicate: #Predicate<Tag> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<Group>(predicate: #Predicate<Group> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<Location>(predicate: #Predicate<Location> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<Activity>(predicate: #Predicate<Activity> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<Contact>(predicate: #Predicate<Contact> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<Interaction>(predicate: #Predicate<Interaction> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<Note>(predicate: #Predicate<Note> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<Reminder>(predicate: #Predicate<Reminder> { $0.syncStatus != synced }))) ?? 0,
-            (try? context.fetchCount(FetchDescriptor<ContactRelationship>(predicate: #Predicate<ContactRelationship> { $0.syncStatus != synced }))) ?? 0
-        ]
-        return counts.reduce(0, +)
+        var total = 0
+        let tagDescriptor = FetchDescriptor<Tag>(predicate: #Predicate<Tag> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(tagDescriptor)) ?? 0
+        let groupDescriptor = FetchDescriptor<Group>(predicate: #Predicate<Group> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(groupDescriptor)) ?? 0
+        let locationDescriptor = FetchDescriptor<Location>(predicate: #Predicate<Location> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(locationDescriptor)) ?? 0
+        let activityDescriptor = FetchDescriptor<Activity>(predicate: #Predicate<Activity> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(activityDescriptor)) ?? 0
+        let contactDescriptor = FetchDescriptor<Contact>(predicate: #Predicate<Contact> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(contactDescriptor)) ?? 0
+        let interactionDescriptor = FetchDescriptor<Interaction>(predicate: #Predicate<Interaction> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(interactionDescriptor)) ?? 0
+        let noteDescriptor = FetchDescriptor<Note>(predicate: #Predicate<Note> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(noteDescriptor)) ?? 0
+        let reminderDescriptor = FetchDescriptor<Reminder>(predicate: #Predicate<Reminder> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(reminderDescriptor)) ?? 0
+        let relationshipDescriptor = FetchDescriptor<ContactRelationship>(predicate: #Predicate<ContactRelationship> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(relationshipDescriptor)) ?? 0
+        return total
     }
 
     private func pushLocalChanges(context: ModelContext, baseURL: URL, password: String) async throws {
