@@ -66,7 +66,7 @@ struct ContentView: View {
         let context = modelContext
         let dedup = dedupeService
         let merger = mergeService
-        Task.detached {
+        Task { @MainActor in
             do {
                 let merged = try dedup.mergeAll(using: merger, in: context)
                 Log.action("contacts.dedupe.afterRestore", metadata: ["mergedCount": "\(merged)"], success: true)
