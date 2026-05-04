@@ -78,20 +78,14 @@ struct DuplicateScanView: View {
         let context = modelContext
         let dedup = dedupeService
         let merger = mergeService
-        Task.detached {
+        Task { @MainActor in
+            defer { isWorking = false }
             do {
-                let groups = try dedup.findGroups(in: context)
                 let merged = try dedup.mergeAll(using: merger, in: context)
-                await MainActor.run {
-                    lastResult = Result(groupCount: groups.count, mergedCount: merged)
-                    isWorking = false
-                }
+                lastResult = Result(groupCount: dedup.lastGroupCount, mergedCount: merged)
                 await UserActionLogger.shared.uploadPending()
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isWorking = false
-                }
+                errorMessage = error.localizedDescription
             }
         }
     }
