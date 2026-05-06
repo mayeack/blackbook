@@ -118,6 +118,7 @@
 		E331D0D1AF87D4E1FA420AAC /* ReminderModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4353ABA45B9630F4CF7DBF0C /* ReminderModelTests.swift */; };
 		E71E2B55D28997F49015FA8D /* ConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A766A33F57F94C9BDF7ACF /* ConstantsTests.swift */; };
 		E93AF93D1470F43091DF3613 /* AddNoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BBA6EAAA528870946A9A68 /* AddNoteView.swift */; };
+		E99E54A243049CBE59F488DD /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9070FA35720DE1331E514BFF /* MoreView.swift */; };
 		E9C12D0FA76386A83E75A5A7 /* BackupMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6A1F78A9CDFC1FC5ADC17B /* BackupMetadata.swift */; };
 		EA77718EDE2F2C9BAFD02C27 /* IMessageSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51B78E4C7B87A207BBC1A65A /* IMessageSyncService.swift */; };
 		EC143B5E71184A068145E022 /* CalendarPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */; };
@@ -218,6 +219,7 @@
 		8B1C638B4A31E4A23207C6E0 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
 		8C6A1F78A9CDFC1FC5ADC17B /* BackupMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupMetadata.swift; sourceTree = "<group>"; };
 		8C76958AF5D1BEA2F22D389A /* IconAndColorPickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconAndColorPickers.swift; sourceTree = "<group>"; };
+		9070FA35720DE1331E514BFF /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModelTests.swift; sourceTree = "<group>"; };
 		950AC9FC1E76731546573DEA /* ReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderService.swift; sourceTree = "<group>"; };
 		970CC06BF6BA7D37D1C593DC /* InteractionLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLogView.swift; sourceTree = "<group>"; };
@@ -510,6 +512,7 @@
 				E96B1DC66ABBEFEB1A66159C /* Groups */,
 				199EBBB9E0E8301AB322E5CA /* Interactions */,
 				6FB3C51FFC8EAF7093972ACC /* Locations */,
+				FDF36655D7BAFA56C4F19C0C /* More */,
 				D727FDC604B3FBA814811BC3 /* Network */,
 				3602FFD6590ABA5857D3F80F /* Reminders */,
 				C2D7BBECE154CA7F64065B1C /* Settings */,
@@ -589,6 +592,14 @@
 				AF252EFB7C1EBC43B1A39370 /* Views */,
 			);
 			path = Blackbook;
+			sourceTree = "<group>";
+		};
+		FDF36655D7BAFA56C4F19C0C /* More */ = {
+			isa = PBXGroup;
+			children = (
+				9070FA35720DE1331E514BFF /* MoreView.swift */,
+			);
+			path = More;
 			sourceTree = "<group>";
 		};
 		FE0142C4205E4BDB48201B1B /* Utilities */ = {
@@ -793,6 +804,7 @@
 				418089A77A3E793B504C88FB /* LoginView.swift in Sources */,
 				AF1648E3FB295CF468ADB9D4 /* MergeContactPickerView.swift in Sources */,
 				3F8A392AE676AD3A604B9EC3 /* ModelSyncApply.swift in Sources */,
+				E99E54A243049CBE59F488DD /* MoreView.swift in Sources */,
 				1F15A9907F62206EA97F4555 /* NetworkGraphEngine.swift in Sources */,
 				264F82AF586E5CA45E98051A /* NetworkGraphView.swift in Sources */,
 				F363626541A0478C9B36D5FC /* NetworkGraphViewModel.swift in Sources */,
