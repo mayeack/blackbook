@@ -90,6 +90,7 @@
 		B99B1B94442BAC565FEDAAA2 /* AIAssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36AE5C06322D7E805B52341 /* AIAssistantViewModel.swift */; };
 		BD62475DEAA35DB0EFF03150 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B1C638B4A31E4A23207C6E0 /* BackupRestoreView.swift */; };
 		BF4B58B36798C30735F316B3 /* SFSymbolSearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB0EEFC6BF1CA172898A5CC /* SFSymbolSearchServiceTests.swift */; };
+		BF7F11D06ADAF53524CB7C27 /* EntityListRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 032E7774C5F4D3CFD826B428 /* EntityListRow.swift */; };
 		C2884A1E1560B0F8842C2964 /* SFSymbolSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450B014084ADF659A27C3F58 /* SFSymbolSearchService.swift */; };
 		C31D09F55E3735C61BE790F0 /* ActivityFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB300BB5DF41935C07BC4210 /* ActivityFormView.swift */; };
 		C386A3D91B842AB5512D4B09 /* InteractionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA17CB7865FCC549E3A695B /* InteractionViewModel.swift */; };
@@ -118,6 +119,7 @@
 		E331D0D1AF87D4E1FA420AAC /* ReminderModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4353ABA45B9630F4CF7DBF0C /* ReminderModelTests.swift */; };
 		E71E2B55D28997F49015FA8D /* ConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A766A33F57F94C9BDF7ACF /* ConstantsTests.swift */; };
 		E93AF93D1470F43091DF3613 /* AddNoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BBA6EAAA528870946A9A68 /* AddNoteView.swift */; };
+		E99E54A243049CBE59F488DD /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9070FA35720DE1331E514BFF /* MoreView.swift */; };
 		E9C12D0FA76386A83E75A5A7 /* BackupMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6A1F78A9CDFC1FC5ADC17B /* BackupMetadata.swift */; };
 		EA77718EDE2F2C9BAFD02C27 /* IMessageSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51B78E4C7B87A207BBC1A65A /* IMessageSyncService.swift */; };
 		EC143B5E71184A068145E022 /* CalendarPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */; };
@@ -145,6 +147,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		032E7774C5F4D3CFD826B428 /* EntityListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityListRow.swift; sourceTree = "<group>"; };
 		0C76007980526C6D096CFBD6 /* NetworkGraphViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModel.swift; sourceTree = "<group>"; };
 		0D88B14476C7E4A4574B1FB1 /* LogInteractionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogInteractionView.swift; sourceTree = "<group>"; };
 		101D3964C1DEC2520B694372 /* GroupModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupModelTests.swift; sourceTree = "<group>"; };
@@ -218,6 +221,7 @@
 		8B1C638B4A31E4A23207C6E0 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
 		8C6A1F78A9CDFC1FC5ADC17B /* BackupMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupMetadata.swift; sourceTree = "<group>"; };
 		8C76958AF5D1BEA2F22D389A /* IconAndColorPickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconAndColorPickers.swift; sourceTree = "<group>"; };
+		9070FA35720DE1331E514BFF /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModelTests.swift; sourceTree = "<group>"; };
 		950AC9FC1E76731546573DEA /* ReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderService.swift; sourceTree = "<group>"; };
 		970CC06BF6BA7D37D1C593DC /* InteractionLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLogView.swift; sourceTree = "<group>"; };
@@ -383,6 +387,14 @@
 			path = Activities;
 			sourceTree = "<group>";
 		};
+		86945E0BADE0365907116998 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				032E7774C5F4D3CFD826B428 /* EntityListRow.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
 		8A03F406E1283D5F0A6AF5F3 /* Services */ = {
 			isa = PBXGroup;
 			children = (
@@ -505,11 +517,13 @@
 			children = (
 				8305B771CCFCFAB29CA98B16 /* Activities */,
 				7E2E2197F385410E23F1DD09 /* Auth */,
+				86945E0BADE0365907116998 /* Components */,
 				52A18B439D89D20233333C5D /* Contacts */,
 				97D40FA7ECF42C7B6C954A0B /* Dashboard */,
 				E96B1DC66ABBEFEB1A66159C /* Groups */,
 				199EBBB9E0E8301AB322E5CA /* Interactions */,
 				6FB3C51FFC8EAF7093972ACC /* Locations */,
+				FDF36655D7BAFA56C4F19C0C /* More */,
 				D727FDC604B3FBA814811BC3 /* Network */,
 				3602FFD6590ABA5857D3F80F /* Reminders */,
 				C2D7BBECE154CA7F64065B1C /* Settings */,
@@ -589,6 +603,14 @@
 				AF252EFB7C1EBC43B1A39370 /* Views */,
 			);
 			path = Blackbook;
+			sourceTree = "<group>";
+		};
+		FDF36655D7BAFA56C4F19C0C /* More */ = {
+			isa = PBXGroup;
+			children = (
+				9070FA35720DE1331E514BFF /* MoreView.swift */,
+			);
+			path = More;
 			sourceTree = "<group>";
 		};
 		FE0142C4205E4BDB48201B1B /* Utilities */ = {
@@ -767,6 +789,7 @@
 				771CFACFB207D0ED960C9E33 /* DashboardViewModel.swift in Sources */,
 				6EBB34A3DDBE871B6B3BF70E /* DateHelpers.swift in Sources */,
 				03915555188215A47C2FFBAF /* DuplicateScanView.swift in Sources */,
+				BF7F11D06ADAF53524CB7C27 /* EntityListRow.swift in Sources */,
 				1D5E32E9EE0B56EA56D2D7EC /* FeatureGating.swift in Sources */,
 				28D30061B05714E65E0FAA2C /* ForgotPasswordView.swift in Sources */,
 				09159275BC5943BE485081DD /* GoogleCalendarService.swift in Sources */,
@@ -793,6 +816,7 @@
 				418089A77A3E793B504C88FB /* LoginView.swift in Sources */,
 				AF1648E3FB295CF468ADB9D4 /* MergeContactPickerView.swift in Sources */,
 				3F8A392AE676AD3A604B9EC3 /* ModelSyncApply.swift in Sources */,
+				E99E54A243049CBE59F488DD /* MoreView.swift in Sources */,
 				1F15A9907F62206EA97F4555 /* NetworkGraphEngine.swift in Sources */,
 				264F82AF586E5CA45E98051A /* NetworkGraphView.swift in Sources */,
 				F363626541A0478C9B36D5FC /* NetworkGraphViewModel.swift in Sources */,

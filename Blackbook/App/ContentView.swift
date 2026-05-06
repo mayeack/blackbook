@@ -19,11 +19,7 @@ struct ContentView: View {
             NavigationStack { ContactListView() }.tabItem { Label("Contacts", systemImage: "person.crop.rectangle.stack") }.tag(AppTab.contacts)
             NavigationStack { ActivityListView() }.tabItem { Label("Activities", systemImage: "figure.run") }.tag(AppTab.activities)
             NavigationStack { TagListView() }.tabItem { Label("Tags", systemImage: "tag") }.tag(AppTab.tags)
-            NavigationStack { GroupListView() }.tabItem { Label("Groups", systemImage: "folder.fill") }.tag(AppTab.groups)
-            NavigationStack { LocationListView() }.tabItem { Label("Locations", systemImage: "mappin.and.ellipse") }.tag(AppTab.locations)
-            NavigationStack { NetworkGraphView() }.tabItem { Label("Network", systemImage: "point.3.connected.trianglepath.dotted") }.tag(AppTab.network)
-            NavigationStack { RemindersView() }.tabItem { Label("Reminders", systemImage: "bell") }.tag(AppTab.reminders)
-            NavigationStack { SettingsView() }.tabItem { Label("Settings", systemImage: "gear") }.tag(AppTab.settings)
+            NavigationStack { MoreView() }.tabItem { Label("More", systemImage: "ellipsis") }.tag(AppTab.more)
         }
         .tint(AppConstants.UI.accentGold)
         .onAppear {
@@ -89,13 +85,20 @@ struct ContentView: View {
             case .network: NetworkGraphView()
             case .reminders: RemindersView()
             case .settings: SettingsView()
+            case .more: EmptyView() // iOS-only tab; macOS sidebar lists each item directly
             }
         }
     }
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case dashboard, contacts, activities, tags, groups, locations, network, reminders, settings
+    case dashboard, contacts, activities, tags, groups, locations, network, reminders, settings, more
+
+    /// `more` is iOS-only; the macOS sidebar shows every case directly.
+    static var allCases: [AppTab] {
+        [.dashboard, .contacts, .activities, .tags, .groups, .locations, .network, .reminders, .settings]
+    }
+
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -114,6 +117,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .network: return "point.3.connected.trianglepath.dotted"
         case .reminders: return "bell"
         case .settings: return "gear"
+        case .more: return "ellipsis"
         }
     }
 }
