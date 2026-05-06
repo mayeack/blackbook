@@ -663,15 +663,28 @@ struct HiddenContactsView: View {
     private var hiddenContacts: [Contact] {
         let hidden = allContacts.filter { $0.isHidden && !$0.isMergedAway }
         if searchText.isEmpty { return hidden }
-        return hidden.filter {
-            $0.displayName.localizedCaseInsensitiveContains(searchText)
-            || ($0.company?.localizedCaseInsensitiveContains(searchText) ?? false)
-        }
+        return hidden.filter { matches($0) }
+    }
+
+    private var mergedContacts: [Contact] {
+        let merged = allContacts.filter { $0.isMergedAway }
+        if searchText.isEmpty { return merged }
+        return merged.filter { matches($0) }
+    }
+
+    private func matches(_ contact: Contact) -> Bool {
+        contact.displayName.localizedCaseInsensitiveContains(searchText)
+        || (contact.company?.localizedCaseInsensitiveContains(searchText) ?? false)
+    }
+
+    private var isEmpty: Bool {
+        allContacts.filter({ $0.isHidden && !$0.isMergedAway }).isEmpty
+        && allContacts.filter({ $0.isMergedAway }).isEmpty
     }
 
     var body: some View {
         SwiftUI.Group {
-            if allContacts.filter({ $0.isHidden && !$0.isMergedAway }).isEmpty {
+            if isEmpty {
                 ContentUnavailableView {
                     Label("No Hidden Contacts", systemImage: "eye.slash")
                 } description: {
@@ -679,31 +692,33 @@ struct HiddenContactsView: View {
                 }
             } else {
                 List {
-                    ForEach(hiddenContacts) { contact in
-                        HStack(spacing: 12) {
-                            ContactAvatarView(contact: contact, size: 40)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(contact.displayName)
-                                    .font(.body.weight(.medium))
-                                if let company = contact.company {
-                                    Text(company)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                    if !hiddenContacts.isEmpty {
+                        Section("Hidden") {
+                            ForEach(hiddenContacts) { contact in
+                                contactRow(contact, label: "Unhide") {
+                                    contact.isHidden = false
+                                    contact.updatedAt = Date()
+                                    try? modelContext.save()
                                 }
                             }
-                            Spacer()
-                            Button {
-                                contact.isHidden = false
-                                contact.updatedAt = Date()
-                                try? modelContext.save()
-                            } label: {
-                                Text("Unhide")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(AppConstants.UI.accentGold)
-                            }
-                            .buttonStyle(.plain)
                         }
-                        .padding(.vertical, 2)
+                    }
+
+                    if !mergedContacts.isEmpty {
+                        Section {
+                            ForEach(mergedContacts) { contact in
+                                contactRow(contact, label: "Restore") {
+                                    contact.isMergedAway = false
+                                    contact.mergedIntoContact = nil
+                                    contact.updatedAt = Date()
+                                    try? modelContext.save()
+                                }
+                            }
+                        } header: {
+                            Text("Merged")
+                        } footer: {
+                            Text("Restoring a merged contact brings it back to your contacts list. Data that was combined into the primary (interactions, tags, emails) will remain on both contacts.")
+                        }
                     }
                 }
                 .searchable(text: $searchText, prompt: "Search hidden contacts...")
@@ -725,6 +740,37 @@ struct HiddenContactsView: View {
         .sheet(isPresented: $showingAddSheet) {
             HideContactsView()
         }
+    }
+
+    @ViewBuilder
+    private func contactRow(_ contact: Contact, label: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            ContactAvatarView(contact: contact, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(contact.displayName)
+                    .font(.body.weight(.medium))
+                if let company = contact.company, !company.isEmpty {
+                    Text(company)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if contact.isMergedAway, let primary = contact.mergedIntoContact {
+                    Text("Merged into \(primary.displayName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button {
+                action()
+            } label: {
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AppConstants.UI.accentGold)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 2)
     }
 }
 
