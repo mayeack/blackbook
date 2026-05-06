@@ -25,16 +25,24 @@ final class ServerStatusModel {
     }
 
     private let defaults = UserDefaults(suiteName: "com.blackbookdevelopment.server") ?? .standard
+    private let mainAppDefaults = UserDefaults(suiteName: "com.blackbookdevelopment.app")
 
     init() {
-        // Auto-start on launch if configured
-        if let email = defaults.string(forKey: "serverEmail"), !email.isEmpty {
+        if !email.isEmpty {
             startServer()
         }
     }
 
+    // Source of truth is the main Blackbook app's logged-in user.
+    // Local `serverEmail` is a fallback override used only when the main
+    // app hasn't written its auth state yet (fresh install, dev/test).
     var email: String {
-        get { defaults.string(forKey: "serverEmail") ?? "" }
+        get {
+            if let main = mainAppDefaults?.string(forKey: "auth.userEmail"), !main.isEmpty {
+                return main
+            }
+            return defaults.string(forKey: "serverEmail") ?? ""
+        }
         set {
             defaults.set(newValue, forKey: "serverEmail")
             restartIfNeeded()
