@@ -8,7 +8,7 @@ struct ActivityListView: View {
     @State private var searchText = ""
     @State private var showAddActivity = false
     @State private var showCalendarSetup = false
-    @State private var calendarService = GoogleCalendarService()
+    @Environment(GoogleCalendarService.self) private var calendarService
 
     private var filteredActivities: [Activity] {
         if searchText.isEmpty { return activities }
@@ -59,6 +59,7 @@ struct ActivityListView: View {
 
                             activitiesSection
                         }
+                        .refreshable { await refreshCalendar() }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -86,10 +87,11 @@ struct ActivityListView: View {
                 await calendarService.fetchCalendarList()
                 await calendarService.fetchEvents(rejectedEventIds: rejectedEventIds)
             }
-            .refreshable {
-                await calendarService.fetchCalendarList()
-                await calendarService.fetchEvents(rejectedEventIds: rejectedEventIds, force: true)
-            }
+    }
+
+    private func refreshCalendar() async {
+        await calendarService.fetchCalendarList()
+        await calendarService.fetchEvents(rejectedEventIds: rejectedEventIds, force: true)
     }
 
     // MARK: - Suggested Activities
@@ -152,14 +154,26 @@ struct ActivityListView: View {
             } else {
                 List {
                     ForEach(visibleSuggestions) { event in
-                        SuggestedActivityRow(event: event) {
-                            addEventAsActivity(event)
-                        } onReject: {
-                            rejectEvent(event)
-                        }
+                        SuggestedActivityRow(event: event)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    withAnimation { addEventAsActivity(event) }
+                                } label: {
+                                    Label("Add", systemImage: "plus")
+                                }
+                                .tint(.green)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    withAnimation { rejectEvent(event) }
+                                } label: {
+                                    Label("Archive", systemImage: "archivebox")
+                                }
+                            }
                     }
                 }
                 .listStyle(.plain)
+                .refreshable { await refreshCalendar() }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -225,53 +239,14 @@ struct ActivityListView: View {
 
 struct SuggestedActivityRow: View {
     let event: SuggestedCalendarEvent
-    let onAdd: () -> Void
-    let onReject: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "calendar")
-                .font(.body)
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(Color.blue.gradient, in: RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.title)
-                    .font(.body.weight(.medium))
-                    .lineLimit(2)
-                HStack(spacing: 4) {
-                    Text(event.startDate.shortFormatted)
-                    Text("·")
-                    Text(event.calendarName)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                Button {
-                    withAnimation { onReject() }
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.red.opacity(0.7))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    withAnimation { onAdd() }
-                } label: {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.vertical, 2)
+        EntityListRow(
+            icon: "calendar",
+            iconColor: .blue,
+            title: event.title,
+            subtitle: "\(event.startDate.shortFormatted) · \(event.calendarName)"
+        )
     }
 }
 
@@ -286,20 +261,12 @@ struct ActivityRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: activity.icon)
-                .font(.body)
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(activity.color.gradient, in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(activity.name)
-                    .font(.body.weight(.medium))
-                Text(activity.dateRange)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
+        EntityListRow(
+            icon: activity.icon,
+            iconColor: activity.color,
+            title: activity.name,
+            subtitle: activity.dateRange
+        ) {
             VStack(alignment: .trailing, spacing: 2) {
                 if !activity.contacts.isEmpty {
                     Text(contactNames)
@@ -319,6 +286,5 @@ struct ActivityRowView: View {
             }
             .frame(maxWidth: 200, alignment: .trailing)
         }
-        .padding(.vertical, 2)
     }
 }

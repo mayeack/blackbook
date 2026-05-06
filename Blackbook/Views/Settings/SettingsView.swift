@@ -51,9 +51,10 @@ struct SettingsView: View {
     @State private var syncService = ContactSyncService()
     @State private var showAPIKeyEntry = false
     @State private var hasAPIKey = false
-    @State private var calendarService = GoogleCalendarService()
+    @Environment(GoogleCalendarService.self) private var calendarService
     @State private var showGoogleClientIdEntry = false
     @State private var showSignOutConfirm = false
+    @State private var showGoogleSignOutConfirm = false
     @State private var showImportOptions = false
     @State private var showSelectiveImport = false
     #if os(macOS)
@@ -92,6 +93,14 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Are you sure you want to sign out? Your data is stored locally and will remain on this device.")
+        }
+        .alert("Sign out of Google Calendar?", isPresented: $showGoogleSignOutConfirm) {
+            Button("Sign Out", role: .destructive) {
+                calendarService.signOut()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You'll need to sign in again to see suggested activities from your calendar. Selected calendars and rejected events stay on this device.")
         }
         .onAppear {
             hasAPIKey = KeychainService.retrieve(
@@ -359,7 +368,7 @@ struct SettingsView: View {
                 // Sign in / sign out row
                 if calendarService.isSignedIn {
                     Button {
-                        calendarService.signOut()
+                        showGoogleSignOutConfirm = true
                     } label: {
                         SettingsRow(
                             icon: "calendar",

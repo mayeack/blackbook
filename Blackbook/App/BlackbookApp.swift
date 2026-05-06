@@ -15,6 +15,7 @@ private let currentSchemaVersion = BackupService.currentSchemaVersion
 struct BlackbookApp: App {
     let modelContainer: ModelContainer
     @State private var authService = AuthenticationService()
+    @State private var googleCalendarService = GoogleCalendarService()
     #if os(macOS)
     @State private var iMessageService = IMessageSyncService()
     #endif
@@ -66,6 +67,7 @@ struct BlackbookApp: App {
         WindowGroup {
             AuthGateView()
                 .environment(authService)
+                .environment(googleCalendarService)
                 #if os(macOS)
                 .environment(iMessageService)
                 .onAppear {
