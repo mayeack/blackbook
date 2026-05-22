@@ -175,3 +175,50 @@ rm -rf /Applications/BlackbookServer.app
 cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
 open /Applications/BlackbookServer.app
 ```
+
+## 2026-05-22 — Automatic bidirectional sync via server epoch + bootstrap
+
+**Summary:** Even though `/sync/changes` now works (PR #36), iPhone and Mac stayed out of sync because the existing delta-only push only sends records marked `syncStatus != .synced`. After 18 days of silently-failing syncs, most records on both devices were marked `.synced` and never re-pushed, leaving the master with just a tiny subset. This change makes recovery automatic: BlackbookServer stamps every response with an `X-Server-Epoch` header (a UUID written next to the master store), and the iOS/macOS client detects a change in epoch — including its first-ever sync against a particular server — and performs a one-time bootstrap that marks every locally-`.synced` record as `.pending` so the next push uploads the full local store. No user-facing action required.
+
+**Setup:**
+- BlackbookServer rebuilt from this branch and reinstalled at `/Applications/BlackbookServer.app`.
+- Both iOS and macOS Blackbook running new TestFlight build from this PR.
+- Cloudflare tunnel `cloudflared-libersecretorum` running.
+
+**Steps:**
+1. Verify the epoch file exists: `cat ~/Library/Application\ Support/Blackbook/Server/epoch.txt` → a UUID.
+2. `curl -i http://127.0.0.1:8765/sync/changes?since=2026-01-01T00:00:00Z` (with valid creds) → response includes `X-Server-Epoch: <uuid>` header.
+3. Restart BlackbookServer → epoch UUID unchanged (persists across restarts).
+4. On iPhone, foreground Blackbook → next 5-min tick (or earlier if just launched) emits `sync.bootstrap` action with `from:"nil"` and `to:"<uuid>"`. The `started` heartbeat reports the pre-bootstrap pushPending; the `success` heartbeat reports the post-bootstrap count (much higher).
+5. Master store record count jumps from ~12 to the iPhone's full contact total. Verify:
+   ```
+   sqlite3 ~/Library/Application\ Support/Blackbook/Server/default.store "SELECT COUNT(*) FROM ZCONTACT"
+   ```
+6. On macOS, relaunch Blackbook → same `sync.bootstrap` fires once; master store gains any Mac-only records.
+7. Within ~5 minutes of step 6 both UIs show the union of records.
+
+**Edge cases:**
+- Epoch unchanged across normal syncs → bootstrap is a no-op (idempotent); delta-only push continues to operate.
+- Heartbeat fails (network blip) → no epoch detected → bootstrap deferred to next tick. Sync still proceeds; no data loss.
+- BlackbookServer restarts but `epoch.txt` is present → epoch unchanged → no bootstrap.
+- `epoch.txt` deleted manually + server restart → new epoch generated → clients bootstrap once on next tick. Confirms only genuine store reset triggers re-sync.
+- Records in `.deleted`, `.modified`, or already `.pending` are NOT touched by the bootstrap sweep — only `.synced` → `.pending`. Deletion tombstones and in-progress edits preserved.
+- Concurrent bootstrap on iPhone + Mac → both push their full local stores; server applies them in arrival order; existing `updatedAt`-based last-write-wins logic in `ModelSyncApply` handles overlaps.
+
+**Recovery semantics (one-time):**
+After the first bootstrap, the master holds the **union** of all contacts both devices knew about. Items that "vanished" during the pre-fix sync glitch may resurface; deliberate tombstone deletes (`.deleted`) stay deleted. The user can re-delete any unwanted duplicates after convergence.
+
+**Platforms:**
+- iOS: build verified (`xcodebuild build … -destination 'generic/platform=iOS'` BUILD SUCCEEDED). End-to-end requires TestFlight install.
+- macOS Blackbook: build verified. Same TestFlight install caveat.
+- BlackbookServer: build verified AND locally smoke-tested via curl — `X-Server-Epoch` header present, epoch persists across restarts, file written on first start.
+
+**Local-only deploy note:** BlackbookServer is NOT part of the TestFlight pipeline. After this PR merges, rebuild + reinstall on this Mac:
+```
+killall BlackbookServer
+git pull --rebase
+xcodebuild -scheme BlackbookServer -destination 'platform=macOS' -configuration Release -derivedDataPath /tmp/blackbook-server-build build
+rm -rf /Applications/BlackbookServer.app
+cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
+open /Applications/BlackbookServer.app
+```

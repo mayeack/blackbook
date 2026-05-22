@@ -41,9 +41,15 @@ final class BackupServer: @unchecked Sendable {
         return Data(hash).prefix(24).base64EncodedString()
     }
 
+    /// Stamped on every HTTP response (header `X-Server-Epoch`). Clients use a change here to
+    /// detect that the master store has been reset and bootstrap a full re-push of their local data.
+    /// Loaded once at init from the epoch file next to the master store; persists across restarts.
+    private let serverEpoch: String
+
     init(password: String, container: ModelContainer? = nil) {
         self.password = password
         self.container = container
+        self.serverEpoch = ServerModelContainer.currentEpoch()
     }
 
     func start(port: UInt16 = BackupServer.defaultPort) {
@@ -803,6 +809,9 @@ final class BackupServer: @unchecked Sendable {
         // Always include Content-Length so proxies (Cloudflare HTTP/2) and
         // URLSession can determine when the response ends.
         headerLines += "Content-Length: \(response.body?.count ?? 0)\r\n"
+        // Stamp every response with the server epoch so clients can detect a master-store reset
+        // and automatically bootstrap a full re-push of their local records.
+        headerLines += "X-Server-Epoch: \(serverEpoch)\r\n"
         headerLines += "\r\n"
         var data = (statusLine + headerLines).data(using: .utf8)!
         if let body = response.body { data.append(body) }

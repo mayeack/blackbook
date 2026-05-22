@@ -22,6 +22,27 @@ enum ServerModelContainer {
         return dir.appendingPathComponent("default.store")
     }
 
+    /// Filesystem location of the epoch file — a UUID written next to the master store the first
+    /// time the daemon starts on a fresh store directory. Persists across daemon restarts; is only
+    /// regenerated when the directory is wiped (which is exactly the signal clients need to bootstrap).
+    static var epochURL: URL {
+        storeURL.deletingLastPathComponent().appendingPathComponent("epoch.txt")
+    }
+
+    /// Returns the current server epoch. Loads from disk if present; otherwise generates a fresh
+    /// UUID, writes it, and returns it. Idempotent and safe to call repeatedly.
+    static func currentEpoch() -> String {
+        if let data = try? Data(contentsOf: epochURL),
+           let stored = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !stored.isEmpty {
+            return stored
+        }
+        let fresh = UUID().uuidString
+        try? Data(fresh.utf8).write(to: epochURL, options: .atomic)
+        logger.info("Wrote new server epoch \(fresh, privacy: .public) at \(epochURL.path, privacy: .public)")
+        return fresh
+    }
+
     /// Schema list mirrors `BlackbookApp.init`'s schema so the same JSON payloads round-trip
     /// correctly between client and server.
     private static var schema: Schema {
