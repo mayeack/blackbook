@@ -73,3 +73,30 @@ Running, append-only log of manual test scenarios for completed features and bug
 - iOS: built clean by Claude (`xcodebuild build` on iPhone 17 simulator). UI verification on a running Simulator/device needs user run.
 - macOS: not exercised (Activities tab on macOS uses the same SwiftUI). Build untouched; should still compile, but a quick build is worth running.
 - BlackbookServer: N/A.
+
+## 2026-05-22 — macOS cloud sync + 5-minute periodic sync on both platforms
+
+**Summary:** macOS client now syncs with `sync.libersecretorum.com` (it previously did not), and both iOS and macOS now perform a full sync every 5 minutes while foregrounded, in addition to the existing launch sync.
+
+**Setup:**
+- Both apps signed in as `michaelyeack@gmail.com`.
+- Central sync server (`sync.libersecretorum.com` → this Mac:8765) reachable.
+- Clean launch (quit before first scenario).
+
+**Steps:**
+1. Launch macOS app cold → in Console.app (subsystem `com.blackbookdevelopment.app`, category `BonjourBrowser`) expect `Configured sync server: https://sync.libersecretorum.com for michaelyeack@gmail.com` within ~1s.
+2. Same launch → category `LocalSync` should log `Pushing N record(s)` / `Pulled N …` lines, then `Local sync completed`, ~1–3s after launch.
+3. Wait 5 minutes with the macOS app foregrounded and untouched → expect a second `Local sync completed` line (and `Periodic sync started (interval: 300s)` should already be in the log from step 2).
+4. On iPhone, add a contact "SyncTest-iOS-<HHmm>" → within ≤5 min the contact appears in the macOS Contacts list without quitting/relaunching.
+5. On macOS, add a contact "SyncTest-mac-<HHmm>" → within ≤5 min the contact appears on the iPhone without relaunching.
+6. Quit macOS app, relaunch → expect a fresh launch sync within ~1s, then a 5-minute tick afterward.
+
+**Edge cases:**
+- Network drop during a periodic tick → `LocalServerSyncService.performFullSync()` logs the error but the loop keeps ticking; on next reachability + tick the offline queue flushes (existing behavior, unchanged by this fix).
+- App backgrounded on iOS for >5 minutes → the Swift Task suspends; on foreground a new tick happens on the next 5-min boundary (no missed-tick catch-up; launch sync covers cold returns).
+- Two ticks overlapping with a manual sync from settings (if added later) → `performFullSync()` already guards on `isSyncing` and returns early.
+
+**Platforms:**
+- iOS: needs user run on physical iPhone (build verified for `generic/platform=iOS`).
+- macOS: build verified (`xcodebuild ... -destination 'platform=macOS'` BUILD SUCCEEDED); needs user run to observe the 5-min tick.
+- BlackbookServer: build verified; no behavior changes in this fix.

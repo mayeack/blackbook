@@ -7,10 +7,8 @@ struct ContentView: View {
     @State private var syncService = ContactSyncService()
     @State private var dedupeService = ContactDeduplicationService()
     @State private var mergeService = ContactMergeService()
-    #if os(iOS)
     @State private var bonjourBrowser = BonjourBrowser()
     @State private var serverSyncService = LocalServerSyncService()
-    #endif
 
     var body: some View {
         #if os(iOS)
@@ -22,17 +20,8 @@ struct ContentView: View {
             NavigationStack { MoreView() }.tabItem { Label("More", systemImage: "ellipsis") }.tag(AppTab.more)
         }
         .tint(AppConstants.UI.accentGold)
-        .onAppear {
-            syncService.startAutoSync(with: modelContext)
-            bonjourBrowser.configure()
-            serverSyncService.configure(with: modelContext)
-            runDedupAfterRestoreIfNeeded()
-            Task {
-                try? await Task.sleep(for: .seconds(1))
-                await serverSyncService.performFullSync()
-                await UserActionLogger.shared.uploadPending()
-            }
-        }
+        .onAppear { configureAndStartSync() }
+        .onDisappear { serverSyncService.stopPeriodicSync() }
         #else
         NavigationSplitView {
             List(selection: $selectedTab) {
@@ -47,12 +36,22 @@ struct ContentView: View {
             detailView(for: selectedTab)
         }
         .frame(minWidth: 800, minHeight: 500)
-        .onAppear {
-            syncService.startAutoSync(with: modelContext)
-            runDedupAfterRestoreIfNeeded()
-            Task { await UserActionLogger.shared.uploadPending() }
-        }
+        .onAppear { configureAndStartSync() }
+        .onDisappear { serverSyncService.stopPeriodicSync() }
         #endif
+    }
+
+    private func configureAndStartSync() {
+        syncService.startAutoSync(with: modelContext)
+        bonjourBrowser.configure()
+        serverSyncService.configure(with: modelContext)
+        runDedupAfterRestoreIfNeeded()
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            await serverSyncService.performFullSync()
+            await UserActionLogger.shared.uploadPending()
+            serverSyncService.startPeriodicSync(intervalSeconds: 300)
+        }
     }
 
     private func runDedupAfterRestoreIfNeeded() {

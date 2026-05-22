@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import Network
 import Observation
@@ -6,9 +5,8 @@ import os
 
 private let logger = Logger(subsystem: "com.blackbookdevelopment.app", category: "BonjourBrowser")
 
-/// Configures the sync server connection for iOS devices.
-/// Uses the public Cloudflare Tunnel URL by default so backups work over the internet.
-/// Falls back to Bonjour discovery on the local network if the public URL is unreachable.
+/// Configures the sync server connection for both iOS and macOS clients.
+/// Uses the public Cloudflare Tunnel URL so both devices reach the same central database.
 @Observable
 final class BonjourBrowser {
     private var browser: NWBrowser?
@@ -42,4 +40,3 @@ final class BonjourBrowser {
         logger.info("Configured sync server: \(url) for \(email)")
     }
 }
-#endif
