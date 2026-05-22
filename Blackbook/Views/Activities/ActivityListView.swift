@@ -172,7 +172,6 @@ struct ActivityListView: View {
                             }
                     }
                 }
-                .listStyle(.plain)
                 .refreshable { await refreshCalendar() }
             }
         }
