@@ -22,6 +22,22 @@ final class LocalServerSyncService {
 
     private static let offlineQueueKey = "localsync.offlineQueue"
     private static let lastSyncKey = "localsync.lastSyncDate"
+    private static let lastSeenEpochKey = "localsync.lastSeenServerEpoch"
+    private static let serverEpochHeader = "X-Server-Epoch"
+
+    /// The server's epoch UUID as seen on the most recent successful HTTP response. A mismatch
+    /// against the value the server sends on a subsequent response means the master store has
+    /// been reset and the client should bootstrap a full re-push.
+    private var lastSeenEpoch: String? {
+        get { UserDefaults.standard.string(forKey: Self.lastSeenEpochKey) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue, forKey: Self.lastSeenEpochKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.lastSeenEpochKey)
+            }
+        }
+    }
 
     init() {
         loadOfflineQueue()
@@ -88,6 +104,53 @@ final class LocalServerSyncService {
         periodicTask = nil
     }
 
+    /// Compares the server epoch from the most recent response against the last one we stored.
+    /// On change (or first-ever sight): marks every locally-synced record as pending so the next
+    /// push pumps the whole local store up to the master, and resets `lastSyncDate` so the next
+    /// pull is a full pull. Returns `true` iff a bootstrap was triggered (caller may want to
+    /// recompute pushPendingCount in that case).
+    @discardableResult
+    private func handleServerEpoch(_ epoch: String?, context: ModelContext) -> Bool {
+        guard let epoch, !epoch.isEmpty else { return false }
+        let previous = lastSeenEpoch
+        guard previous != epoch else { return false }
+        logger.info("Server epoch changed (\(previous ?? "nil") -> \(epoch)) — bootstrapping full re-sync")
+        Log.action("sync.bootstrap", metadata: ["from": previous ?? "nil", "to": epoch])
+        markAllSyncedRecordsPending(context: context)
+        lastSyncDate = nil
+        saveLastSyncDate()
+        lastSeenEpoch = epoch
+        return true
+    }
+
+    /// One-time bootstrap sweep: flips every record currently marked `.synced` to `.pending` so
+    /// the next push uploads the entire local store. Records in `.deleted` (tombstones awaiting
+    /// push), `.modified` (in-progress edits), or already `.pending` are left untouched —
+    /// touching them would corrupt deletion intent or merge state.
+    private func markAllSyncedRecordsPending(context: ModelContext) {
+        let synced = SyncStatus.synced.rawValue
+        let pending = SyncStatus.pending.rawValue
+        var flippedCount = 0
+        func flip<T: PersistentModel>(_ type: T.Type, _ predicate: Predicate<T>, _ apply: (T) -> Void) {
+            guard let records = try? context.fetch(FetchDescriptor<T>(predicate: predicate)) else { return }
+            for r in records { apply(r) }
+            flippedCount += records.count
+        }
+        flip(Tag.self, #Predicate<Tag> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(Group.self, #Predicate<Group> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(Location.self, #Predicate<Location> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(Activity.self, #Predicate<Activity> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(Contact.self, #Predicate<Contact> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(Interaction.self, #Predicate<Interaction> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(Note.self, #Predicate<Note> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(Reminder.self, #Predicate<Reminder> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(ContactRelationship.self, #Predicate<ContactRelationship> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(RejectedCalendarEvent.self, #Predicate<RejectedCalendarEvent> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        try? context.save()
+        logger.info("Bootstrap marked \(flippedCount) record(s) pending")
+        Log.action("sync.bootstrap.markPending", metadata: ["count": "\(flippedCount)"])
+    }
+
     func performFullSync() async {
         guard let modelContext, !isSyncing else { return }
         guard let baseURL, let password, let url = URL(string: baseURL), !baseURL.isEmpty else {
@@ -101,9 +164,15 @@ final class LocalServerSyncService {
         defer { isSyncing = false }
 
         let started = Date()
-        let pushedCount = pushPendingCount(context: modelContext)
+        var pushedCount = pushPendingCount(context: modelContext)
         Log.action("sync.local.start", metadata: ["pushPending": "\(pushedCount)"])
-        await sendHeartbeat(baseURL: url, password: password, status: "started", pushPending: pushedCount)
+        let startedEpoch = await sendHeartbeat(baseURL: url, password: password, status: "started", pushPending: pushedCount)
+        // Before we push, check whether the server's epoch has changed. A change means the master
+        // store was reset (or this is the client's first sync ever), in which case we mark every
+        // locally-synced record as pending so the next step pushes the full local store up.
+        if handleServerEpoch(startedEpoch, context: modelContext) {
+            pushedCount = pushPendingCount(context: modelContext)
+        }
         do {
             try await pushLocalChanges(context: modelContext, baseURL: url, password: password)
             try await pullRemoteChanges(context: modelContext, baseURL: url, password: password)
@@ -125,16 +194,19 @@ final class LocalServerSyncService {
 
     /// Best-effort heartbeat ping. Records a check-in line server-side regardless of whether
     /// a data sync occurred or succeeded. Never throws — heartbeat failure must not break sync.
+    /// Returns the server's `X-Server-Epoch` header value (if any), so callers can detect a
+    /// master-store reset and trigger a bootstrap.
+    @discardableResult
     private func sendHeartbeat(baseURL: URL?,
                                password: String?,
                                status: String,
                                pushPending: Int = 0,
                                durationMs: Int? = nil,
-                               error: String? = nil) async {
-        guard let baseURL, let password else { return }
+                               error: String? = nil) async -> String? {
+        guard let baseURL, let password else { return nil }
         var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         comp.path = LocalSyncProtocol.Path.heartbeat
-        guard let endpoint = comp.url else { return }
+        guard let endpoint = comp.url else { return nil }
 
         var body: [String: Any] = [
             "platform": Self.currentPlatform,
@@ -148,7 +220,7 @@ final class LocalServerSyncService {
         if let durationMs { body["durationMs"] = durationMs }
         if let error { body["error"] = error }
 
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else { return }
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else { return nil }
 
         let email = UserDefaults.standard.string(forKey: "auth.userEmail") ?? ""
 
@@ -164,6 +236,7 @@ final class LocalServerSyncService {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
                 logger.debug("Heartbeat \(status) ack")
+                return http.value(forHTTPHeaderField: Self.serverEpochHeader)
             } else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 logger.warning("Heartbeat \(status) returned status \(code)")
@@ -171,6 +244,7 @@ final class LocalServerSyncService {
         } catch {
             logger.warning("Heartbeat \(status) failed: \(error.localizedDescription)")
         }
+        return nil
     }
 
     private static var currentPlatform: String {
