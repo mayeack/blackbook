@@ -18,6 +18,7 @@ final class LocalServerSyncService {
     private let monitorQueue = DispatchQueue(label: "com.blackbookdevelopment.localsync.monitor")
     private var isConnected = true
     private var offlineQueue: [SyncRecord] = []
+    private var periodicTask: Task<Void, Never>?
 
     private static let offlineQueueKey = "localsync.offlineQueue"
     private static let lastSyncKey = "localsync.lastSyncDate"
@@ -30,6 +31,7 @@ final class LocalServerSyncService {
 
     deinit {
         networkMonitor.cancel()
+        periodicTask?.cancel()
     }
 
     func configure(with context: ModelContext) {
@@ -65,6 +67,25 @@ final class LocalServerSyncService {
             }
         }
         networkMonitor.start(queue: monitorQueue)
+    }
+
+    /// Starts a repeating background sync that fires every `intervalSeconds` while the app is foregrounded.
+    /// Safe to call multiple times — any previous loop is cancelled first.
+    func startPeriodicSync(intervalSeconds: TimeInterval = 300) {
+        periodicTask?.cancel()
+        periodicTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(intervalSeconds))
+                if Task.isCancelled { break }
+                await self?.performFullSync()
+            }
+        }
+        logger.info("Periodic sync started (interval: \(Int(intervalSeconds))s)")
+    }
+
+    func stopPeriodicSync() {
+        periodicTask?.cancel()
+        periodicTask = nil
     }
 
     func performFullSync() async {
