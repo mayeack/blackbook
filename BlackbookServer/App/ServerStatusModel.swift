@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import ServiceManagement
+import SwiftData
 
 @Observable
 final class ServerStatusModel {
@@ -9,6 +10,10 @@ final class ServerStatusModel {
     private(set) var port: UInt16 = 0
     private(set) var backupCount = 0
     private(set) var diskUsage: String = "0 bytes"
+
+    /// Master SwiftData container. Nil if container init failed (sync routes will return 503
+    /// in that case; backups and logs continue to work since they're filesystem-only).
+    private let modelContainer: ModelContainer?
     var launchAtLogin: Bool {
         get { SMAppService.mainApp.status == .enabled }
         set {
@@ -27,7 +32,8 @@ final class ServerStatusModel {
     private let defaults = UserDefaults(suiteName: "com.blackbookdevelopment.server") ?? .standard
     private let mainAppDefaults = UserDefaults(suiteName: "com.blackbookdevelopment.app")
 
-    init() {
+    init(modelContainer: ModelContainer? = nil) {
+        self.modelContainer = modelContainer
         if !email.isEmpty {
             startServer()
         }
@@ -54,7 +60,7 @@ final class ServerStatusModel {
     func startServer() {
         guard !email.isEmpty else { return }
         let password = BackupServer.derivePassword(from: email)
-        let srv = BackupServer(password: password)
+        let srv = BackupServer(password: password, container: modelContainer)
         srv.start()
         server = srv
 

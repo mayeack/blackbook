@@ -127,3 +127,51 @@ Running, append-only log of manual test scenarios for completed features and bug
 - iOS: build verified (`xcodebuild build … -destination 'generic/platform=iOS'` BUILD SUCCEEDED); needs user run to observe `"platform":"iOS"` heartbeats land server-side.
 - macOS: build verified; needs user run to observe heartbeats land in the JSONL file.
 - BlackbookServer: build verified; new `/heartbeat` route is handled by the embedded server in the main app (BlackbookServer target shares the LocalSyncServer source).
+
+## 2026-05-22 — Port /sync/changes into BlackbookServer (real iOS↔macOS sync)
+
+**Summary:** Up to now the deployed sync server (`BlackbookServer.app`) only handled `/logs` + `/backups` + `/heartbeat`. Every `/sync/changes` request from any client returned 400 (missing `X-User-Email`) or 404 (route absent), silently. This change ports the sync handlers from the dead-code `Blackbook/Services/LocalSyncServer.swift` into `BlackbookServer/App/BackupServer.swift`, gives BlackbookServer its own SwiftData `ModelContainer` rooted at `~/Library/Application Support/Blackbook/Server/default.store`, and adds the missing `X-User-Email` header on the iOS and macOS Blackbook clients.
+
+**Setup:**
+- Both apps signed in as `michaelyeack@gmail.com`.
+- BlackbookServer.app freshly built from this branch and installed at `/Applications/BlackbookServer.app`.
+- Cloudflare tunnel `cloudflared-libersecretorum` running.
+
+**Steps:**
+1. Stop + reinstall + relaunch BlackbookServer:
+   ```
+   killall BlackbookServer
+   xcodebuild -scheme BlackbookServer -destination 'platform=macOS' -configuration Release -derivedDataPath /tmp/blackbook-server-build build
+   rm -rf /Applications/BlackbookServer.app
+   cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
+   open /Applications/BlackbookServer.app
+   ```
+2. Master store exists: `ls -lT ~/Library/Application\ Support/Blackbook/Server/default.store` → file present.
+3. Probe with valid password, no email header → expect `HTTP 400 Missing X-User-Email header`.
+4. Probe with valid password + email header → expect `HTTP 200` and JSON `{"contacts":[],"tags":[],...}` (empty arrays on a fresh store).
+5. On iPhone (new TestFlight build with the client-side X-User-Email change): sign out + back in.
+6. Tail `~/Library/Application Support/Blackbook/Logs/_access/access-YYYY-MM-DD.jsonl` → expect `/sync/changes` rows with `"status":200` (no more 400s).
+7. Tail `~/Library/Application Support/Blackbook/RemoteBackups/michaelyeack_at_gmail_com/Logs/heartbeats-YYYY-MM-DD.jsonl` → expect `"status":"success"` (was `"failed"`).
+8. Next heartbeat reports `"pushPending":0` (15 records pushed through).
+9. macOS Blackbook UI app: relaunch → its launch sync now succeeds, the 15 records pushed from iPhone appear in the UI within 5 minutes.
+
+**Edge cases:**
+- BlackbookServer launched without a usable ModelContainer → `/sync/changes` returns 503 "Master store unavailable"; `/backups` and `/logs` continue to work.
+- Client without X-User-Email header → 400 (existing auth gate); not silently ignored.
+- Sync push touches all 10 model types in dependency order; deletes are processed per-type after upserts.
+- Cross-platform model schema match: BlackbookServer initializes a `Schema` matching `BlackbookApp.init`'s array, so JSON payloads round-trip cleanly.
+
+**Platforms:**
+- iOS: build verified (`xcodebuild build … -destination 'generic/platform=iOS'` BUILD SUCCEEDED). End-to-end behavior requires TestFlight install + manual run.
+- macOS Blackbook app: build verified. Same TestFlight install caveat.
+- BlackbookServer: build verified AND locally smoke-tested with curl through loopback — `/sync/changes` returns the right JSON envelope.
+
+**Local-only deploy note:** BlackbookServer is NOT part of the TestFlight pipeline. After the PR merges, rebuild + reinstall it locally on this Mac:
+```
+killall BlackbookServer
+git pull --rebase
+xcodebuild -scheme BlackbookServer -destination 'platform=macOS' -configuration Release -derivedDataPath /tmp/blackbook-server-build build
+rm -rf /Applications/BlackbookServer.app
+cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
+open /Applications/BlackbookServer.app
+```

@@ -60,6 +60,14 @@ targets:
     supportedDestinations: [macOS]
     sources:
       - BlackbookServer
+      - path: Blackbook/Models
+        excludes:
+          - BackupMetadata.swift
+      - Blackbook/Utilities/LocalSyncProtocol.swift
+      - Blackbook/Utilities/SyncTypes.swift
+      - Blackbook/Utilities/ModelSyncApply.swift
+      - Blackbook/Utilities/ContactSyncApply.swift
+      - Blackbook/Utilities/DateHelpers.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.blackbookdevelopment.server

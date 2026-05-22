@@ -191,6 +191,12 @@ final class LocalServerSyncService {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
     }
 
+    /// User email for the `X-User-Email` header on sync requests. The deployed BlackbookServer
+    /// requires this header on every authenticated route (see `BackupServer.handleAuthed`).
+    private static var currentUserEmail: String {
+        UserDefaults.standard.string(forKey: "auth.userEmail") ?? ""
+    }
+
     private func pushPendingCount(context: ModelContext) -> Int {
         let synced = SyncStatus.synced.rawValue
         var total = 0
@@ -261,6 +267,7 @@ final class LocalServerSyncService {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue(password, forHTTPHeaderField: LocalSyncProtocol.passwordHeader)
+        request.setValue(Self.currentUserEmail, forHTTPHeaderField: LocalSyncProtocol.userEmailHeader)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = jsonData
 
@@ -294,6 +301,7 @@ final class LocalServerSyncService {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
         request.setValue(password, forHTTPHeaderField: LocalSyncProtocol.passwordHeader)
+        request.setValue(Self.currentUserEmail, forHTTPHeaderField: LocalSyncProtocol.userEmailHeader)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -398,6 +406,7 @@ final class LocalServerSyncService {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue(password, forHTTPHeaderField: LocalSyncProtocol.passwordHeader)
+        request.setValue(Self.currentUserEmail, forHTTPHeaderField: LocalSyncProtocol.userEmailHeader)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = jsonData
         do {
