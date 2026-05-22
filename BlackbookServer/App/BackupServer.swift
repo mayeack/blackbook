@@ -235,6 +235,15 @@ final class BackupServer: @unchecked Sendable {
         guard let request else {
             return (400, [:], "Bad Request".data(using: .utf8))
         }
+        let result = handleAuthed(request: request)
+        Self.logAccess(method: request.method,
+                       path: request.path,
+                       email: request.headers["x-user-email"] ?? "",
+                       status: result.status)
+        return result
+    }
+
+    private func handleAuthed(request: HTTPRequest) -> (status: Int, headers: [String: String], body: Data?) {
         let auth = request.headers["x-sync-password"] ?? request.headers["X-Sync-Password"]
         guard auth == password else {
             return (401, [:], "Unauthorized".data(using: .utf8))
@@ -248,11 +257,97 @@ final class BackupServer: @unchecked Sendable {
             return handleLogsRoute(request: request, userEmail: email)
         }
 
+        if request.method == "POST" && request.path == "/heartbeat" {
+            return handleHeartbeat(body: request.body, userEmail: email)
+        }
+
         guard request.path.hasPrefix("/backups") else {
             return (404, [:], "Not Found".data(using: .utf8))
         }
 
         return handleBackupRoute(request: request, userEmail: email)
+    }
+
+    // MARK: - Access Log
+
+    private static let accessDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// Per-request access log so we can see EVERY incoming request and the status returned.
+    /// Writes one JSONL line per request to
+    /// `<Application Support>/Blackbook/Logs/_access/access-YYYY-MM-DD.jsonl`.
+    private static func logAccess(method: String, path: String, email: String, status: Int) {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Blackbook/Logs/_access", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let day = accessDateFormatter.string(from: Date())
+        let url = dir.appendingPathComponent("access-\(day).jsonl")
+        let entry: [String: Any] = [
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "method": method,
+            "path": path,
+            "email": email,
+            "status": status
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: entry) else { return }
+        do {
+            let handle: FileHandle
+            if FileManager.default.fileExists(atPath: url.path) {
+                handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+            } else {
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+                handle = try FileHandle(forWritingTo: url)
+            }
+            defer { try? handle.close() }
+            try handle.write(contentsOf: data)
+            try handle.write(contentsOf: Data([0x0A]))
+        } catch {
+            logger.warning("Access log write failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Heartbeat
+
+    /// POST /heartbeat — body is an arbitrary JSON object describing a client check-in.
+    /// We add a server-side `receivedAt` timestamp and append the line to
+    /// `<Application Support>/Blackbook/Logs/<sanitized_email>/heartbeats-YYYY-MM-DD.jsonl`.
+    private func handleHeartbeat(body: Data?, userEmail: String) -> (status: Int, headers: [String: String], body: Data?) {
+        guard let body,
+              var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return (400, [:], "Invalid JSON body".data(using: .utf8))
+        }
+        json["receivedAt"] = ISO8601DateFormatter().string(from: Date())
+        json["email"] = userEmail
+        guard let line = try? JSONSerialization.data(withJSONObject: json) else {
+            return (500, [:], nil)
+        }
+        let day = Self.accessDateFormatter.string(from: Date())
+        let dir = userLogsDir(userEmail)
+        let fileURL = dir.appendingPathComponent("heartbeats-\(day).jsonl")
+        do {
+            let handle: FileHandle
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                handle = try FileHandle(forWritingTo: fileURL)
+                try handle.seekToEnd()
+            } else {
+                FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+                handle = try FileHandle(forWritingTo: fileURL)
+            }
+            defer { try? handle.close() }
+            try handle.write(contentsOf: line)
+            try handle.write(contentsOf: Data([0x0A]))
+            logger.info("Heartbeat recorded for \(userEmail, privacy: .public)")
+            return (200, ["Content-Type": "application/json"], "{\"ok\":true}".data(using: .utf8))
+        } catch {
+            logger.error("Heartbeat write failed: \(error.localizedDescription)")
+            return (500, [:], "Write failed".data(using: .utf8))
+        }
     }
 
     // MARK: - Logs Storage
