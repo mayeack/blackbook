@@ -252,7 +252,73 @@ final class LocalSyncServer: @unchecked Sendable {
             }
             return handleBackupRoute(request: request, userEmail: email)
         }
+        // Heartbeat endpoint — lightweight check-in, written to a per-user JSONL log.
+        if request.method == "POST" && request.path == LocalSyncProtocol.Path.heartbeat {
+            guard let email = request.headers["x-user-email"], !email.isEmpty else {
+                return (400, [:], "Missing X-User-Email header".data(using: .utf8))
+            }
+            return handleHeartbeat(body: request.body, userEmail: email)
+        }
         return (404, [:], "Not Found".data(using: .utf8))
+    }
+
+    // MARK: - Heartbeat
+
+    private var heartbeatsRoot: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Blackbook/Logs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func userHeartbeatDir(_ email: String) -> URL {
+        let dir = heartbeatsRoot.appendingPathComponent(sanitizeEmail(email), isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static let heartbeatDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// POST /heartbeat — body is an arbitrary JSON object describing a client check-in.
+    /// We add a server-side `receivedAt` timestamp and append the line to
+    /// `<Application Support>/Blackbook/Logs/<sanitized_email>/heartbeats-YYYY-MM-DD.jsonl`.
+    /// Returns 200 with `{"ok":true}` so the client can confirm round-trip success.
+    private func handleHeartbeat(body: Data?, userEmail: String) -> (status: Int, headers: [String: String], body: Data?) {
+        guard let body,
+              var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return (400, [:], "Invalid JSON body".data(using: .utf8))
+        }
+        json["receivedAt"] = ISO8601DateFormatter().string(from: Date())
+        json["email"] = userEmail
+        guard let line = try? JSONSerialization.data(withJSONObject: json) else {
+            return (500, [:], nil)
+        }
+        let day = Self.heartbeatDateFormatter.string(from: Date())
+        let fileURL = userHeartbeatDir(userEmail).appendingPathComponent("heartbeats-\(day).jsonl")
+        do {
+            let handle: FileHandle
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                handle = try FileHandle(forWritingTo: fileURL)
+                try handle.seekToEnd()
+            } else {
+                FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+                handle = try FileHandle(forWritingTo: fileURL)
+            }
+            defer { try? handle.close() }
+            try handle.write(contentsOf: line)
+            try handle.write(contentsOf: Data([0x0A])) // newline
+            logger.info("Heartbeat recorded for \(userEmail, privacy: .public)")
+            return (200, ["Content-Type": "application/json"], "{\"ok\":true}".data(using: .utf8))
+        } catch {
+            logger.error("Heartbeat write failed: \(error.localizedDescription)")
+            return (500, [:], "Write failed".data(using: .utf8))
+        }
     }
 
     private func handlePull(query: [String: String]) -> (status: Int, headers: [String: String], body: Data?) {

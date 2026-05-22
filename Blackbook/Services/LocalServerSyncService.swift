@@ -93,6 +93,7 @@ final class LocalServerSyncService {
         guard let baseURL, let password, let url = URL(string: baseURL), !baseURL.isEmpty else {
             syncError = "Sync server not configured. Add server URL and password in Settings."
             Log.action("sync.local", success: false, error: "server not configured")
+            await sendHeartbeat(baseURL: nil, password: nil, status: "skipped", error: "server not configured")
             return
         }
         isSyncing = true
@@ -102,6 +103,7 @@ final class LocalServerSyncService {
         let started = Date()
         let pushedCount = pushPendingCount(context: modelContext)
         Log.action("sync.local.start", metadata: ["pushPending": "\(pushedCount)"])
+        await sendHeartbeat(baseURL: url, password: password, status: "started", pushPending: pushedCount)
         do {
             try await pushLocalChanges(context: modelContext, baseURL: url, password: password)
             try await pullRemoteChanges(context: modelContext, baseURL: url, password: password)
@@ -110,12 +112,83 @@ final class LocalServerSyncService {
             logger.info("Local sync completed")
             let durationMs = Int(Date().timeIntervalSince(started) * 1000)
             Log.action("sync.local", metadata: ["pushed": "\(pushedCount)"], durationMs: durationMs, success: true)
+            await sendHeartbeat(baseURL: url, password: password, status: "success", pushPending: pushedCount, durationMs: durationMs)
         } catch {
             syncError = error.localizedDescription
             logger.error("Local sync failed: \(error.localizedDescription)")
             Log.action("sync.local", success: false, error: error.localizedDescription)
+            let durationMs = Int(Date().timeIntervalSince(started) * 1000)
+            await sendHeartbeat(baseURL: url, password: password, status: "failed", pushPending: pushedCount, durationMs: durationMs, error: error.localizedDescription)
         }
         await UserActionLogger.shared.uploadPending()
+    }
+
+    /// Best-effort heartbeat ping. Records a check-in line server-side regardless of whether
+    /// a data sync occurred or succeeded. Never throws — heartbeat failure must not break sync.
+    private func sendHeartbeat(baseURL: URL?,
+                               password: String?,
+                               status: String,
+                               pushPending: Int = 0,
+                               durationMs: Int? = nil,
+                               error: String? = nil) async {
+        guard let baseURL, let password else { return }
+        var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        comp.path = LocalSyncProtocol.Path.heartbeat
+        guard let endpoint = comp.url else { return }
+
+        var body: [String: Any] = [
+            "platform": Self.currentPlatform,
+            "device": Self.currentDeviceName,
+            "appVersion": Self.currentAppVersion,
+            "status": status,
+            "sentAt": ISO8601DateFormatter().string(from: Date()),
+            "pushPending": pushPending,
+            "lastSyncDate": lastSyncDate.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull()
+        ]
+        if let durationMs { body["durationMs"] = durationMs }
+        if let error { body["error"] = error }
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else { return }
+
+        let email = UserDefaults.standard.string(forKey: "auth.userEmail") ?? ""
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue(password, forHTTPHeaderField: LocalSyncProtocol.passwordHeader)
+        request.setValue(email, forHTTPHeaderField: LocalSyncProtocol.userEmailHeader)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = jsonData
+        request.timeoutInterval = 5
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                logger.debug("Heartbeat \(status) ack")
+            } else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                logger.warning("Heartbeat \(status) returned status \(code)")
+            }
+        } catch {
+            logger.warning("Heartbeat \(status) failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static var currentPlatform: String {
+        #if os(iOS)
+        return "iOS"
+        #elseif os(macOS)
+        return "macOS"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    private static var currentDeviceName: String {
+        BackupService.currentDeviceName
+    }
+
+    private static var currentAppVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
     }
 
     private func pushPendingCount(context: ModelContext) -> Int {

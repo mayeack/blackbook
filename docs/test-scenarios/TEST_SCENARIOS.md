@@ -100,3 +100,30 @@ Running, append-only log of manual test scenarios for completed features and bug
 - iOS: needs user run on physical iPhone (build verified for `generic/platform=iOS`).
 - macOS: build verified (`xcodebuild ... -destination 'platform=macOS'` BUILD SUCCEEDED); needs user run to observe the 5-min tick.
 - BlackbookServer: build verified; no behavior changes in this fix.
+
+## 2026-05-22 — Sync heartbeat for sync-health observability
+
+**Summary:** Added a server-side `POST /heartbeat` endpoint and client-side heartbeat pings sent at the start and end of every `performFullSync()` call (success, failure, or skip). Each heartbeat lands as a JSONL line in `<Application Support>/Blackbook/Logs/<sanitized_email>/heartbeats-YYYY-MM-DD.jsonl` on the macOS host so you can grep the file to verify both iOS and macOS are checking in.
+
+**Setup:**
+- Both apps signed in as `michaelyeack@gmail.com`.
+- macOS Blackbook running and serving port 8765 (status of `lsof -i :8765` shows `Blackbook (LISTEN)`).
+- Cloudflare tunnel `cloudflared-libersecretorum` running.
+
+**Steps:**
+1. Launch macOS app → within ~3s `tail -f ~/Library/Containers/com.blackbookdevelopment.app/Data/Library/Application\ Support/Blackbook/Logs/michaelyeack_at_gmail_com/heartbeats-$(date -u +%Y-%m-%d).jsonl` should show two entries: one `"status":"started"` and one `"status":"success"`, both `"platform":"macOS"`, `"device":"Michael's Mac mini"`.
+2. Wait 5 minutes → expect two more entries (next periodic tick).
+3. Launch iOS app → expect two more entries with `"platform":"iOS"` and the iPhone's device name.
+4. Disconnect macOS from the network, wait for a tick → expect a `"status":"failed"` entry with an `"error"` field after reconnect.
+5. Sign out on iOS → no further iOS heartbeats until sign-in restored.
+6. `cat heartbeats-*.jsonl | jq -r '[.receivedAt,.platform,.status] | @tsv'` gives a chronological health timeline by platform.
+
+**Edge cases:**
+- Heartbeat endpoint unreachable mid-sync → sync still completes (heartbeat call is best-effort with 5s timeout, doesn't throw).
+- Server unreachable for full sync → client sends `"status":"skipped"` with error `"server not configured"` *if* the URL is absent in Keychain; if URL is present but server is down, the heartbeat itself times out silently (no record written — which is itself a signal).
+- Concurrent ticks — `performFullSync` guards on `isSyncing`, so only one heartbeat pair per actual sync execution.
+
+**Platforms:**
+- iOS: build verified (`xcodebuild build … -destination 'generic/platform=iOS'` BUILD SUCCEEDED); needs user run to observe `"platform":"iOS"` heartbeats land server-side.
+- macOS: build verified; needs user run to observe heartbeats land in the JSONL file.
+- BlackbookServer: build verified; new `/heartbeat` route is handled by the embedded server in the main app (BlackbookServer target shares the LocalSyncServer source).

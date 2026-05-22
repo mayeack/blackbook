@@ -10,6 +10,7 @@ enum LocalSyncProtocol {
 
     enum Path {
         static let syncChanges = "/sync/changes"
+        static let heartbeat = "/heartbeat"
         static func photo(contactId: String) -> String { "/photo/\(contactId)" }
 
         // Backup endpoints
