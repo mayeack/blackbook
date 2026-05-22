@@ -19,6 +19,10 @@ final class LocalServerSyncService {
     private var isConnected = true
     private var offlineQueue: [SyncRecord] = []
     private var periodicTask: Task<Void, Never>?
+    /// Scheduled after any in-flight sync failure to retry quickly (~30s) without waiting for the
+    /// 5-min periodic tick. Cancelled on next successful sync and on `stopPeriodicSync` / deinit.
+    private var failureRetryTask: Task<Void, Never>?
+    private static let failureRetryDelay: TimeInterval = 30
 
     private static let offlineQueueKey = "localsync.offlineQueue"
     private static let lastSyncKey = "localsync.lastSyncDate"
@@ -48,6 +52,7 @@ final class LocalServerSyncService {
     deinit {
         networkMonitor.cancel()
         periodicTask?.cancel()
+        failureRetryTask?.cancel()
     }
 
     func configure(with context: ModelContext) {
@@ -102,6 +107,8 @@ final class LocalServerSyncService {
     func stopPeriodicSync() {
         periodicTask?.cancel()
         periodicTask = nil
+        failureRetryTask?.cancel()
+        failureRetryTask = nil
     }
 
     /// Compares the server epoch from the most recent response against the last one we stored.
@@ -182,14 +189,31 @@ final class LocalServerSyncService {
             let durationMs = Int(Date().timeIntervalSince(started) * 1000)
             Log.action("sync.local", metadata: ["pushed": "\(pushedCount)"], durationMs: durationMs, success: true)
             await sendHeartbeat(baseURL: url, password: password, status: "success", pushPending: pushedCount, durationMs: durationMs)
+            // Sync succeeded — cancel any pending fast retry from a previous failure.
+            failureRetryTask?.cancel()
+            failureRetryTask = nil
         } catch {
             syncError = error.localizedDescription
             logger.error("Local sync failed: \(error.localizedDescription)")
             Log.action("sync.local", success: false, error: error.localizedDescription)
             let durationMs = Int(Date().timeIntervalSince(started) * 1000)
             await sendHeartbeat(baseURL: url, password: password, status: "failed", pushPending: pushedCount, durationMs: durationMs, error: error.localizedDescription)
+            scheduleFailureRetry()
         }
         await UserActionLogger.shared.uploadPending()
+    }
+
+    /// Schedule a single fast retry of `performFullSync` after a transient sync failure. The retry
+    /// fires after `failureRetryDelay` seconds. At most one retry is queued at any time — a new
+    /// failure cancels and reschedules. A successful sync also cancels the queued retry.
+    private func scheduleFailureRetry() {
+        failureRetryTask?.cancel()
+        failureRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.failureRetryDelay))
+            guard let self, !Task.isCancelled else { return }
+            logger.info("Retrying sync \(Int(Self.failureRetryDelay))s after failure")
+            await self.performFullSync()
+        }
     }
 
     /// Best-effort heartbeat ping. Records a check-in line server-side regardless of whether

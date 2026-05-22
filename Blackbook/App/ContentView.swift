@@ -3,6 +3,7 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: AppTab = .dashboard
     @State private var syncService = ContactSyncService()
     @State private var dedupeService = ContactDeduplicationService()
@@ -22,6 +23,11 @@ struct ContentView: View {
         .tint(AppConstants.UI.accentGold)
         .onAppear { configureAndStartSync() }
         .onDisappear { serverSyncService.stopPeriodicSync() }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await serverSyncService.performFullSync() }
+            }
+        }
         #else
         NavigationSplitView {
             List(selection: $selectedTab) {
@@ -38,6 +44,11 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 500)
         .onAppear { configureAndStartSync() }
         .onDisappear { serverSyncService.stopPeriodicSync() }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await serverSyncService.performFullSync() }
+            }
+        }
         #endif
     }
 

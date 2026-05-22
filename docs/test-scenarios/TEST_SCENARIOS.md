@@ -222,3 +222,35 @@ rm -rf /Applications/BlackbookServer.app
 cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
 open /Applications/BlackbookServer.app
 ```
+
+## 2026-05-22 — Fast retry on sync failure + sync on app foreground
+
+**Summary:** Transient mid-push network failures used to leave dirty records stuck for up to 5 minutes (the periodic timer interval), and foregrounding the iOS app after backgrounding didn't trigger a fresh sync. Today the user merged contacts on iPhone, hit a "network connection was lost" mid-push, and the 782 affected records sat pending. This change schedules a 30-second retry after any sync failure, and runs `performFullSync()` immediately when the app enters the active scene phase. Both triggers are automatic.
+
+**Setup:**
+- iOS + macOS Blackbook running the new TestFlight build from this PR.
+- BlackbookServer running on this Mac on port 8765.
+
+**Steps:**
+1. Open Blackbook on iPhone, merge two duplicate contacts in `Contacts → tap a contact → Merge` (or any flow that creates `.pending` records).
+2. Immediately background the app (Home gesture).
+3. Wait 10 seconds, then foreground the app.
+4. Tail server access log: `tail -f ~/Library/Application\ Support/Blackbook/Logs/_access/access-$(date -u +%Y-%m-%d).jsonl`.
+   - **Expected:** within ~1 second of foreground, a `POST /sync/changes` row with `status:200` and `email:michaelyeack@gmail.com`.
+5. To exercise the fast retry: enable Airplane Mode on iPhone, attempt a merge or other edit, watch for `status:"failed"` heartbeat with a network error.
+6. Disable Airplane Mode within 30 seconds.
+   - **Expected:** within ~30 seconds of disabling Airplane Mode, a follow-up `POST /sync/changes` with `status:200`. The new heartbeat entry reports `status:"success"` and `pushPending:0`.
+7. On macOS, observe the next periodic tick (≤5 min after step 4 or 6) pulling the iPhone's merges.
+
+**Edge cases:**
+- Two rapid foreground events (quickly background + foreground twice) → `isSyncing` guard returns early on the second `performFullSync` call; no double push.
+- Sync failure followed by stop (e.g., view torn down) → `stopPeriodicSync()` cancels the queued `failureRetryTask` and the periodic task; no leaked Tasks.
+- Multiple sequential failures → each failure cancels and reschedules the retry task; at most one retry is queued at any time.
+- App opened cold (first launch) → existing `configureAndStartSync` initial-sync path runs; subsequent foregrounding fires the same `performFullSync`, idempotent via `isSyncing` guard.
+
+**Platforms:**
+- iOS: build verified (`xcodebuild build … -destination 'generic/platform=iOS'` BUILD SUCCEEDED). Real-device verification depends on TestFlight install.
+- macOS Blackbook: build verified. `.onChange(of: scenePhase)` fires on macOS too — equivalent benefit on Mac when window becomes key.
+- BlackbookServer: build verified, no server changes in this PR.
+
+**No local deploy step needed:** unlike PRs #36 and #37, no BlackbookServer changes here. The TestFlight pipeline ships the client change end-to-end.
