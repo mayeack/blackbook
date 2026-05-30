@@ -35,6 +35,7 @@
 		3D6714171EE7057CBE848A07 /* BlackbookServerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F49097698C68BE415965A964 /* BlackbookServerApp.swift */; };
 		3DDF69D8B580022FFDE12FCA /* ServerModelContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AB554426E75CDDDB20498E2 /* ServerModelContainer.swift */; };
 		3F2A2AE985F300274A0AFE5B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 854F37F271CEC66B3F1BE876 /* Assets.xcassets */; };
+		3F759DE748EA4246FBBBA456 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535A0087C38A75EF251D28DF /* DeviceIdentity.swift */; };
 		3F8A392AE676AD3A604B9EC3 /* ModelSyncApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = B56B474D15D62192EC7F6305 /* ModelSyncApply.swift */; };
 		40C2890B8D20DC8BF540F2B1 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EDF5198B759D9C15B32C55 /* SubscriptionView.swift */; };
 		418089A77A3E793B504C88FB /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD02AD2B31E4BDFBABB04A9 /* LoginView.swift */; };
@@ -144,6 +145,7 @@
 		F363626541A0478C9B36D5FC /* NetworkGraphViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C76007980526C6D096CFBD6 /* NetworkGraphViewModel.swift */; };
 		F7DD6583F920E520F4EEBE9D /* ClaudeAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */; };
 		F90B2184862AC79EBA241556 /* Contact.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8222BEE7020B6711480F644E /* Contact.swift */; };
+		F92545D544AD003815547A34 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535A0087C38A75EF251D28DF /* DeviceIdentity.swift */; };
 		F9C8E6C6BBBDE1468720591E /* ContactListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBCBC491C2BFAA0AABA68B3 /* ContactListViewModelTests.swift */; };
 		FC428EE351F1C7F125A3E819 /* AIInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C58C1200FB5DE674799040E /* AIInsightsView.swift */; };
 		FC4D35EB1F0F93963E0499E2 /* DateHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */; };
@@ -206,6 +208,7 @@
 		4DCA116B785721C8942FD325 /* FeatureGatingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureGatingTests.swift; sourceTree = "<group>"; };
 		4E45E53C6F0C7F7A6808F6EE /* LocalSyncServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSyncServer.swift; sourceTree = "<group>"; };
 		51B78E4C7B87A207BBC1A65A /* IMessageSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMessageSyncService.swift; sourceTree = "<group>"; };
+		535A0087C38A75EF251D28DF /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		56EBAC598F8585225B1F09E4 /* RelationshipScoreEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelationshipScoreEngine.swift; sourceTree = "<group>"; };
 		59D5A4C8F3FE7AFE76757690 /* Group.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Group.swift; sourceTree = "<group>"; };
 		5AA17CB7865FCC549E3A695B /* InteractionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionViewModel.swift; sourceTree = "<group>"; };
@@ -637,6 +640,7 @@
 				FA9E2FA5C2EA9DC5CC7C31F9 /* Constants.swift */,
 				FAE3F1034482B48A2B7CCF08 /* ContactSyncApply.swift */,
 				815CE74C56D359F1D0990254 /* DateHelpers.swift */,
+				535A0087C38A75EF251D28DF /* DeviceIdentity.swift */,
 				C0BF1D07C08681789AF0CC48 /* FeatureGating.swift */,
 				2877312225BA97E41E36D583 /* KeychainService.swift */,
 				61B8831D66944BBBD80A6E6E /* LocalSyncProtocol.swift */,
@@ -806,6 +810,7 @@
 				627F00BB1C55B4CD93AD362C /* DashboardView.swift in Sources */,
 				771CFACFB207D0ED960C9E33 /* DashboardViewModel.swift in Sources */,
 				6EBB34A3DDBE871B6B3BF70E /* DateHelpers.swift in Sources */,
+				F92545D544AD003815547A34 /* DeviceIdentity.swift in Sources */,
 				03915555188215A47C2FFBAF /* DuplicateScanView.swift in Sources */,
 				BF7F11D06ADAF53524CB7C27 /* EntityListRow.swift in Sources */,
 				1D5E32E9EE0B56EA56D2D7EC /* FeatureGating.swift in Sources */,
@@ -909,6 +914,7 @@
 				59FEFF7D727B2CB6F2E62054 /* ContactRelationship.swift in Sources */,
 				5C59F290C171167D7664BE76 /* ContactSyncApply.swift in Sources */,
 				25F4C43A32CF59B6B592D404 /* DateHelpers.swift in Sources */,
+				3F759DE748EA4246FBBBA456 /* DeviceIdentity.swift in Sources */,
 				1D1FA4DA1805F09735832F43 /* Group.swift in Sources */,
 				13B68B5D4ABD5BDC2C1AC8B7 /* Interaction.swift in Sources */,
 				113034766F531D2FF71921B2 /* LocalSyncProtocol.swift in Sources */,

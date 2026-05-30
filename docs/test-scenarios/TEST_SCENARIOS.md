@@ -254,3 +254,56 @@ open /Applications/BlackbookServer.app
 - BlackbookServer: build verified, no server changes in this PR.
 
 **No local deploy step needed:** unlike PRs #36 and #37, no BlackbookServer changes here. The TestFlight pipeline ships the client change end-to-end.
+
+## 2026-05-29 — Source-device provenance on every data record
+
+**Summary:** Every model (Contact, Tag, Group, Location, Activity, Interaction, Note, Reminder, ContactRelationship, RejectedCalendarEvent) now stores `createdBy{DeviceId,Platform,DeviceName}` and `lastEditedBy{DeviceId,Platform,DeviceName}`. Set on local create (device that ran the init), refreshed on local edit via the new `markLocallyEdited()` helper. Sync layer round-trips all six fields, preserving the originator's identity rather than overwriting with the local device. No UI surface — data is queryable from SQL on the master.
+
+**Setup:**
+- BlackbookServer rebuilt from this branch and reinstalled at `/Applications/BlackbookServer.app` (server target compiles the model files via project.yml; schema migrates automatically).
+- iOS + macOS Blackbook running new TestFlight builds.
+
+**Steps:**
+1. Confirm schema migrated cleanly: `sqlite3 ~/Library/Application\ Support/Blackbook/Server/default.store ".schema ZCONTACT"` → should show `ZCREATEDBYDEVICEID`, `ZCREATEDBYPLATFORM`, `ZCREATEDBYDEVICENAME`, `ZLASTEDITEDBYDEVICEID`, `ZLASTEDITEDBYPLATFORM`, `ZLASTEDITEDBYDEVICENAME`. Existing records carry NULL in all six (no backfill — confirmed accurate).
+2. On Mac, create a new contact "Provenance Test 1". Wait one sync tick.
+3. Query master:
+   ```bash
+   sqlite3 ~/Library/Application\ Support/Blackbook/Server/default.store \
+     "SELECT ZFIRSTNAME, ZCREATEDBYPLATFORM, ZCREATEDBYDEVICENAME
+      FROM ZCONTACT WHERE ZFIRSTNAME = 'Provenance Test 1'"
+   ```
+   → expect `Provenance Test 1 | macOS | Michael's Mac mini`.
+4. On iPhone, after pull tick, open the contact, verify it's visible (UI doesn't show source).
+5. Edit the contact on iPhone (e.g., add a phone). Wait one sync tick.
+6. Query master again:
+   ```bash
+   sqlite3 … "SELECT ZFIRSTNAME, ZCREATEDBYPLATFORM, ZLASTEDITEDBYPLATFORM
+              FROM ZCONTACT WHERE ZFIRSTNAME = 'Provenance Test 1'"
+   ```
+   → expect `Provenance Test 1 | macOS | iOS`. `createdBy*` unchanged (Mac), `lastEditedBy*` flipped to iPhone.
+
+**Edge cases:**
+- Pre-existing contacts (the 1288 records on the master before this PR) keep NULL provenance — confirmed by SQL count, no false attribution.
+- `DeviceIdentity.installId` regenerates only if the app is uninstalled + reinstalled. Reinstalling on the same physical device creates a new installId for new records; previously-created records keep their original IDs.
+- Schema migration is **automatic SwiftData lightweight migration** — no `currentSchemaVersion` bump, no store wipe. Verified locally: old store with 1288 contacts opened cleanly with 6 new columns appearing as NULL.
+- `markLocallyEdited()` correctly skips records in `.deleted` state — preserves tombstone semantics.
+- Sync apply uses **explicit nil**: a remote payload without the new keys overwrites the local-init defaults with nil, so records that pre-date this feature don't get falsely attributed to the receiving device.
+
+**Diagnostic queries** the user can now run on the master:
+- Which device created each duplicate of a contact: `SELECT ZFIRSTNAME, ZCREATEDBYPLATFORM, ZCREATEDBYDEVICEID FROM ZCONTACT WHERE ZFIRSTNAME LIKE '%Davina%'`.
+- Count records by creating platform: `SELECT ZCREATEDBYPLATFORM, COUNT(*) FROM ZCONTACT GROUP BY ZCREATEDBYPLATFORM`.
+
+**Platforms:**
+- iOS: build verified (`xcodebuild build … -destination 'generic/platform=iOS'` BUILD SUCCEEDED). End-to-end requires TestFlight install.
+- macOS Blackbook: build verified. Same TestFlight install caveat.
+- BlackbookServer: build verified, AND locally smoke-tested — the upgraded server started cleanly against the existing 1288-record master store, all 6 new columns present, all existing records have NULL provenance as expected.
+
+**Local-only deploy note:** BlackbookServer is NOT part of the TestFlight pipeline. After this PR merges, rebuild + reinstall:
+```
+killall BlackbookServer
+git pull --rebase
+xcodebuild -scheme BlackbookServer -destination 'platform=macOS' -configuration Release -derivedDataPath /tmp/blackbook-server-build build
+rm -rf /Applications/BlackbookServer.app
+cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
+open /Applications/BlackbookServer.app
+```
