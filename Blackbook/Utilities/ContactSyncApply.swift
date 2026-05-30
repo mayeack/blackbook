@@ -34,6 +34,13 @@ enum ContactSyncApply {
         if let linkedInURL = contact.linkedInURL { dict["linkedInURL"] = linkedInURL }
         if let twitterHandle = contact.twitterHandle { dict["twitterHandle"] = twitterHandle }
         if let instagramHandle = contact.instagramHandle { dict["instagramHandle"] = instagramHandle }
+        // Source-device provenance — six optional fields, skipped if nil (existing records).
+        if let v = contact.createdByDeviceId { dict["createdByDeviceId"] = v }
+        if let v = contact.createdByPlatform { dict["createdByPlatform"] = v }
+        if let v = contact.createdByDeviceName { dict["createdByDeviceName"] = v }
+        if let v = contact.lastEditedByDeviceId { dict["lastEditedByDeviceId"] = v }
+        if let v = contact.lastEditedByPlatform { dict["lastEditedByPlatform"] = v }
+        if let v = contact.lastEditedByDeviceName { dict["lastEditedByDeviceName"] = v }
         if let lastInteractionDate = contact.lastInteractionDate {
             dict["lastInteractionDate"] = iso8601.string(from: lastInteractionDate)
         }
@@ -107,6 +114,15 @@ enum ContactSyncApply {
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
             contact.customFields = obj
         }
+        // Source-device provenance — set from remote payload, or explicit nil if absent.
+        // Explicit nil overrides the local-init defaults so we don't lie about who created
+        // a record that came from a pre-feature client.
+        contact.createdByDeviceId = dict["createdByDeviceId"] as? String
+        contact.createdByPlatform = dict["createdByPlatform"] as? String
+        contact.createdByDeviceName = dict["createdByDeviceName"] as? String
+        contact.lastEditedByDeviceId = dict["lastEditedByDeviceId"] as? String
+        contact.lastEditedByPlatform = dict["lastEditedByPlatform"] as? String
+        contact.lastEditedByDeviceName = dict["lastEditedByDeviceName"] as? String
 
         // Resolve tag relationships
         if let tagIdStrings = dict["tagIds"] as? [String] {

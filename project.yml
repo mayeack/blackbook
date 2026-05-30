@@ -68,6 +68,7 @@ targets:
       - Blackbook/Utilities/ModelSyncApply.swift
       - Blackbook/Utilities/ContactSyncApply.swift
       - Blackbook/Utilities/DateHelpers.swift
+      - Blackbook/Utilities/DeviceIdentity.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.blackbookdevelopment.server

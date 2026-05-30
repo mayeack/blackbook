@@ -40,6 +40,15 @@ final class Contact {
     var lastSyncedAt: Date?
     var syncVersion: Int = 0
 
+    // MARK: - Source-device provenance
+
+    var createdByDeviceId: String?
+    var createdByPlatform: String?
+    var createdByDeviceName: String?
+    var lastEditedByDeviceId: String?
+    var lastEditedByPlatform: String?
+    var lastEditedByDeviceName: String?
+
     @Relationship(deleteRule: .cascade, inverse: \Interaction.contact)
     var interactions: [Interaction]
 
@@ -153,6 +162,25 @@ final class Contact {
         self.metViaBacklinks = []
         self.mergedIntoContact = nil
         self.mergedContacts = []
+        self.createdByDeviceId = DeviceIdentity.installId
+        self.createdByPlatform = DeviceIdentity.platform
+        self.createdByDeviceName = DeviceIdentity.deviceName
+        self.lastEditedByDeviceId = DeviceIdentity.installId
+        self.lastEditedByPlatform = DeviceIdentity.platform
+        self.lastEditedByDeviceName = DeviceIdentity.deviceName
+    }
+
+    /// Mark this record as locally edited: bumps `updatedAt`, flips `syncStatus` to `.pending`
+    /// (unless already `.deleted`), and refreshes the three `lastEditedBy*` fields to the
+    /// current device. Use everywhere a local user action mutates the record.
+    func markLocallyEdited() {
+        updatedAt = Date()
+        if syncStatus != SyncStatus.deleted.rawValue {
+            syncStatus = SyncStatus.pending.rawValue
+        }
+        lastEditedByDeviceId = DeviceIdentity.installId
+        lastEditedByPlatform = DeviceIdentity.platform
+        lastEditedByDeviceName = DeviceIdentity.deviceName
     }
 }
 
