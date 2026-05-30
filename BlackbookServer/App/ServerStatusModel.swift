@@ -68,7 +68,7 @@ final class ServerStatusModel {
     func startServer() {
         guard !email.isEmpty else { return }
         let password = BackupServer.derivePassword(from: email)
-        let srv = BackupServer(password: password, container: modelContainer)
+        let srv = BackupServer(password: password, container: modelContainer, imessage: imessage)
         srv.start()
         server = srv
 
