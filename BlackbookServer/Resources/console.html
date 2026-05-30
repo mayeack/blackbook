@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackbook Server Console</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --panel2: #1f242d; --line: #2a3039;
+    --text: #e6e9ef; --muted: #8b94a3; --gold: #d4a017; --green: #34c759;
+    --amber: #f2b705; --red: #ff5c5c; --blue: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 16px 24px;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); }
+  .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  header .meta { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  #updated { color: var(--muted); font-size: 12px; }
+  main { padding: 20px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); max-width: 1400px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .pill.green { background: rgba(52,199,89,.15); color: var(--green); }
+  .pill.amber { background: rgba(242,183,5,.15); color: var(--amber); }
+  .pill.red { background: rgba(255,92,92,.15); color: var(--red); }
+  .pill.muted { background: rgba(139,148,163,.15); color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px; }
+  .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .stat .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; margin-top: 2px; }
+  .bars { display: flex; gap: 8px; flex-wrap: wrap; }
+  .bar { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 76px; }
+  .bar .v { font-size: 18px; font-weight: 700; }
+  .bar .k { color: var(--muted); font-size: 11px; }
+  button {
+    font: inherit; font-weight: 600; color: var(--text); background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--gold); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .handles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .handles code { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font-size: 12px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 4px 2px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .scroll { max-height: 320px; overflow: auto; }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--gold); color: var(--text); padding: 10px 18px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="serverDot"></span>
+  <h1>Blackbook Server</h1>
+  <span class="meta" id="serverMeta"></span>
+  <span class="spacer"></span>
+  <span id="updated">connecting…</span>
+</header>
+<main>
+  <section class="card wide">
+    <h2>Sync Health</h2>
+    <div id="syncHealth"></div>
+  </section>
+
+  <section class="card">
+    <h2>Backups &amp; Storage</h2>
+    <div class="grid" id="backupStats"></div>
+    <table id="backupUsers" style="margin-top:12px"></table>
+  </section>
+
+  <section class="card">
+    <h2>Data &amp; iMessage</h2>
+    <div id="imessagePanel"></div>
+    <div class="grid" id="recordCounts" style="margin-top:12px"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>Requests (today)</h2>
+    <div class="bars" id="reqBars"></div>
+    <div class="scroll" style="margin-top:12px">
+      <table id="reqRecent"></table>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let lastImessageEnabled = false;
+
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B","KB","MB","GB","TB"]; let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + " " + u[i];
+}
+function ago(iso) {
+  if (!iso) return "—";
+  const t = Date.parse(iso); if (isNaN(t)) return iso;
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.round(s/60) + "m ago";
+  if (s < 86400) return Math.round(s/3600) + "h ago";
+  return Math.round(s/86400) + "d ago";
+}
+function statusPill(st) {
+  const cls = st === "success" ? "green" : st === "failed" ? "red" : st === "started" ? "amber" : "muted";
+  return `<span class="pill ${cls}">${st || "—"}</span>`;
+}
+function esc(s) { return String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+function render(d) {
+  const sv = d.server || {};
+  $("serverDot").className = "dot" + (sv.running ? " on" : "");
+  $("serverMeta").textContent = `port ${sv.port} · console ${sv.consolePort} · epoch ${String(sv.epoch||"").slice(0,8)}`;
+  $("updated").textContent = "updated " + new Date().toLocaleTimeString();
+
+  // Sync health
+  const sh = d.syncHealth || [];
+  if (!sh.length) {
+    $("syncHealth").innerHTML = `<div class="empty">No heartbeats recorded today or yesterday.</div>`;
+  } else {
+    let rows = sh.map(h => `<tr>
+      <td>${esc(h.device)} <span class="pill muted">${esc(h.platform)}</span></td>
+      <td>${esc(h.email)}</td>
+      <td>${statusPill(h.status)}</td>
+      <td class="num">${h.pushPending}</td>
+      <td>${ago(h.lastSyncDate)}</td>
+      <td>${ago(h.receivedAt)}</td>
+      <td>${h.durationMs ? h.durationMs + "ms" : "—"}</td>
+      <td class="mono" style="color:var(--red)">${esc(h.error)}</td>
+    </tr>`).join("");
+    $("syncHealth").innerHTML = `<table>
+      <tr><th>Device</th><th>Account</th><th>Status</th><th class="num">Pending</th><th>Last sync</th><th>Heartbeat</th><th>Duration</th><th>Error</th></tr>
+      ${rows}</table>`;
+  }
+
+  // Backups
+  const b = d.backups || {};
+  $("backupStats").innerHTML = `
+    <div class="stat"><div class="v">${b.totalCount ?? 0}</div><div class="k">Backups</div></div>
+    <div class="stat"><div class="v">${fmtBytes(b.totalBytes)}</div><div class="k">Disk Used</div></div>
+    <div class="stat"><div class="v">${(b.perUser||[]).length}</div><div class="k">Accounts</div></div>`;
+  const pu = b.perUser || [];
+  $("backupUsers").innerHTML = pu.length
+    ? `<tr><th>Account</th><th class="num">Count</th><th>Latest</th></tr>` +
+      pu.map(u => `<tr><td class="mono">${esc(u.email)}</td><td class="num">${u.count}</td><td>${ago(u.latest)}</td></tr>`).join("")
+    : `<tr><td class="empty">No backups yet.</td></tr>`;
+
+  // Data + iMessage
+  const data = d.data || {}; const im = data.imessage || {};
+  const enabled = !!im.isEnabled; lastImessageEnabled = enabled;
+  const imErr = im.error ? `<div class="empty" style="color:var(--red)">${esc(im.error)}</div>` : "";
+  const handles = (im.unmatchedHandles || []);
+  const handlesHtml = handles.length
+    ? `<div class="handles">${handles.map(h => `<code>${esc(h)}</code>`).join("")}</div>`
+    : "";
+  $("imessagePanel").innerHTML = `
+    <div class="grid">
+      <div class="stat"><div class="v">${im.messagesProcessed ?? 0}</div><div class="k">iMsgs Logged</div></div>
+      <div class="stat"><div class="v">${im.isRunning ? "On" : "Off"}</div><div class="k">Running</div></div>
+      <div class="stat"><div class="v">${ago(im.lastSyncDate)}</div><div class="k">Last Check</div></div>
+    </div>
+    ${imErr}
+    <div class="actions">
+      <button class="primary" id="btnBackfill" ${im.isBackfilling ? "disabled" : ""}>${im.isBackfilling ? "Importing…" : "Sync Last 30 Days"}</button>
+      <button id="btnToggle">${enabled ? "Disable" : "Enable"} iMessage Logging</button>
+    </div>
+    ${handles.length ? `<div class="empty" style="margin-top:10px">Unmatched handles (${handles.length}) — add to the matching contact:</div>${handlesHtml}` : ""}`;
+  $("btnBackfill").onclick = backfill;
+  $("btnToggle").onclick = toggle;
+
+  const rc = data.recordCounts || {};
+  $("recordCounts").innerHTML = Object.keys(rc).sort().map(k =>
+    `<div class="stat"><div class="v">${rc[k]}</div><div class="k">${esc(k)}</div></div>`).join("");
+
+  // Requests
+  const r = d.requests || {}; const bs = r.byStatus || {};
+  const order = ["200","202","400","401","404","5xx"];
+  const keys = Object.keys(bs).sort((a,b) => (order.indexOf(a)+99*(order.indexOf(a)<0)) - (order.indexOf(b)+99*(order.indexOf(b)<0)));
+  $("reqBars").innerHTML =
+    `<div class="bar"><div class="v">${r.total ?? 0}</div><div class="k">total</div></div>` +
+    keys.map(k => {
+      const cls = k.startsWith("2") ? "green" : k === "401" ? "amber" : "red";
+      return `<div class="bar"><div class="v" style="color:var(--${cls==='green'?'green':cls==='amber'?'amber':'red'})">${bs[k]}</div><div class="k">${k}</div></div>`;
+    }).join("");
+  const rec = r.recent || [];
+  $("reqRecent").innerHTML = rec.length
+    ? `<tr><th>Time</th><th>Method</th><th>Path</th><th>Account</th><th class="num">Status</th></tr>` +
+      rec.map(e => `<tr>
+        <td>${esc((e.timestamp||"").slice(11,19))}</td>
+        <td>${esc(e.method)}</td>
+        <td class="mono">${esc(e.path)}</td>
+        <td class="mono">${esc(e.email)}</td>
+        <td class="num"><span class="pill ${String(e.status).startsWith("2")?"green":e.status==401?"amber":"red"}">${e.status}</span></td>
+      </tr>`).join("")
+    : `<tr><td class="empty">No requests logged today.</td></tr>`;
+}
+
+async function load() {
+  try {
+    const res = await fetch("/api/stats", { cache: "no-store" });
+    render(await res.json());
+  } catch (e) {
+    $("updated").textContent = "server unreachable";
+  }
+}
+async function backfill() {
+  const btn = $("btnBackfill"); btn.disabled = true; btn.textContent = "Importing…";
+  try {
+    await fetch("/api/imessage/backfill", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({days:30}) });
+    toast("Backfill started — importing last 30 days");
+  } catch (e) { toast("Backfill failed to start"); }
+  setTimeout(load, 1500);
+}
+async function toggle() {
+  try {
+    await fetch("/api/imessage/toggle", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({enabled: !lastImessageEnabled}) });
+    toast(lastImessageEnabled ? "iMessage logging disabled" : "iMessage logging enabled");
+  } catch (e) { toast("Toggle failed"); }
+  setTimeout(load, 800);
+}
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

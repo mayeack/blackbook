@@ -68,6 +68,11 @@ struct ServerMenuView: View {
                     Button("Stop Server") {
                         model.stopServer()
                     }
+                    Button("Open Web Console") {
+                        if let url = URL(string: "http://127.0.0.1:\(BackupServer.defaultConsolePort)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
                 } else {
                     Button("Start Server") {
                         model.startServer()

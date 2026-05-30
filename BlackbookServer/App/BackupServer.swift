@@ -20,8 +20,13 @@ private struct HTTPRequest {
 final class BackupServer: @unchecked Sendable {
     private let password: String
     private let container: ModelContainer?
+    /// iMessage reader, used by the localhost console's safe actions (backfill/toggle) and stats.
+    private let imessage: IMessageSyncService?
     private let queue = DispatchQueue(label: "com.blackbookdevelopment.backupserver")
     private var listener: NWListener?
+    /// Loopback-only listener serving the web console on `defaultConsolePort`. Never exposed via
+    /// the Cloudflare tunnel (which forwards only the sync port), so it needs no password.
+    private var consoleListener: NWListener?
     private var bonjourService: NetService?
     private(set) var isRunning = false
     private(set) var port: UInt16 = 0
@@ -31,6 +36,7 @@ final class BackupServer: @unchecked Sendable {
     private let maxRestartDelay: TimeInterval = 30.0
 
     static let defaultPort: UInt16 = 8765
+    static let defaultConsolePort: UInt16 = 8766
     static let bonjourType = "_blackbook-sync._tcp"
     static let passwordHeader = "X-Sync-Password"
     static let userEmailHeader = "X-User-Email"
@@ -46,9 +52,10 @@ final class BackupServer: @unchecked Sendable {
     /// Loaded once at init from the epoch file next to the master store; persists across restarts.
     private let serverEpoch: String
 
-    init(password: String, container: ModelContainer? = nil) {
+    init(password: String, container: ModelContainer? = nil, imessage: IMessageSyncService? = nil) {
         self.password = password
         self.container = container
+        self.imessage = imessage
         self.serverEpoch = ServerModelContainer.currentEpoch()
     }
 
@@ -69,6 +76,7 @@ final class BackupServer: @unchecked Sendable {
                     self?.isRunning = true
                     self?.restartDelay = 1.0
                     self?.publishBonjour(port: Int(self?.port ?? 0))
+                    self?.startConsole()
                     logger.info("Backup server listening on port \(self?.port ?? 0)")
                 case .failed(let error):
                     logger.error("Listener failed: \(error.localizedDescription)")
@@ -96,10 +104,246 @@ final class BackupServer: @unchecked Sendable {
         isStopping = true
         listener?.cancel()
         listener = nil
+        consoleListener?.cancel()
+        consoleListener = nil
         bonjourService?.stop()
         bonjourService = nil
         isRunning = false
         port = 0
+    }
+
+    // MARK: - Web Console (loopback only)
+
+    /// Starts the localhost-only console listener on `defaultConsolePort`. Bound to 127.0.0.1 via
+    /// `requiredLocalEndpoint` so it's unreachable from the LAN or the Cloudflare tunnel (which maps
+    /// only the sync port). Idempotent — a no-op if already listening.
+    private func startConsole() {
+        guard consoleListener == nil else { return }
+        let params = NWParameters.tcp
+        params.allowLocalEndpointReuse = true
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(
+            host: NWEndpoint.Host("127.0.0.1"),
+            port: NWEndpoint.Port(rawValue: Self.defaultConsolePort)!
+        )
+        do {
+            let cl = try NWListener(using: params)
+            self.consoleListener = cl
+            cl.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    logger.info("Console listening on 127.0.0.1:\(Self.defaultConsolePort)")
+                case .failed(let error):
+                    logger.error("Console listener failed: \(error.localizedDescription)")
+                default:
+                    break
+                }
+            }
+            cl.newConnectionHandler = { [weak self] conn in
+                self?.handleConsole(connection: conn)
+            }
+            cl.start(queue: queue)
+        } catch {
+            logger.error("Failed to start console listener: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Console Request Handling
+
+    private func handleConsole(connection: NWConnection) {
+        // Defense-in-depth on top of the loopback-only bind: only serve loopback peers.
+        guard Self.isLoopback(connection.endpoint) else {
+            connection.cancel()
+            return
+        }
+        connection.start(queue: queue)
+        receiveRequest(connection: connection, accumulated: Data()) { [weak self] request in
+            guard let self else { return }
+            let response = self.handleConsoleRoute(request)
+            self.sendResponse(response, on: connection) {
+                connection.cancel()
+            }
+        }
+    }
+
+    private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        guard case let .hostPort(host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let addr): return addr.isLoopback
+        case .ipv6(let addr): return addr.isLoopback
+        case .name(let name, _): return name == "localhost" || name == "127.0.0.1" || name == "::1"
+        @unknown default: return false
+        }
+    }
+
+    private func handleConsoleRoute(_ request: HTTPRequest?) -> (status: Int, headers: [String: String], body: Data?) {
+        guard let request else { return (400, [:], "Bad Request".data(using: .utf8)) }
+        switch (request.method, request.path) {
+        case ("GET", "/"), ("GET", "/console"):
+            return consoleHTMLResponse()
+        case ("GET", "/api/stats"):
+            return consoleJSON(buildConsoleStats())
+        case ("POST", "/api/imessage/backfill"):
+            let days = consoleBodyInt(request.body, key: "days") ?? 30
+            if let imessage { Task { @MainActor in await imessage.backfill(daysBack: days) } }
+            return consoleJSON(["ok": true, "days": days], status: 202)
+        case ("POST", "/api/imessage/toggle"):
+            let enabled = consoleBodyBool(request.body, key: "enabled") ?? false
+            if let imessage { Task { @MainActor in imessage.isEnabled = enabled } }
+            return consoleJSON(["ok": true, "enabled": enabled])
+        default:
+            return (404, [:], "Not Found".data(using: .utf8))
+        }
+    }
+
+    private func consoleHTMLResponse() -> (status: Int, headers: [String: String], body: Data?) {
+        guard let url = Bundle.main.url(forResource: "console", withExtension: "html"),
+              let data = try? Data(contentsOf: url) else {
+            return (500, [:], "console.html missing from bundle".data(using: .utf8))
+        }
+        return (200, ["Content-Type": "text/html; charset=utf-8"], data)
+    }
+
+    private func consoleJSON(_ object: Any, status: Int = 200) -> (status: Int, headers: [String: String], body: Data?) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return (500, [:], nil) }
+        return (status, ["Content-Type": "application/json"], data)
+    }
+
+    private func consoleBodyInt(_ body: Data?, key: String) -> Int? {
+        guard let body, let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return nil }
+        return obj[key] as? Int
+    }
+
+    private func consoleBodyBool(_ body: Data?, key: String) -> Bool? {
+        guard let body, let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return nil }
+        return obj[key] as? Bool
+    }
+
+    // MARK: - Console Stats
+
+    private func buildConsoleStats() -> [String: Any] {
+        [
+            "generatedAt": ISO8601DateFormatter().string(from: Date()),
+            "server": [
+                "running": isRunning,
+                "port": Int(port),
+                "consolePort": Int(Self.defaultConsolePort),
+                "epoch": serverEpoch
+            ],
+            "syncHealth": consoleSyncHealth(),
+            "backups": consoleBackups(),
+            "requests": consoleRequests(),
+            "data": consoleData()
+        ]
+    }
+
+    private func consoleSyncHealth() -> [[String: Any]] {
+        let fm = FileManager.default
+        let days = consoleRecentDayStems(2) // oldest first → today's lines overwrite
+        var latestByDevice: [String: [String: Any]] = [:]
+        guard let userDirs = try? fm.contentsOfDirectory(at: remoteBackupsDirectory, includingPropertiesForKeys: nil) else { return [] }
+        for userDir in userDirs where userDir.hasDirectoryPath {
+            let logsDir = userDir.appendingPathComponent("Logs", isDirectory: true)
+            for day in days {
+                let url = logsDir.appendingPathComponent("heartbeats-\(day).jsonl")
+                for line in consoleReadLines(url) {
+                    guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+                    let device = (obj["device"] as? String) ?? (obj["platform"] as? String) ?? "unknown"
+                    let key = "\((obj["email"] as? String) ?? "")|\(device)"
+                    latestByDevice[key] = obj
+                }
+            }
+        }
+        return latestByDevice.values.map { obj in
+            [
+                "email": obj["email"] as? String ?? "",
+                "device": obj["device"] as? String ?? "",
+                "platform": obj["platform"] as? String ?? "",
+                "appVersion": obj["appVersion"] as? String ?? "",
+                "status": obj["status"] as? String ?? "",
+                "pushPending": obj["pushPending"] as? Int ?? 0,
+                "lastSyncDate": obj["lastSyncDate"] as? String ?? "",
+                "sentAt": obj["sentAt"] as? String ?? "",
+                "receivedAt": obj["receivedAt"] as? String ?? "",
+                "durationMs": obj["durationMs"] as? Int ?? 0,
+                "error": obj["error"] as? String ?? ""
+            ]
+        }.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+    }
+
+    private func consoleBackups() -> [String: Any] {
+        let fm = FileManager.default
+        var perUser: [[String: Any]] = []
+        var total = 0
+        if let userDirs = try? fm.contentsOfDirectory(at: remoteBackupsDirectory, includingPropertiesForKeys: nil) {
+            for userDir in userDirs where userDir.hasDirectoryPath {
+                let backups = ((try? fm.contentsOfDirectory(at: userDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+                    .filter { $0.hasDirectoryPath && $0.lastPathComponent != "Logs" }
+                let latest = backups.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
+                total += backups.count
+                perUser.append([
+                    "email": userDir.lastPathComponent,
+                    "count": backups.count,
+                    "latest": latest.map { ISO8601DateFormatter().string(from: $0) } ?? ""
+                ])
+            }
+        }
+        return ["totalCount": total, "totalBytes": diskUsageBytes, "perUser": perUser]
+    }
+
+    private func consoleRequests() -> [String: Any] {
+        let day = Self.accessDateFormatter.string(from: Date())
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Blackbook/Logs/_access/access-\(day).jsonl")
+        let lines = consoleReadLines(url)
+        var byStatus: [String: Int] = [:]
+        for line in lines {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+            let status = obj["status"] as? Int ?? 0
+            byStatus[status >= 500 ? "5xx" : "\(status)", default: 0] += 1
+        }
+        let recent = lines.suffix(50).compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        return ["total": lines.count, "byStatus": byStatus, "recent": Array(recent.reversed())]
+    }
+
+    private func consoleData() -> [String: Any] {
+        var counts: [String: Int] = [:]
+        if let container {
+            let ctx = ModelContext(container)
+            counts["Contact"] = (try? ctx.fetchCount(FetchDescriptor<Contact>())) ?? 0
+            counts["Interaction"] = (try? ctx.fetchCount(FetchDescriptor<Interaction>())) ?? 0
+            counts["Note"] = (try? ctx.fetchCount(FetchDescriptor<Note>())) ?? 0
+            counts["Tag"] = (try? ctx.fetchCount(FetchDescriptor<Tag>())) ?? 0
+            counts["Group"] = (try? ctx.fetchCount(FetchDescriptor<Group>())) ?? 0
+            counts["Location"] = (try? ctx.fetchCount(FetchDescriptor<Location>())) ?? 0
+            counts["ContactRelationship"] = (try? ctx.fetchCount(FetchDescriptor<ContactRelationship>())) ?? 0
+            counts["Reminder"] = (try? ctx.fetchCount(FetchDescriptor<Reminder>())) ?? 0
+            counts["Activity"] = (try? ctx.fetchCount(FetchDescriptor<Activity>())) ?? 0
+            counts["RejectedCalendarEvent"] = (try? ctx.fetchCount(FetchDescriptor<RejectedCalendarEvent>())) ?? 0
+        }
+        var im: [String: Any] = ["available": imessage != nil]
+        if let imessage {
+            im["isRunning"] = imessage.isRunning
+            im["isEnabled"] = imessage.isEnabled
+            im["messagesProcessed"] = imessage.messagesProcessed
+            im["isBackfilling"] = imessage.isBackfilling
+            im["lastSyncDate"] = imessage.lastSyncDate.map { ISO8601DateFormatter().string(from: $0) } ?? ""
+            im["unmatchedHandles"] = imessage.unmatchedHandlesLastPoll
+            if let err = imessage.syncError { im["error"] = err }
+        }
+        return ["recordCounts": counts, "imessage": im]
+    }
+
+    /// Day stems (UTC `yyyy-MM-dd`) for the last `n` days, oldest first.
+    private func consoleRecentDayStems(_ n: Int) -> [String] {
+        (0..<n).reversed().map { offset in
+            Self.accessDateFormatter.string(from: Date().addingTimeInterval(-Double(offset) * 86_400))
+        }
+    }
+
+    /// Reads a file as UTF-8 and returns its non-empty lines; empty array if the file is missing.
+    private func consoleReadLines(_ url: URL) -> [String] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
     }
 
     // MARK: - Restart
@@ -108,6 +352,8 @@ final class BackupServer: @unchecked Sendable {
         guard !isStopping else { return }
         listener?.cancel()
         listener = nil
+        consoleListener?.cancel()
+        consoleListener = nil
         bonjourService?.stop()
         bonjourService = nil
         isRunning = false

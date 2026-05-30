@@ -361,3 +361,32 @@ cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Ap
 open /Applications/BlackbookServer.app
 ```
 Then re-confirm Full Disk Access for "Blackbook Server" and toggle "Log iMessages" on.
+
+## 2026-05-30 — BlackbookServer web console (localhost KPI dashboard + safe actions)
+
+**Context:** Added a localhost-only web console to BlackbookServer for at-a-glance operational health. A second `NWListener` bound to `127.0.0.1:8766` (the Cloudflare tunnel maps only 8765, so the console is never internet-exposed and needs no password). Serves `console.html` + `GET /api/stats` (sync health, backups/storage, request/error log, record counts, iMessage stats) and two safe POST actions (`/api/imessage/backfill`, `/api/imessage/toggle`).
+
+### Open it
+- Menu-bar server.rack icon → **Open Web Console** (visible when the server is running), or browse to `http://127.0.0.1:8766`.
+
+### Scenario 1 — Dashboard loads with live data
+1. Open the console. Header shows a green dot + `port 8765 · console 8766 · epoch …`.
+2. Four sections populate and auto-refresh every 5 s: Sync Health (per-device heartbeats), Backups & Storage, Data & iMessage (record counts + iMessage panel), Requests (today's status histogram + recent tail).
+
+### Scenario 2 — Safe actions
+1. **Sync Last 30 Days** button → toast "Backfill started"; iMsgs-Logged KPI rises (requires FDA granted to Blackbook Server + Messages present).
+2. **Enable/Disable iMessage Logging** button flips `isRunning` in the Data panel on the next refresh.
+
+### Scenario 3 — Security: NOT exposed off-loopback (the important check)
+- `curl http://$(ipconfig getifaddr en0):8766/` → connection refused (status 000). Loopback-only bind confirmed.
+- `curl https://sync.libersecretorum.com/api/stats` → 401 (hits the 8765 sync server's auth gate; the console route doesn't exist there). The console is not tunneled.
+- Defense-in-depth: the console connection handler also rejects any non-loopback remote endpoint.
+
+### Verification done
+- BlackbookServer builds clean (Debug + Release); `console.html` confirmed bundled in `Contents/Resources/`.
+- `GET /` → 200 text/html 12049 bytes; `GET /api/stats` → full JSON (Contacts 1288, backups 5/3.8 MB, 2 sync devices, 148 requests today). Verified with curl + a strict Python HTTP client.
+- LAN:8766 refused; tunnel /api/stats → 401. Backfill endpoint → 202.
+- 13 Swift Testing tests still pass.
+
+### Note
+The console only runs while the sync server is running (it starts/stops with the main listener). The main Blackbook app is unaffected — these are BlackbookServer-only changes, deployed locally (not TestFlight).
