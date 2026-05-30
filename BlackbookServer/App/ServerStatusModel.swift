@@ -14,6 +14,11 @@ final class ServerStatusModel {
     /// Master SwiftData container. Nil if container init failed (sync routes will return 503
     /// in that case; backups and logs continue to work since they're filesystem-only).
     private let modelContainer: ModelContainer?
+
+    /// Reads the local iMessage database and logs interactions into the master store.
+    /// Runs independently of the backup/sync server (it only needs the master container +
+    /// Full Disk Access). Interactions it creates reach all devices on their next pull.
+    let imessage: IMessageSyncService
     var launchAtLogin: Bool {
         get { SMAppService.mainApp.status == .enabled }
         set {
@@ -34,9 +39,12 @@ final class ServerStatusModel {
 
     init(modelContainer: ModelContainer? = nil) {
         self.modelContainer = modelContainer
+        self.imessage = IMessageSyncService(modelContainer: modelContainer)
         if !email.isEmpty {
             startServer()
         }
+        // iMessage logging is independent of the email/sync server — start it if the user enabled it.
+        imessage.startIfEnabled()
     }
 
     // Source of truth is the main Blackbook app's logged-in user.

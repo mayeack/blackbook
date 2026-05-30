@@ -109,13 +109,6 @@ enum AppConstants {
         static let serverURL = "https://sync.libersecretorum.com"
     }
 
-    enum IMessageSync {
-        static let chatDBPath = "\(NSHomeDirectory())/Library/Messages/chat.db"
-        static let pollIntervalSeconds: TimeInterval = 30
-        static let lastProcessedROWIDKey = "iMessageSync.lastProcessedROWID"
-        static let enabledKey = "iMessageSync.enabled"
-    }
-
     enum Defaults {
         static let reminderLeadTimeDays = 1
         static let autoReminderThreshold: Double = 25.0

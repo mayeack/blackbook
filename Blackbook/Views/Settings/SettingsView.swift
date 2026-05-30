@@ -57,16 +57,10 @@ struct SettingsView: View {
     @State private var showGoogleSignOutConfirm = false
     @State private var showImportOptions = false
     @State private var showSelectiveImport = false
-    #if os(macOS)
-    @Environment(IMessageSyncService.self) private var iMessageService
-    #endif
 
     var body: some View {
         Form {
             contactsSyncSection
-            #if os(macOS)
-            iMessageSyncSection
-            #endif
             hiddenContactsSection
             securitySection
             dataSection
@@ -185,70 +179,6 @@ struct SettingsView: View {
         }
         return "Not synced"
     }
-
-    // MARK: iMessage Sync (macOS)
-
-    #if os(macOS)
-    private var iMessageSyncSection: some View {
-        Section {
-            SettingsRow(
-                icon: "message.fill",
-                iconColor: .green,
-                title: "iMessage Sync",
-                subtitle: iMessageSyncSubtitle
-            ) {
-                Toggle("", isOn: Binding(
-                    get: { iMessageService.isEnabled },
-                    set: { newValue in
-                        iMessageService.isEnabled = newValue
-                        if newValue {
-                            iMessageService.startIfEnabled(with: modelContext)
-                        }
-                    }
-                ))
-                .labelsHidden()
-            }
-
-            if iMessageService.isRunning {
-                SettingsRow(
-                    icon: "checkmark.circle.fill",
-                    iconColor: .green,
-                    title: "Messages Logged",
-                    subtitle: nil
-                ) {
-                    Text("\(iMessageService.messagesProcessed)")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if let err = iMessageService.syncError {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-                .padding(.leading, 40)
-            }
-        } header: {
-            Text("iMessage")
-        } footer: {
-            Text("Automatically logs sent and received iMessages as interactions for matching contacts. Requires Full Disk Access.")
-        }
-    }
-
-    private var iMessageSyncSubtitle: String {
-        if iMessageService.isRunning, let date = iMessageService.lastSyncDate {
-            return "Last checked: \(date.relativeDescription)"
-        }
-        if iMessageService.isRunning {
-            return "Running"
-        }
-        return "Disabled"
-    }
-    #endif
 
     // MARK: Hidden Contacts
 

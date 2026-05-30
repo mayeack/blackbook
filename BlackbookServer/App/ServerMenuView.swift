@@ -82,6 +82,10 @@ struct ServerMenuView: View {
 
             Divider()
 
+            iMessageSection
+
+            Divider()
+
             Button("Quit Blackbook Server") {
                 NSApplication.shared.terminate(nil)
             }
@@ -93,6 +97,84 @@ struct ServerMenuView: View {
                 editingEmail = model.email
             }
             model.refreshStatus()
+        }
+    }
+
+    @ViewBuilder
+    private var iMessageSection: some View {
+        let im = model.imessage
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { im.isEnabled },
+                set: { im.isEnabled = $0 }
+            )) {
+                Label("Log iMessages", systemImage: "message")
+                    .font(.caption)
+            }
+
+            if im.isRunning {
+                HStack {
+                    Text("\(im.messagesProcessed) logged")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let date = im.lastSyncDate {
+                        Spacer()
+                        Text("checked \(date.formatted(.relative(presentation: .numeric)))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Button {
+                    Task { await im.backfill(daysBack: 30) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if im.isBackfilling {
+                            ProgressView().controlSize(.small)
+                            Text("Importing…")
+                        } else {
+                            Image(systemName: "clock.arrow.circlepath")
+                            Text("Sync Last 30 Days")
+                        }
+                    }
+                    .font(.caption)
+                }
+                .disabled(im.isBackfilling)
+            }
+
+            if let err = im.syncError {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open Full Disk Access") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.caption2)
+            }
+
+            if !im.unmatchedHandlesLastPoll.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(im.unmatchedHandlesLastPoll, id: \.self) { handle in
+                            Text(handle)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        Text("Add as a phone or email on the matching contact to log their messages.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } label: {
+                    Text("Unmatched handles (\(im.unmatchedHandlesLastPoll.count))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
