@@ -307,3 +307,57 @@ rm -rf /Applications/BlackbookServer.app
 cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
 open /Applications/BlackbookServer.app
 ```
+
+---
+
+## 2026-05-29 — iMessage Sync moved into BlackbookServer (un-sandboxed) + email matching, backfill, dedup, diagnostics
+
+**Context:** Toggling "iMessage Sync" in the macOS app did nothing even with Full Disk Access. Root cause: the main macOS app is sandboxed (required for its TestFlight distribution), so it (a) resolved `chat.db` to a non-existent sandbox-container path and (b) couldn't read `~/Library/Messages/` even with FDA. De-sandboxing the main app would break TestFlight (App Store Connect rejects non-sandboxed macOS builds, ITMS-90296). Resolution: the iMessage reader was moved into **BlackbookServer**, which is already un-sandboxed, always-running (login item), holds the master SwiftData store, and syncs to all devices. Interactions it creates flow to iOS + macOS via `/sync/changes` (server pull serves by `updatedAt`).
+
+The main app's iMessage Sync UI/service was **removed**. All iMessage controls now live in the BlackbookServer menu-bar popover.
+
+### Setup (one-time)
+1. Rebuild + reinstall BlackbookServer from this branch (see deploy note below). The menu-bar "server.rack" icon should appear.
+2. Grant **Full Disk Access to "Blackbook Server"** (not "Blackbook") in System Settings → Privacy & Security → Full Disk Access. This is the key difference — FDA must be on the server app.
+3. Click the menu-bar icon → toggle **"Log iMessages"** on.
+
+### Scenario 1 — Toggle works in the server
+1. Open the BlackbookServer menu. Flip "Log iMessages" on.
+2. It should show "N logged" and "checked <time> ago". No red error.
+3. If a red "Cannot open chat.db … Grant Full Disk Access to Blackbook Server" error appears, FDA isn't granted to the *server* app — fix via the "Open Full Disk Access" button, then re-toggle.
+
+### Scenario 2 — Email-handle matching
+1. Pick a contact whose iMessage thread is an `@icloud.com` Apple ID and confirm that email is on the contact. Send yourself a message from that thread on another device.
+2. Within 30s the message should log. Verify on the Mac app (after the next sync pull) or iPhone: the contact's Interactions list shows it with a "message.fill" icon and the right direction arrow.
+
+### Scenario 3 — 30-day backfill
+1. In the server menu, tap "Sync Last 30 Days". Spinner shows "Importing…", then "N logged" jumps.
+2. After the next client sync pull, open Nick Nguyen / Jose / any frequent contact on iPhone or Mac — Interactions from the last 30 days should be present with correct timestamps + direction.
+3. Tap "Sync Last 30 Days" again — interaction count must NOT double (dedup guard).
+
+### Scenario 4 — Unmatched-handles diagnostic
+1. Clear the phone/email on a contact you message. Send yourself a message from that handle. Wait 30s.
+2. Server menu shows "Unmatched handles (1)"; expand to see the verbatim handle.
+3. Re-add the handle to the contact; on next poll it leaves the list and starts logging.
+
+### Scenario 5 — Device round-trip
+1. After Scenarios 2–3, wait for the iOS/macOS client's 5-min `LocalServerSyncService.performFullSync` (or foreground the app to trigger an immediate pull).
+2. The iMessage interactions appear on every device; relationship score reflects the bumped `lastInteractionDate`.
+3. Note: because the server runs 24/7, this now works **even when the Mac app is closed** — a strict improvement over the old main-app design.
+
+### Platforms
+- BlackbookServer (macOS, un-sandboxed): build verified clean; reinstalled to /Applications and running. iMessage reader compiled in.
+- Blackbook main app (iOS + macOS): build verified clean; macOS sandbox **restored** (confirmed `com.apple.security.app-sandbox` present via `codesign -d --entitlements -`) → TestFlight unaffected.
+- Tests: 13 Swift Testing tests pass.
+
+### Local-only deploy note
+BlackbookServer is NOT in the TestFlight pipeline. After this branch merges, rebuild + reinstall:
+```
+killall BlackbookServer
+git pull --rebase
+xcodebuild -scheme BlackbookServer -destination 'platform=macOS' -configuration Release -derivedDataPath /tmp/blackbook-server-build build
+rm -rf /Applications/BlackbookServer.app
+cp -R /tmp/blackbook-server-build/Build/Products/Release/BlackbookServer.app /Applications/
+open /Applications/BlackbookServer.app
+```
+Then re-confirm Full Disk Access for "Blackbook Server" and toggle "Log iMessages" on.

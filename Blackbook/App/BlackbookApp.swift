@@ -16,9 +16,6 @@ struct BlackbookApp: App {
     let modelContainer: ModelContainer
     @State private var authService = AuthenticationService()
     @State private var googleCalendarService = GoogleCalendarService()
-    #if os(macOS)
-    @State private var iMessageService = IMessageSyncService()
-    #endif
 
     init() {
         UserActionLogger.shared.setUserEmail(UserDefaults.standard.string(forKey: "auth.userEmail"))
@@ -68,12 +65,6 @@ struct BlackbookApp: App {
             AuthGateView()
                 .environment(authService)
                 .environment(googleCalendarService)
-                #if os(macOS)
-                .environment(iMessageService)
-                .onAppear {
-                    iMessageService.startIfEnabled(with: modelContainer.mainContext)
-                }
-                #endif
         }
         .modelContainer(modelContainer)
     }
