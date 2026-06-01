@@ -408,56 +408,79 @@ final class LocalServerSyncService {
 
         guard let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
-        // Apply in dependency order: leaf entities first
+        // Apply in dependency order: leaf entities first. Each layer is applied in chunks with
+        // intermediate saves (see `applyInChunks`) so a fresh full sync never commits one massive
+        // 0→N transaction — that made the UI's @Query re-render the entire new object graph at once
+        // and faulted SwiftData relationships, crashing under Release optimization (work_log 2026-06-01).
 
         // Layer 0: Tags, Groups, Locations, RejectedCalendarEvents
         if let tags = top["tags"] as? [[String: Any]] {
             logger.info("Pulled \(tags.count) tag(s)")
-            for dict in tags { try ModelSyncApply.applyRemoteTag(dict, to: context) }
+            try applyInChunks(tags, context: context, apply: ModelSyncApply.applyRemoteTag)
         }
         if let groups = top["groups"] as? [[String: Any]] {
             logger.info("Pulled \(groups.count) group(s)")
-            for dict in groups { try ModelSyncApply.applyRemoteGroup(dict, to: context) }
+            try applyInChunks(groups, context: context, apply: ModelSyncApply.applyRemoteGroup)
         }
         if let locations = top["locations"] as? [[String: Any]] {
             logger.info("Pulled \(locations.count) location(s)")
-            for dict in locations { try ModelSyncApply.applyRemoteLocation(dict, to: context) }
+            try applyInChunks(locations, context: context, apply: ModelSyncApply.applyRemoteLocation)
         }
         if let events = top["rejectedCalendarEvents"] as? [[String: Any]] {
-            for dict in events { try ModelSyncApply.applyRemoteRejectedEvent(dict, to: context) }
+            try applyInChunks(events, context: context, apply: ModelSyncApply.applyRemoteRejectedEvent)
         }
 
         // Layer 1: Activities (references Groups)
         if let activities = top["activities"] as? [[String: Any]] {
             logger.info("Pulled \(activities.count) activity(ies)")
-            for dict in activities { try ModelSyncApply.applyRemoteActivity(dict, to: context) }
+            try applyInChunks(activities, context: context, apply: ModelSyncApply.applyRemoteActivity)
         }
 
         // Layer 2: Contacts (references Tags, Groups, Locations, Activities)
         if let contacts = top["contacts"] as? [[String: Any]] {
             logger.info("Pulled \(contacts.count) contact(s)")
-            for dict in contacts { try ContactSyncApply.applyRemoteContact(dict, to: context) }
+            try applyInChunks(contacts, context: context, apply: ContactSyncApply.applyRemoteContact)
         }
 
         // Layer 3: Child entities (reference Contacts)
         if let interactions = top["interactions"] as? [[String: Any]] {
             logger.info("Pulled \(interactions.count) interaction(s)")
-            for dict in interactions { try ModelSyncApply.applyRemoteInteraction(dict, to: context) }
+            try applyInChunks(interactions, context: context, apply: ModelSyncApply.applyRemoteInteraction)
         }
         if let notes = top["notes"] as? [[String: Any]] {
             logger.info("Pulled \(notes.count) note(s)")
-            for dict in notes { try ModelSyncApply.applyRemoteNote(dict, to: context) }
+            try applyInChunks(notes, context: context, apply: ModelSyncApply.applyRemoteNote)
         }
         if let reminders = top["reminders"] as? [[String: Any]] {
             logger.info("Pulled \(reminders.count) reminder(s)")
-            for dict in reminders { try ModelSyncApply.applyRemoteReminder(dict, to: context) }
+            try applyInChunks(reminders, context: context, apply: ModelSyncApply.applyRemoteReminder)
         }
         if let rels = top["contactRelationships"] as? [[String: Any]] {
             logger.info("Pulled \(rels.count) relationship(s)")
-            for dict in rels { try ModelSyncApply.applyRemoteContactRelationship(dict, to: context) }
+            try applyInChunks(rels, context: context, apply: ModelSyncApply.applyRemoteContactRelationship)
         }
 
         try context.save()
+    }
+
+    /// Number of pulled records applied per intermediate save during a pull.
+    private static let applyChunkSize = 25
+
+    /// Applies pulled record dicts via `apply`, saving after every `applyChunkSize` records so no
+    /// single transaction commits a massive 0→N change (which can fault SwiftData relationships
+    /// during the subsequent @Query re-render and crash the UI under Release optimization — observed
+    /// 2026-06-01 after a 95-message iMessage backfill). The caller saves once more for the remainder.
+    private func applyInChunks(
+        _ items: [[String: Any]],
+        context: ModelContext,
+        apply: (_ dict: [String: Any], _ context: ModelContext) throws -> Void
+    ) throws {
+        for (index, dict) in items.enumerated() {
+            try apply(dict, context)
+            if (index + 1) % Self.applyChunkSize == 0 {
+                try context.save()
+            }
+        }
     }
 
     private func fetchPendingContacts(context: ModelContext) throws -> [Contact] {

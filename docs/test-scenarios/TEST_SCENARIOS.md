@@ -390,3 +390,18 @@ Then re-confirm Full Disk Access for "Blackbook Server" and toggle "Log iMessage
 
 ### Note
 The console only runs while the sync server is running (it starts/stops with the main listener). The main Blackbook app is unaffected — these are BlackbookServer-only changes, deployed locally (not TestFlight).
+
+## 2026-06-01 — Harden bulk sync-apply against the SwiftData @Query faulting crash
+
+**Context:** After the 95-message iMessage backfill, the macOS app crash-looped (4× `EXC_BAD_ACCESS` in 45s) the moment the 95 interactions bulk-synced in. Root cause: `LocalServerSyncService.pullRemoteChanges` applied all pulled records to the main context and saved once — a single 0→95 transaction made the dashboard's `@Query` re-render the entire new object graph at once, faulting the `Interaction↔Contact` relationship under Release optimization. (Debug + settled-data Release builds do NOT crash; it was a transient race during the one-time bulk insert.) Fix: apply each layer in chunks of 25 with intermediate saves (`applyInChunks`) so no single massive transition occurs.
+
+### Scenario — fresh-device full sync of a large store
+1. On a device with an empty/reset store, sign in and let the first full sync run (pulls all contacts + the 95+ interactions).
+2. Keep the **Overview/Dashboard** in front during the sync.
+3. Expect: no crash; interactions appear (possibly in visible chunks of ~25 as each intermediate save lands); relationship scores update.
+4. Open a contact → Interactions tab → messages render.
+
+### Notes / caveats
+- The crash is timing/optimization-dependent and could not be reproduced on settled data, so this hardening is **defense-in-depth** — verified by build + test + reasoning, not by reproducing the original race.
+- Chunked saves also improve failure semantics: a mid-pull error now preserves already-applied chunks (idempotent UUID-upsert heals the rest on the next sync) instead of losing the whole batch.
+- Verified: macOS + iOS build clean; 13 Swift Testing tests pass.
