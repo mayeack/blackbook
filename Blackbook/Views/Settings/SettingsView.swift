@@ -636,7 +636,7 @@ struct HiddenContactsView: View {
                             ForEach(hiddenContacts) { contact in
                                 contactRow(contact, label: "Unhide") {
                                     contact.isHidden = false
-                                    contact.updatedAt = Date()
+                                    contact.markLocallyEdited()
                                     try? modelContext.save()
                                 }
                             }
@@ -649,7 +649,7 @@ struct HiddenContactsView: View {
                                 contactRow(contact, label: "Restore") {
                                     contact.isMergedAway = false
                                     contact.mergedIntoContact = nil
-                                    contact.updatedAt = Date()
+                                    contact.markLocallyEdited()
                                     try? modelContext.save()
                                 }
                             }
@@ -766,7 +766,7 @@ struct HideContactsView: View {
                     Button("Hide (\(selectedIDs.count))") {
                         for contact in allContacts where selectedIDs.contains(contact.id) {
                             contact.isHidden = true
-                            contact.updatedAt = Date()
+                            contact.markLocallyEdited()
                         }
                         try? modelContext.save()
                         dismiss()

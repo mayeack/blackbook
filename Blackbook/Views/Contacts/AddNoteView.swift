@@ -22,7 +22,7 @@ struct AddNoteView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { modelContext.insert(Note(contact: contact, content: content, category: category)); contact.updatedAt = Date(); try? modelContext.save(); dismiss() }.disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { modelContext.insert(Note(contact: contact, content: content, category: category)); contact.markLocallyEdited(); try? modelContext.save(); dismiss() }.disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
             }
         }
     }

@@ -26,7 +26,9 @@ struct LogInteractionView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") {
                     modelContext.insert(Interaction(contact: contact, type: type, date: date, duration: nil, summary: summary.isEmpty ? nil : summary, sentiment: nil))
-                    contact.lastInteractionDate = date; contact.updatedAt = Date(); try? modelContext.save(); dismiss()
+                    contact.lastInteractionDate = date
+                    contact.markLocallyEdited()
+                    try? modelContext.save(); dismiss()
                 } }
             }
         }

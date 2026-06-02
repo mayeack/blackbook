@@ -232,7 +232,14 @@ final class IMessageSyncService {
 
         let contacts: [Contact]
         do {
-            contacts = try context.fetch(FetchDescriptor<Contact>())
+            // Exclude merged-away and hidden contacts — they're "dead" pointers from the user's
+            // perspective. If a live duplicate and a merged-away version both share a phone or
+            // email, the handle-lookup dict-assignment order can pick the merged-away one, which
+            // makes the iMessage invisible on the live contact's detail view (observed
+            // 2026-06-02 with Hugo Dooner: 4 messages attached to merged-away Z_PK 1210
+            // instead of live Z_PK 313).
+            let predicate = #Predicate<Contact> { !$0.isMergedAway && !$0.isHidden }
+            contacts = try context.fetch(FetchDescriptor<Contact>(predicate: predicate))
         } catch {
             syncError = "Failed to fetch contacts: \(error.localizedDescription)"
             logger.error("Contact fetch failed: \(error)")

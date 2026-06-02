@@ -436,3 +436,36 @@ Two changes ship together:
 - Other views still use `@Query` — they're rendered only when their tab is selected, so a settled main store at that point keeps them safe.
 - Verified by: iOS Simulator + macOS clean builds; 13 Swift Testing tests pass.
 - Crash signature confirmed via `~/Downloads/Blackbook-2026-06-02-093228.ips` — frames 12-13 in `_SwiftData_SwiftUI` (`@Query`), frame 18 in `ScrollView.init`, frame 5 `Sequence.forEach`, into SwiftData fault on tagged address `0x8000000000000010`.
+
+## 2026-06-02 — Silent sync drift fix: every contact edit now flips syncStatus to pending; iMessage handle lookup ignores merged-away
+
+**Context:** User reported three divergences between iOS and macOS for the same Contact records: (1) Hugo Dooner shows as "Hugo" on iOS but "Hugo Dooner" on macOS, (2) Kail Walker is priority=1 on iOS but priority=0 on macOS, (3) Hugo's recent iMessages don't show on the Hugo Dooner contact detail. Root cause for (1) and (2): 17 edit sites across the iOS/macOS app wrote `contact.updatedAt = Date()` (or just mutated a syncable field) without calling `contact.markLocallyEdited()` to flip `syncStatus` to `.pending`. The next push filters by `syncStatus != .synced`, so silently-edited records never leave the device — server stays stale, the other device pulls the stale version. Audit on the user's macOS store found **643 contacts** with `updatedAt > lastSyncedAt && syncStatus = .synced` — silently-edited but never pushed. Root cause for (3): `BlackbookServer/App/IMessageSyncService.buildHandleLookup` fetched every Contact including merged-away ones, so when a live duplicate and a merged-away version shared a phone/email, the dict-assignment order could pick the merged-away one and attach incoming iMessages to a hidden record. Confirmed on server: 4 Hugo iMessages were attached to merged-away Z_PK 1210, not live Z_PK 313.
+
+Changes:
+1. **17 edit sites updated** to call `markLocallyEdited()` instead of direct `updatedAt = Date()` / unmarked field writes. Files: `ContactDetailView`, `ContactListView`, `ContactFormView`, `AddNoteView`, `LogInteractionView`, `ContactTagPickerView`, `ContactGroupPickerView`, `ContactLocationPickerView`, `DashboardView`, `SettingsView`, `ContactSyncService`, `SocialEnrichmentService`, `ContactMergeService`.
+2. **`IMessageSyncService`** fetches contacts with `#Predicate<Contact> { !$0.isMergedAway && !$0.isHidden }` before building the handle lookup.
+
+Server-side one-time SQL heal applied directly to the master store while the daemon was stopped:
+- `UPDATE ZINTERACTION SET ZCONTACT=313, ZUPDATEDAT=<now> WHERE ZCONTACT=1210;` — relink 4 Hugo iMessages from merged-away Hugo to live Hugo Dooner.
+- `UPDATE ZCONTACT SET ZLASTNAME='Dooner', ZUPDATEDAT=<now> WHERE Z_PK=313;` — restore the last name and force a re-pull.
+- `UPDATE ZCONTACT SET ZUPDATEDAT=<now> WHERE Z_PK=1197;` — bump Kail Walker so macOS adopts the server's `isPriority=1`.
+
+### Scenario A — single-edit propagation
+1. On either device (build 119+), open any contact, change one field (last name, priority toggle, add tag), save.
+2. Within 5 min the change appears on the other device's view of the same contact.
+3. Watch the server access log: the source device's next `/sync/changes` push includes that record; the other device's pull response includes it.
+
+### Scenario B — silent-edit backlog clears as users touch contacts
+1. With build 119+ on macOS, open any of the 643 silently-edited contacts and make any change (or just toggle a flag and back).
+2. That contact's next push reaches the server; the other device adopts it.
+3. The full 643 backfill is opt-in — only contacts the user re-touches will sync. This avoids macOS-wins overwriting iOS edits that were also silent.
+
+### Scenario C — iMessage attaches to live contact when duplicates exist
+1. Have a contact with a live record (`isMergedAway=false`) and a merged-away duplicate (`isMergedAway=true`) sharing the same phone/email.
+2. Receive a new iMessage from that handle.
+3. Open the live contact → Interactions tab → the message appears. The merged-away contact gets nothing.
+
+### Notes / caveats
+- The fix is per-edit-going-forward. The existing 643-record backlog clears only as users naturally touch each contact (or via a deliberate one-time migration, which we deliberately skipped because it would overwrite iOS edits for any field where the two devices disagree).
+- BlackbookServer is local-deploy only (not TestFlight). After this PR lands, rebuild + reinstall `/Applications/BlackbookServer.app` from main so the iMessage-lookup fix takes effect.
+- Verified: iOS Simulator + macOS clean builds, BlackbookServer clean build, 13 Swift Testing tests pass.

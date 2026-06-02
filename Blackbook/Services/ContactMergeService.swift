@@ -22,8 +22,8 @@ final class ContactMergeService {
 
         secondary.isMergedAway = true
         secondary.mergedIntoContact = primary
-        primary.updatedAt = Date()
-        secondary.updatedAt = Date()
+        primary.markLocallyEdited()
+        secondary.markLocallyEdited()
 
         try context.save()
         logger.info("Merged '\(secondary.displayName)' into '\(primary.displayName)'")

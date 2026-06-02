@@ -61,7 +61,7 @@ struct ContactDetailView: View {
                     Button {
                         if contact.isHidden {
                             contact.isHidden = false
-                            contact.updatedAt = Date()
+                            contact.markLocallyEdited()
                             try? modelContext.save()
                         } else {
                             showHideConfirm = true
@@ -118,7 +118,7 @@ struct ContactDetailView: View {
             Button("Cancel", role: .cancel) {}
             Button("Hide", role: .destructive) {
                 contact.isHidden = true
-                contact.updatedAt = Date()
+                contact.markLocallyEdited()
                 try? modelContext.save()
                 dismiss()
             }
@@ -411,7 +411,7 @@ struct MetViaPickerView: View {
                 Section {
                     Button {
                         contact.metVia = nil
-                        contact.updatedAt = Date()
+                        contact.markLocallyEdited()
                         try? modelContext.save()
                         dismiss()
                     } label: {
@@ -428,7 +428,7 @@ struct MetViaPickerView: View {
                     ForEach(filtered) { c in
                         Button {
                             contact.metVia = c
-                            contact.updatedAt = Date()
+                            contact.markLocallyEdited()
                             try? modelContext.save()
                             dismiss()
                         } label: {
@@ -528,13 +528,13 @@ struct IntroducedToPickerView: View {
                         for c in eligible {
                             if selectedIDs.contains(c.id) && !currentBacklinkIDs.contains(c.id) {
                                 c.metVia = contact
-                                c.updatedAt = Date()
+                                c.markLocallyEdited()
                             } else if !selectedIDs.contains(c.id) && currentBacklinkIDs.contains(c.id) {
                                 c.metVia = nil
-                                c.updatedAt = Date()
+                                c.markLocallyEdited()
                             }
                         }
-                        contact.updatedAt = Date()
+                        contact.markLocallyEdited()
                         try? modelContext.save()
                         dismiss()
                     }.fontWeight(.semibold)

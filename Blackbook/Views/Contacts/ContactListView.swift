@@ -199,7 +199,7 @@ struct ContactListView: View {
                 Button("Cancel", role: .cancel) { contactToHide = nil }
                 Button("Hide", role: .destructive) {
                     contact.isHidden = true
-                    contact.updatedAt = Date()
+                    contact.markLocallyEdited()
                     try? modelContext.save()
                     contactToHide = nil
                 }
@@ -605,7 +605,7 @@ struct ContactFieldToggleSheet: View {
                             Button {
                                 if isSelected { contact.groups.removeAll { $0.id == group.id } }
                                 else { contact.groups.append(group) }
-                                contact.updatedAt = Date()
+                                contact.markLocallyEdited()
                                 try? modelContext.save()
                             } label: {
                                 HStack(spacing: 10) {
@@ -627,7 +627,7 @@ struct ContactFieldToggleSheet: View {
                             Button {
                                 if isSelected { contact.tags.removeAll { $0.id == tag.id } }
                                 else { contact.tags.append(tag) }
-                                contact.updatedAt = Date()
+                                contact.markLocallyEdited()
                                 try? modelContext.save()
                             } label: {
                                 HStack(spacing: 10) {
@@ -649,7 +649,7 @@ struct ContactFieldToggleSheet: View {
                             Button {
                                 if isSelected { contact.locations.removeAll { $0.id == location.id } }
                                 else { contact.locations.append(location) }
-                                contact.updatedAt = Date()
+                                contact.markLocallyEdited()
                                 try? modelContext.save()
                             } label: {
                                 HStack(spacing: 10) {
