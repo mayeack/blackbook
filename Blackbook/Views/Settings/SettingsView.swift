@@ -159,7 +159,7 @@ struct SettingsView: View {
                     }
                     if err.contains("default.store") || err.contains("couldn't be opened") {
                         Text("The data store failed to open. In Xcode, go to Signing & Capabilities and select a development team, then rebuild. The app will fall back to local storage if CloudKit is unavailable.")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.orange)
                     }
                 }

@@ -237,7 +237,7 @@ struct CollapsibleFilterSection<Content: View>: View {
                         .foregroundStyle(.primary)
                     if activeCount > 0 {
                         Text("\(activeCount)")
-                            .font(.caption2.weight(.bold))
+                            .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -343,7 +343,7 @@ struct ContactRowView: View {
                         ScoreBadgeView(score: contact.relationshipScore)
                     }
                 }
-                if let d = contact.lastInteractionDate { Text(d.relativeDescription).font(.caption2).foregroundStyle(.secondary) }
+                if let d = contact.lastInteractionDate { Text(d.relativeDescription).font(.caption).foregroundStyle(.secondary) }
             }
         }
         .padding(.vertical, 2)
@@ -381,7 +381,7 @@ struct ContactRowView: View {
             Button { onColumnTap?(.metVia) } label: {
                 if let metVia = contact.metVia {
                     Text(metVia.displayName)
-                        .font(.caption2.weight(.medium))
+                        .font(.caption.weight(.medium))
                         .lineLimit(1)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
@@ -447,7 +447,7 @@ struct PillsColumnView: View {
             HStack(spacing: 3) {
                 ForEach(pills.prefix(maxVisible)) { pill in
                     Text(pill.name)
-                        .font(.caption2.weight(.medium))
+                        .font(.caption.weight(.medium))
                         .lineLimit(1)
                         .foregroundStyle(pill.color)
                         .padding(.horizontal, 5)
@@ -456,7 +456,7 @@ struct PillsColumnView: View {
                 }
                 if pills.count > maxVisible {
                     Text("+\(pills.count - maxVisible)")
-                        .font(.caption2.weight(.medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
             }

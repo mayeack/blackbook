@@ -144,7 +144,7 @@ struct SubscriptionView: View {
                                 .font(.headline)
                             if isYearly {
                                 Text("BEST VALUE")
-                                    .font(.caption2.bold())
+                                    .font(.caption.bold())
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
                                     .foregroundStyle(.white)
@@ -160,7 +160,7 @@ struct SubscriptionView: View {
                         Text(product.displayPrice)
                             .font(.title3.bold())
                         Text(isYearly ? "per year" : "per month")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -206,7 +206,7 @@ struct SubscriptionView: View {
             .buttonStyle(.plain)
 
             Text("Subscriptions renew automatically. You can cancel anytime in Settings.")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)

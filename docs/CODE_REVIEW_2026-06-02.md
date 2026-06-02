@@ -7,6 +7,11 @@
 
 Severity: **P1** correctness/data · **P2** standards/consistency · **P3** style/nits.
 
+> **Remediation status (updated 2026-06-02, later same day).** Four follow-up PRs landed/are open:
+> - **PR #46 (merged)** — finding #6 (partial): sync apply/conflict-resolution now has 11 unit tests (`SyncApplyTests`). Network-path integration still pending.
+> - **This PR** — finding #9 (`.caption2`): 16 content sites bumped to `.caption`; rules.md now documents the two narrow exceptions (icon glyphs, canvas labels). Finding #7 (stale Icon-1 48×48): rules.md corrected to 36. Finding #12 (dead code): `LocalSyncServer.swift` deleted.
+> - **Still open:** #5 (nameKey whitespace), #6 (network-path tests), #8 (EntityListRow adoption), #10 (file size), #11 (Button style).
+
 ---
 
 ## 1. Overall health — strong

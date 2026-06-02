@@ -205,7 +205,11 @@ When adding new table or list views with column headers, use the **Header 2** st
 
 The app targets desktop (macOS) and tablet-class screens with ample real estate. Content must feel **comfortable and easy to scan**, not cramped. Follow these principles:
 
-- **Minimum readable font is `.subheadline`** — never use `.caption2` for user-facing content. `.caption` is the absolute floor for metadata/timestamps. Use `.body` or larger for primary content.
+- **Minimum readable font is `.subheadline`** — never use `.caption2` for user-facing **text content**. `.caption` is the absolute floor for metadata/timestamps. Use `.body` or larger for primary content.
+  - **`.caption2` is reserved for two non-text cases only, and nowhere else:**
+    1. **Inline SF Symbol glyphs** sized inside a chip/badge/indicator — e.g. the score-trend arrow, a filter-chip's leading icon, a disclosure chevron. Here `.caption2` sizes an *icon*, not body text.
+    2. **Spatial labels drawn on a `Canvas`** — e.g. network-graph node names, where a larger font overlaps adjacent nodes.
+  - All other labels (pill text, last-interaction dates, counts, badge/capsule labels, footnotes, disclaimers) use `.caption` or larger. Audited and enforced 2026-06-02.
 - **Section labels** (field headings like "Phone", "Met via") use `.subheadline.weight(.semibold)` — not `.caption`.
 - **Primary content values** (phone numbers, names, note bodies) use `.body` or larger.
 - **Titles on detail screens** use `.title.weight(.bold)` — not `.title2` or smaller.
@@ -221,24 +225,13 @@ When in doubt, round **up** to the next font size / spacing tier. Small cramped 
 
 ### Icon Styles
 
-#### Icon 1
+#### Icon 1 (`icon1Size`)
 
-Used for prominent, standalone icon badges in collection rows and detail headers where the icon is a key visual anchor (e.g. Location rows and headers).
+`AppConstants.UI.icon1Size` is **36** — the single canonical collection-badge size, identical to the Row Icon Badges below. There is intentionally **one** badge size across Tags, Groups, and Locations.
 
-```swift
-Image(systemName: icon)
-    .font(.title3)
-    .foregroundStyle(.white)
-    .frame(width: AppConstants.UI.icon1Size, height: AppConstants.UI.icon1Size)
-    .background(color.gradient, in: RoundedRectangle(cornerRadius: 10))
-```
+> **History:** earlier drafts defined `icon1Size` as a larger **48×48** badge (cornerRadius 10, `.title3`) to give Locations extra prominence. The app standardized on 36×36 for all collections; `icon1Size` is now 36 and no view renders a 48pt badge. Do not reintroduce a 48×48 variant. (See `CLAUDE.md`: "Do not use `icon1Size` for larger icons.")
 
-- **Size:** `AppConstants.UI.icon1Size` (48×48)
-- **Corner radius:** 10
-- **Icon font:** `.title3`
-- **Background:** `color.gradient` inside `RoundedRectangle`
-
-#### Row Icon Badges (Tag, Group, and any future collection-type rows)
+#### Row Icon Badges (Tag, Group, Location, and any future collection-type rows)
 
 ```swift
 Image(systemName: icon)
@@ -279,30 +272,9 @@ HStack(spacing: 12) {
 
 ### Location Row Layout
 
-Location rows use **Icon 1** for the badge and **Header 1** for the name to give locations greater visual prominence.
+**Locations use the standard Row Layout above** (36×36 badge, `.body.weight(.medium)` name) — identical to Tags and Groups. `LocationRowView` matches `TagRowView`/`GroupRowView` exactly. (An earlier draft gave Locations a larger Icon-1 / Header-1 row; that prominence was removed when the app standardized on a single 36×36 collection row.)
 
-```swift
-HStack(spacing: 12) {
-    // Icon 1 badge (48×48, see Icon 1)
-    VStack(alignment: .leading, spacing: 4) {
-        Text(name)
-            .font(.title.weight(.bold))
-        Text("\(count) contact\(count == 1 ? "" : "s")")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-    }
-    Spacer()
-}
-.padding(.vertical, 4)
-```
-
-- **Icon style:** Icon 1 (48×48)
-- **Name font:** Header 1 — `.title.weight(.bold)`
-- **Subtitle font:** `.caption`, `.secondary` foreground
-- **VStack spacing:** 4
-- **Vertical padding:** 4
-
-### Detail View Headers (Tag, Group, and future collection detail pages)
+### Detail View Headers (Tag, Group, Location, and future collection detail pages)
 
 Use the same sizing as row icons — detail headers should feel like a natural extension of the list row, not a different component.
 
@@ -337,34 +309,7 @@ Section {
 
 ### Location Detail Header
 
-Location detail headers use **Icon 1** and **Header 1** to match the Location Row Layout.
-
-```swift
-Section {
-    HStack(spacing: 12) {
-        Image(systemName: icon)
-            .font(.title3)
-            .foregroundStyle(.white)
-            .frame(width: AppConstants.UI.icon1Size, height: AppConstants.UI.icon1Size)
-            .background(color.color.gradient, in: RoundedRectangle(cornerRadius: 10))
-        VStack(alignment: .leading, spacing: 4) {
-            Text(name)
-                .font(.title.weight(.bold))
-            Text("\(count) contact\(count == 1 ? "" : "s")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        Spacer()
-    }
-    .padding(.vertical, 4)
-}
-```
-
-- **Icon style:** Icon 1 (48×48, cornerRadius 10, `.title3` font)
-- **Name font:** Header 1 — `.title.weight(.bold)`
-- **Subtitle font:** `.caption`
-- **VStack spacing:** 4
-- **Vertical padding:** 4
+**Locations use the standard Detail View Header above** (36×36 badge, cornerRadius 8, `.font(.body)`) — identical to Tag and Group detail headers. (An earlier draft prescribed an Icon-1 / Header-1 header for Locations; removed when the app standardized on the single 36×36 collection style.)
 
 ### Dashboard Contact Rows (Fading Relationships, Strongest Relationships, and future dashboard cards)
 

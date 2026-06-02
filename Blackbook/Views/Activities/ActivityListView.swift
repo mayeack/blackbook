@@ -115,7 +115,7 @@ struct ActivityListView: View {
                 Spacer()
                 if calendarService.isSignedIn {
                     Text("From your Google Calendar")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -269,17 +269,17 @@ struct ActivityRowView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 if !activity.contacts.isEmpty {
                     Text(contactNames)
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.trailing)
                     Text("\(activity.contacts.count) contact\(activity.contacts.count == 1 ? "" : "s")")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
                 if !activity.groups.isEmpty {
                     Text("\(activity.groups.count) group\(activity.groups.count == 1 ? "" : "s")")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
