@@ -3,8 +3,15 @@ import SwiftData
 
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Contact.relationshipScore, order: .reverse) private var allContacts: [Contact]
-    @Query(sort: \Reminder.dueDate) private var reminders: [Reminder]
+    // @Query was previously used here for `allContacts` and `reminders`. It auto-refreshed on
+    // every ModelContext save — including mid-pull saves — and the _SwiftData_SwiftUI forEach
+    // can fault inverse relationships (`Contact.interactions`) during a partial-state window,
+    // crashing under Release optimization (work_log 2026-06-01 macOS; 2026-06-02 iOS).
+    // Replaced with a manual fetch on launch + after sync completes, so the dashboard only
+    // ever sees settled state and never observes an in-flight transition.
+    @State private var allContacts: [Contact] = []
+    @State private var reminders: [Reminder] = []
+    @State private var hasLoadedOnce = false
     @State private var viewModel = DashboardViewModel()
     @State private var showingPrioritizePicker = false
     @State private var weeklyStats = WeeklyStats(totalInteractions: 0, uniqueContacts: 0, byType: [:])
@@ -15,29 +22,57 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                weeklyStatsCard; prioritizeCard; fadingCard; remindersCard; aiCard; topContactsCard
-            }.padding()
+        SwiftUI.Group {
+            if hasLoadedOnce {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        weeklyStatsCard; prioritizeCard; fadingCard; remindersCard; aiCard; topContactsCard
+                    }.padding()
+                }
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .navigationTitle("Overview")
         .navigationDestination(for: UUID.self) { id in
             if let c = contactsByID[id] { ContactDetailView(contact: c) }
         }
-        .onAppear {
-            weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
-            // Defer score recalculation to avoid SwiftData relationship
-            // faulting during initial view load which can crash.
+        .task {
+            // Defer the first fetch briefly so any in-flight pull-apply finishes saving
+            // before we touch SwiftData on the main thread.
+            if !hasLoadedOnce {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            await refreshFromStore()
+            hasLoadedOnce = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [viewModel, modelContext] in
                 viewModel.recalculateScoresIfNeeded(context: modelContext)
             }
         }
-        .onChange(of: allContacts.count) { _, _ in
-            weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
+        .onReceive(NotificationCenter.default.publisher(for: .blackbookSyncDidComplete)) { _ in
+            Task { await refreshFromStore() }
         }
         .sheet(isPresented: $showingPrioritizePicker) {
             PrioritizeContactPicker(contacts: contacts.filter { !$0.isPriority })
         }
+    }
+
+    @MainActor
+    private func refreshFromStore() async {
+        let contactDescriptor = FetchDescriptor<Contact>(
+            sortBy: [SortDescriptor(\.relationshipScore, order: .reverse)]
+        )
+        let reminderDescriptor = FetchDescriptor<Reminder>(
+            sortBy: [SortDescriptor(\.dueDate)]
+        )
+        if let contacts = try? modelContext.fetch(contactDescriptor) {
+            allContacts = contacts
+        }
+        if let reminders = try? modelContext.fetch(reminderDescriptor) {
+            self.reminders = reminders
+        }
+        weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
     }
 
     private var weeklyStatsCard: some View {
