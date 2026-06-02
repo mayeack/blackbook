@@ -15,43 +15,60 @@ The Dashboard is the app's home screen, providing an at-a-glance summary of the 
 **File:** `Blackbook/Views/Dashboard/DashboardView.swift`
 
 **Data sources:**
-- `@Query(sort: \Contact.relationshipScore, order: .reverse)` — all contacts, filtered to exclude hidden
-- `@Query(sort: \Reminder.dueDate)` — all reminders
+- `@State private var allContacts: [Contact]` — fetched on demand via `FetchDescriptor(sortBy: \.relationshipScore, .reverse)`, filtered to exclude hidden/merged-away via the `contacts` computed property
+- `@State private var reminders: [Reminder]` — fetched on demand via `FetchDescriptor(sortBy: \.dueDate)`
 - `DashboardViewModel` — `@State private var viewModel`
 
-**Lifecycle:** Calls `viewModel.recalculateScores(context:)` on appear.
+> **Why not `@Query`?** As of PR #43, `DashboardView` no longer uses `@Query`. `@Query` auto-refreshed on every `ModelContext` save — including the intermediate saves a sync-pull makes — and the `_SwiftData_SwiftUI` machinery faulted the `Contact.interactions` inverse relationship while observing that partial state, crashing the app at launch (`EXC_BAD_ACCESS`). The dashboard now snapshots the store explicitly so it only ever renders settled state.
 
-**Layout:** `NavigationStack` > `ScrollView` > `VStack(spacing: 20)` with `.padding()`. Navigation title: "Dashboard".
+**Lifecycle:**
+- `.task` — on first appearance waits ~500ms (so any in-flight pull-apply commits first), calls `refreshFromStore()`, sets `hasLoadedOnce = true`, then schedules `viewModel.recalculateScoresIfNeeded(context:)` ~1s later.
+- `.onReceive(NotificationCenter … .blackbookSyncDidComplete)` — re-runs `refreshFromStore()` after each successful sync so newly pulled data appears without a relaunch.
+- `refreshFromStore()` (`@MainActor`) — fetches contacts + reminders and recomputes `weeklyStats`.
+
+**Layout:** `NavigationStack` > `SwiftUI.Group` gated on `hasLoadedOnce`:
+- **Loading:** centered `ProgressView` until the first fetch lands.
+- **Loaded:** `ScrollView` > `VStack(spacing: 20)` with `.padding()`.
+
+Navigation title: **"Overview"**.
 
 **Cards (top to bottom):**
 
 1. **Weekly Stats Card** (`weeklyStatsCard`)
    - Title: "This Week", icon: `chart.bar.fill`, accent gold
    - Shows `StatBubble` pair: total interactions count + unique people count
-   - Data from `viewModel.weeklyStats(from:)`
+   - Data from `weeklyStats` (computed by `viewModel.computeWeeklyStats(context:)`)
 
-2. **Fading Relationships Card** (`fadingCard`)
+2. **Prioritize Card** (`prioritizeCard`)
+   - Title: "Prioritize", icon: `pin.fill`, accent gold
+   - Empty: an `AddContactChip` button → `showingPrioritizePicker` sheet (`PrioritizeContactPicker`)
+   - Populated: `PriorityChipFlowLayout` of `PriorityContactChip`s (each a `NavigationLink(value: contact.id)`), plus a trailing `AddContactChip`
+   - The chip's ✕ button clears `isPriority` (via `markLocallyEdited()`)
+
+3. **Fading Relationships Card** (`fadingCard`)
    - Title: "Fading Relationships", icon: `arrow.down.right.circle.fill`, color: `fadingRed`
    - Empty state: "All relationships are healthy"
-   - Populated: `VStack(spacing: 8)` of contact rows — `HStack(spacing: 12)` with `ContactAvatarView(size: 36)`, name `.body.weight(.medium)`, last interaction `.caption`, `ScoreBadgeView`, `.padding(.vertical, 2)`
+   - Populated: `PriorityChipFlowLayout` of `ContactChip`s, each a `NavigationLink(value: contact.id)`
    - Data from `viewModel.fadingContacts(from:)`
 
-3. **Upcoming Reminders Card** (`remindersCard`)
+4. **Upcoming Reminders Card** (`remindersCard`)
    - Title: "Upcoming Reminders", icon: `bell.fill`, accent gold
    - Shows up to 5 incomplete reminders
    - Empty state: "No upcoming reminders"
    - Each row: title (line limit 1), contact name, due date (red if overdue)
 
-4. **AI Assistant Card** (`aiCard`)
+5. **AI Assistant Card** (`aiCard`)
    - Title: "AI Assistant", icon: `sparkles`, color: purple
    - Contains a `NavigationLink` to `AIInsightsView`
    - Label: "Get AI-powered outreach suggestions" with chevron
 
-5. **Strongest Relationships Card** (`topContactsCard`)
+6. **Strongest Relationships Card** (`topContactsCard`)
    - Title: "Strongest Relationships", icon: `star.fill`, color: `strongGreen`
    - Empty state: "Add contacts to see top relationships"
    - Populated: ranked list (#1, #2, etc.) in `HStack(spacing: 12)` with rank label (`.caption.weight(.bold)`, 24pt frame), `ContactAvatarView(size: 36)`, name `.body.weight(.medium)`, `ScoreBadgeView`, `.padding(.vertical, 2)`
    - Data from `viewModel.topContacts(from:)`
+
+**Navigation:** `.navigationDestination(for: UUID.self)` resolves a contact id to `ContactDetailView` via the `contactsByID` map.
 
 ### DashboardCard (Reusable Component)
 
