@@ -190,7 +190,7 @@ struct MergePrimarySelectionView: View {
                         ScoreBadgeView(score: contact.relationshipScore)
                         if !contact.emails.isEmpty {
                             Text(contact.emails.first!)
-                                .font(.caption2)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }

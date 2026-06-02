@@ -234,7 +234,7 @@ struct BackupRestoreView: View {
 
     private func typeBadge(_ type: BackupType) -> some View {
         Text(type.displayName)
-            .font(.caption2.weight(.semibold))
+            .font(.caption.weight(.semibold))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(badgeColor(for: type).opacity(0.15), in: Capsule())
@@ -243,7 +243,7 @@ struct BackupRestoreView: View {
 
     private func deviceBadge(_ name: String) -> some View {
         Text(name)
-            .font(.caption2.weight(.medium))
+            .font(.caption.weight(.medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(.gray.opacity(0.15), in: Capsule())

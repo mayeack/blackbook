@@ -31,3 +31,4 @@ Pods/
 # IDE
 .idea/
 *.code-workspace
+.claude/scheduled_tasks.lock
