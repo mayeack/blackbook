@@ -97,7 +97,7 @@ struct ContactLocationPickerView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         contact.locations = allLocations.filter { selectedIDs.contains($0.id) }
-                        contact.updatedAt = Date()
+                        contact.markLocallyEdited()
                         try? modelContext.save()
                         dismiss()
                     }.fontWeight(.semibold)

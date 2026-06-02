@@ -97,7 +97,7 @@ struct ContactGroupPickerView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         contact.groups = allGroups.filter { selectedIDs.contains($0.id) }
-                        contact.updatedAt = Date()
+                        contact.markLocallyEdited()
                         try? modelContext.save()
                         dismiss()
                     }.fontWeight(.semibold)

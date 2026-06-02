@@ -34,7 +34,7 @@ final class SocialEnrichmentService {
                 contact.company = contact.company ?? components.dropFirst().first?.trimmingCharacters(in: .whitespaces)
             }
         }
-        contact.updatedAt = Date()
         contact.customFields["lastEnriched"] = ISO8601DateFormatter().string(from: Date())
+        contact.markLocallyEdited()
     }
 }

@@ -101,7 +101,7 @@ struct ContactTagPickerView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         contact.tags = allTags.filter { selectedIDs.contains($0.id) }
-                        contact.updatedAt = Date()
+                        contact.markLocallyEdited()
                         try? modelContext.save()
                         dismiss()
                     }.fontWeight(.semibold)

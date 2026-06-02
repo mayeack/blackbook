@@ -98,7 +98,10 @@ struct DashboardView: View {
                     ForEach(prioritized) { contact in
                         NavigationLink(value: contact.id) {
                             PriorityContactChip(contact: contact) {
-                                withAnimation { contact.isPriority = false }
+                                withAnimation {
+                                    contact.isPriority = false
+                                    contact.markLocallyEdited()
+                                }
                             }
                         }
                         .buttonStyle(.plain)
@@ -304,7 +307,10 @@ struct PrioritizeContactPicker: View {
         NavigationStack {
             List(filtered) { contact in
                 Button {
-                    withAnimation { contact.isPriority = true }
+                    withAnimation {
+                        contact.isPriority = true
+                        contact.markLocallyEdited()
+                    }
                     dismiss()
                 } label: {
                     HStack(spacing: 12) {

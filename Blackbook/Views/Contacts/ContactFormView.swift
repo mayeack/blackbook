@@ -157,11 +157,12 @@ struct ContactFormView: View {
         t.linkedInURL = linkedInURL.isEmpty ? nil : linkedInURL
         t.twitterHandle = twitterHandle.isEmpty ? nil : twitterHandle
         t.instagramHandle = instagramHandle.isEmpty ? nil : instagramHandle
-        t.isPriority = isPriority; t.updatedAt = Date()
+        t.isPriority = isPriority
         t.tags = allTags.filter { selectedTagIds.contains($0.id) }
         t.groups = allGroups.filter { selectedGroupIds.contains($0.id) }
         t.locations = allLocations.filter { selectedLocationIds.contains($0.id) }
         t.metVia = allContacts.first { $0.id == metViaContactId }
+        t.markLocallyEdited()
         try? modelContext.save()
         Log.action(isNew ? "contact.create" : "contact.edit", metadata: [
             "contactId": t.id.uuidString,

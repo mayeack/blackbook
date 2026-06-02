@@ -344,7 +344,7 @@ final class ContactSyncService {
         contact.company = cn.organizationName.isEmpty ? nil : cn.organizationName
         contact.jobTitle = cn.jobTitle.isEmpty ? nil : cn.jobTitle
         populateFields(contact, from: cn)
-        contact.updatedAt = Date()
+        contact.markLocallyEdited()
     }
 
     private func populateFields(_ contact: Contact, from cn: CNContact) {
