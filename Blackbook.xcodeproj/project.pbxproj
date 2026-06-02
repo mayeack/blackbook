@@ -21,6 +21,7 @@
 		1838B918B2D0E5BA722A3EF0 /* ServerMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107F0516F43606F715A04CAC /* ServerMenuView.swift */; };
 		1D1FA4DA1805F09735832F43 /* Group.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D5A4C8F3FE7AFE76757690 /* Group.swift */; };
 		1D5E32E9EE0B56EA56D2D7EC /* FeatureGating.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0BF1D07C08681789AF0CC48 /* FeatureGating.swift */; };
+		1D99B1A030BE9CA3B7CF9713 /* ContactDeduplicationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCD54BD3218CA370A819170 /* ContactDeduplicationServiceTests.swift */; };
 		1E261EB5A02886029E363553 /* SyncTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6169F3E4455CDCD77042D958 /* SyncTypesTests.swift */; };
 		1F15A9907F62206EA97F4555 /* NetworkGraphEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 682862BCC7F0F257DF35CEB8 /* NetworkGraphEngine.swift */; };
 		25A80D3929B5841C1D224E29 /* TagModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12AE2904F18728288E8C2218 /* TagModelTests.swift */; };
@@ -102,6 +103,7 @@
 		AFC41BDFEE097478165A2D0D /* ContactDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F47D5E806EFA1DA2D5935A /* ContactDetailViewModelTests.swift */; };
 		B164427D17DE85E450AEA4C1 /* ActivityListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC2D7FC775E7A455AA78ABC /* ActivityListView.swift */; };
 		B383DE37B4755963A3BBD2FE /* SmartGroupsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6DFE9C279FB07636F49D37A /* SmartGroupsView.swift */; };
+		B3D765199ED7FF84739621F0 /* NetworkGraphEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8CBD51D0C167CD7EB595D1F /* NetworkGraphEngineTests.swift */; };
 		B7A06A425624014C337FFB6E /* BiometricServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA93BA20CE88C3BC9C9317A /* BiometricServiceTests.swift */; };
 		B8795D426E8414EDC3028C87 /* ContactFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98155954680EC712B26CB05D /* ContactFormView.swift */; };
 		B99B1B94442BAC565FEDAAA2 /* AIAssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36AE5C06322D7E805B52341 /* AIAssistantViewModel.swift */; };
@@ -270,6 +272,7 @@
 		B388096991E8F365A624F046 /* BackupDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupDetailView.swift; sourceTree = "<group>"; };
 		B56B474D15D62192EC7F6305 /* ModelSyncApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSyncApply.swift; sourceTree = "<group>"; };
 		BB300BB5DF41935C07BC4210 /* ActivityFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFormView.swift; sourceTree = "<group>"; };
+		BBCD54BD3218CA370A819170 /* ContactDeduplicationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDeduplicationServiceTests.swift; sourceTree = "<group>"; };
 		BBD49AF1F502FF3C26EC5CF1 /* CalendarPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPickerView.swift; sourceTree = "<group>"; };
 		BEE4CD8BE91D0E8284B87F31 /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		C0BF1D07C08681789AF0CC48 /* FeatureGating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureGating.swift; sourceTree = "<group>"; };
@@ -296,6 +299,7 @@
 		F49D100318268DC2B37475CA /* SyncTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTypes.swift; sourceTree = "<group>"; };
 		F767094E24F344D3643565AA /* LocationIconSuggestionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationIconSuggestionView.swift; sourceTree = "<group>"; };
 		F8A766A33F57F94C9BDF7ACF /* ConstantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConstantsTests.swift; sourceTree = "<group>"; };
+		F8CBD51D0C167CD7EB595D1F /* NetworkGraphEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphEngineTests.swift; sourceTree = "<group>"; };
 		F8F368EF8553F3DD542C10AE /* LocationDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationDetailView.swift; sourceTree = "<group>"; };
 		FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactMergeServiceTests.swift; sourceTree = "<group>"; };
 		FA9E2FA5C2EA9DC5CC7C31F9 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
@@ -509,6 +513,7 @@
 				2AA93BA20CE88C3BC9C9317A /* BiometricServiceTests.swift */,
 				EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */,
 				F8A766A33F57F94C9BDF7ACF /* ConstantsTests.swift */,
+				BBCD54BD3218CA370A819170 /* ContactDeduplicationServiceTests.swift */,
 				75F47D5E806EFA1DA2D5935A /* ContactDetailViewModelTests.swift */,
 				ECBCBC491C2BFAA0AABA68B3 /* ContactListViewModelTests.swift */,
 				FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */,
@@ -522,6 +527,7 @@
 				367B4A2B6BD57C86106A9103 /* InteractionViewModelTests.swift */,
 				7DB7F634E85EAB2589E6F041 /* KeychainServiceTests.swift */,
 				E47D954BD6E7D82202705588 /* LocationModelTests.swift */,
+				F8CBD51D0C167CD7EB595D1F /* NetworkGraphEngineTests.swift */,
 				9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */,
 				AD6C2B5FA5933483BFCEC3B4 /* NoteModelTests.swift */,
 				AB7B07D8F95B7197892AB8D6 /* RelationshipScoreEngineTests.swift */,
@@ -880,6 +886,7 @@
 				B7A06A425624014C337FFB6E /* BiometricServiceTests.swift in Sources */,
 				F7DD6583F920E520F4EEBE9D /* ClaudeAPIServiceTests.swift in Sources */,
 				E71E2B55D28997F49015FA8D /* ConstantsTests.swift in Sources */,
+				1D99B1A030BE9CA3B7CF9713 /* ContactDeduplicationServiceTests.swift in Sources */,
 				AFC41BDFEE097478165A2D0D /* ContactDetailViewModelTests.swift in Sources */,
 				F9C8E6C6BBBDE1468720591E /* ContactListViewModelTests.swift in Sources */,
 				28092BCCCBD27C677F28E65F /* ContactMergeServiceTests.swift in Sources */,
@@ -893,6 +900,7 @@
 				819102BFD7CD40272EA76C97 /* InteractionViewModelTests.swift in Sources */,
 				A303CE901664DED4348494BD /* KeychainServiceTests.swift in Sources */,
 				79377F20F80D93BE4ED30678 /* LocationModelTests.swift in Sources */,
+				B3D765199ED7FF84739621F0 /* NetworkGraphEngineTests.swift in Sources */,
 				FD484B077257640144869BCF /* NetworkGraphViewModelTests.swift in Sources */,
 				17FC135DAFA6AACBD52DFD7D /* NoteModelTests.swift in Sources */,
 				FD356F0646511FD58F59CCEF /* RelationshipScoreEngineTests.swift in Sources */,
