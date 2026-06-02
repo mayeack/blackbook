@@ -405,3 +405,34 @@ The console only runs while the sync server is running (it starts/stops with the
 - The crash is timing/optimization-dependent and could not be reproduced on settled data, so this hardening is **defense-in-depth** — verified by build + test + reasoning, not by reproducing the original race.
 - Chunked saves also improve failure semantics: a mid-pull error now preserves already-applied chunks (idempotent UUID-upsert heals the rest on the next sync) instead of losing the whole batch.
 - Verified: macOS + iOS build clean; 13 Swift Testing tests pass.
+
+## 2026-06-02 — iOS crash-on-load after partial pull: deferred Dashboard fetch + background-context pull
+
+**Context:** Day after the macOS chunking fix (PR #42), the iPhone (TestFlight build 117) crash-looped at launch (~1.6s in, `EXC_BAD_ACCESS / SIGSEGV` deep in `SwiftData → _SwiftData_SwiftUI → Sequence.forEach`, top of stack inside the Dashboard's `ScrollView`). Chunking on the main context still let SwiftUI `@Query` observe partial-state transitions between intermediate saves; on iOS, all `TabView` children stay alive so multiple `@Query`s reacted simultaneously and faulted the `Contact.interactions` inverse during the bulk apply. Once the iPhone's store was in a partial state, even the next *launch* re-rendered the bad state and crashed before sync could heal it.
+
+Two changes ship together:
+1. **`DashboardView` no longer uses `@Query`.** It now keeps `allContacts` / `reminders` in `@State`, fetches via `FetchDescriptor` in a `.task` (with a 500 ms initial delay so any in-flight pull settles first), and re-fetches on a `.blackbookSyncDidComplete` notification. Body is gated on `hasLoadedOnce` (shows `ProgressView` until the first fetch). Result: the dashboard never observes a mid-sync transition.
+2. **`pullRemoteChanges` applies on a fresh `ModelContext(container)` with autosave off** and saves once at the end. The main context (and its remaining `@Query`s in other tabs) only sees one settled commit, never partial state. Replaces the per-25-record `applyInChunks` from PR #42.
+
+### Scenario A — iPhone recovery from existing partial-state crash loop
+1. After build 118 lands in TestFlight, install it on the iPhone.
+2. **Delete the existing Blackbook app first**, then install build 118 fresh (the existing store may still hold partial-state interactions from earlier crashes).
+3. Open the app, sign in, let it sync.
+4. Expect: dashboard shows `ProgressView` briefly, then the Overview cards render. No crash. Contacts arrive; interactions on a contact's Interactions tab show the iMessage history.
+5. Background the app, foreground it — sync runs again, dashboard updates without flicker.
+
+### Scenario B — fresh-device large bulk sync
+1. On an iPhone or Mac with an empty store, sign in.
+2. Watch the Overview tab during the first full sync (1300 contacts + 171 interactions).
+3. Expect: `ProgressView` until ~500ms after first render; then the cards populate from the just-completed background apply. No `EXC_BAD_ACCESS`.
+
+### Scenario C — pull failure mid-apply
+1. Force a network failure mid-pull (e.g. airplane-mode toggle during a backfill push from the server).
+2. Expect: `bgContext.save()` is never called → the main store stays at its previous settled state, no partial records visible to the UI. On the next sync, the same payload is re-pulled (idempotent UUID upsert in `applyRemote*`) and applied atomically.
+
+### Notes / caveats
+- The fix removes `applyInChunks` and the `applyChunkSize` constant from PR #42 — superseded by the single-atomic-commit approach.
+- Dashboard auto-refresh on store mutations is gone; refresh happens on launch, on sync completion, and on a `.blackbookSyncDidComplete` notification. If you mutate the store from a sheet (e.g. logging an interaction), call `NotificationCenter.default.post(name: .blackbookSyncDidComplete, object: nil)` or accept that the dashboard updates on the next sync tick.
+- Other views still use `@Query` — they're rendered only when their tab is selected, so a settled main store at that point keeps them safe.
+- Verified by: iOS Simulator + macOS clean builds; 13 Swift Testing tests pass.
+- Crash signature confirmed via `~/Downloads/Blackbook-2026-06-02-093228.ips` — frames 12-13 in `_SwiftData_SwiftUI` (`@Query`), frame 18 in `ScrollView.init`, frame 5 `Sequence.forEach`, into SwiftData fault on tagged address `0x8000000000000010`.
