@@ -153,6 +153,7 @@ final class LocalServerSyncService {
         flip(Reminder.self, #Predicate<Reminder> { $0.syncStatus == synced }) { $0.syncStatus = pending }
         flip(ContactRelationship.self, #Predicate<ContactRelationship> { $0.syncStatus == synced }) { $0.syncStatus = pending }
         flip(RejectedCalendarEvent.self, #Predicate<RejectedCalendarEvent> { $0.syncStatus == synced }) { $0.syncStatus = pending }
+        flip(AppNotification.self, #Predicate<AppNotification> { $0.syncStatus == synced }) { $0.syncStatus = pending }
         try? context.save()
         logger.info("Bootstrap marked \(flippedCount) record(s) pending")
         Log.action("sync.bootstrap.markPending", metadata: ["count": "\(flippedCount)"])
@@ -318,6 +319,8 @@ final class LocalServerSyncService {
         total += (try? context.fetchCount(reminderDescriptor)) ?? 0
         let relationshipDescriptor = FetchDescriptor<ContactRelationship>(predicate: #Predicate<ContactRelationship> { $0.syncStatus != synced })
         total += (try? context.fetchCount(relationshipDescriptor)) ?? 0
+        let appNotificationDescriptor = FetchDescriptor<AppNotification>(predicate: #Predicate<AppNotification> { $0.syncStatus != synced })
+        total += (try? context.fetchCount(appNotificationDescriptor)) ?? 0
         return total
     }
 
@@ -334,10 +337,12 @@ final class LocalServerSyncService {
         let pendingNotes = try context.fetch(FetchDescriptor<Note>(predicate: #Predicate<Note> { $0.syncStatus != syncedStatus }))
         let pendingReminders = try context.fetch(FetchDescriptor<Reminder>(predicate: #Predicate<Reminder> { $0.syncStatus != syncedStatus }))
         let pendingRelationships = try context.fetch(FetchDescriptor<ContactRelationship>(predicate: #Predicate<ContactRelationship> { $0.syncStatus != syncedStatus }))
+        let pendingAppNotifications = try context.fetch(FetchDescriptor<AppNotification>(predicate: #Predicate<AppNotification> { $0.syncStatus != syncedStatus }))
 
         let totalPending = pendingTags.count + pendingGroups.count + pendingLocations.count +
             pendingActivities.count + pendingContacts.count + pendingInteractions.count +
-            pendingNotes.count + pendingReminders.count + pendingRelationships.count
+            pendingNotes.count + pendingReminders.count + pendingRelationships.count +
+            pendingAppNotifications.count
         logger.info("Pushing \(totalPending) record(s)")
 
         guard totalPending > 0 else { return }
@@ -358,6 +363,7 @@ final class LocalServerSyncService {
         if !pendingNotes.isEmpty { body["notes"] = pendingNotes.map { ModelSyncApply.noteToDict($0) } }
         if !pendingReminders.isEmpty { body["reminders"] = pendingReminders.map { ModelSyncApply.reminderToDict($0) } }
         if !pendingRelationships.isEmpty { body["contactRelationships"] = pendingRelationships.map { ModelSyncApply.contactRelationshipToDict($0) } }
+        if !pendingAppNotifications.isEmpty { body["appNotifications"] = pendingAppNotifications.map { ModelSyncApply.appNotificationToDict($0) } }
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else { return }
 
@@ -387,6 +393,7 @@ final class LocalServerSyncService {
         for note in pendingNotes { note.syncStatus = SyncStatus.synced.rawValue; note.lastSyncedAt = now }
         for reminder in pendingReminders { reminder.syncStatus = SyncStatus.synced.rawValue; reminder.lastSyncedAt = now }
         for rel in pendingRelationships { rel.syncStatus = SyncStatus.synced.rawValue; rel.lastSyncedAt = now }
+        for n in pendingAppNotifications { n.syncStatus = SyncStatus.synced.rawValue; n.lastSyncedAt = now }
         try context.save()
     }
 
@@ -464,6 +471,10 @@ final class LocalServerSyncService {
             logger.info("Pulled \(rels.count) relationship(s)")
             for dict in rels { try ModelSyncApply.applyRemoteContactRelationship(dict, to: bgContext) }
         }
+        if let appNotifications = top["appNotifications"] as? [[String: Any]] {
+            logger.info("Pulled \(appNotifications.count) notification(s)")
+            for dict in appNotifications { try ModelSyncApply.applyRemoteAppNotification(dict, to: bgContext) }
+        }
 
         try bgContext.save()
 
@@ -472,6 +483,9 @@ final class LocalServerSyncService {
         // when the Dashboard isn't the visible tab (on macOS its @State recalc wouldn't run).
         // Runs on the background context → the main context's @Queries see one settled commit.
         RelationshipScoreEngine().recalculateAll(context: bgContext)
+
+        // Generate "reconnect" suggestions for newly-fading contacts (deduped). Same settled commit.
+        NotificationService.generateFadingNotifications(context: bgContext)
     }
 
     private func fetchPendingContacts(context: ModelContext) throws -> [Contact] {

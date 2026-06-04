@@ -50,7 +50,8 @@ struct BlackbookApp: App {
             ContactRelationship.self,
             Reminder.self,
             Activity.self,
-            RejectedCalendarEvent.self
+            RejectedCalendarEvent.self,
+            AppNotification.self
         ])
 
         // Wipe the store when the schema version changes so SwiftData never
