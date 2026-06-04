@@ -32,6 +32,8 @@
 		28D30061B05714E65E0FAA2C /* ForgotPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23843A28716C56CF55E7614C /* ForgotPasswordView.swift */; };
 		349461D101C51D6D178972AD /* Contact.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8222BEE7020B6711480F644E /* Contact.swift */; };
 		38133D435F6BEF39527FC2CB /* GroupModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101D3964C1DEC2520B694372 /* GroupModelTests.swift */; };
+		3882488C9E1137855A4160D3 /* ContactSuggestionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC89F208DED881F3BEFA245 /* ContactSuggestionEngine.swift */; };
+		391963EE7FEDF8139B2F90F5 /* ContactSuggestionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F30DE3186049895D31C581D /* ContactSuggestionEngineTests.swift */; };
 		3C97130622FF6D29BACDEA77 /* Activity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21445D604CF5DB4A2F69B7DF /* Activity.swift */; };
 		3D5BA26EDD7B1258E870B1D4 /* BonjourBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB12E01D4EB1C6E3A68182E /* BonjourBrowser.swift */; };
 		3D6714171EE7057CBE848A07 /* BlackbookServerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F49097698C68BE415965A964 /* BlackbookServerApp.swift */; };
@@ -171,6 +173,7 @@
 		032E7774C5F4D3CFD826B428 /* EntityListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityListRow.swift; sourceTree = "<group>"; };
 		0C76007980526C6D096CFBD6 /* NetworkGraphViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModel.swift; sourceTree = "<group>"; };
 		0D88B14476C7E4A4574B1FB1 /* LogInteractionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogInteractionView.swift; sourceTree = "<group>"; };
+		0F30DE3186049895D31C581D /* ContactSuggestionEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSuggestionEngineTests.swift; sourceTree = "<group>"; };
 		101D3964C1DEC2520B694372 /* GroupModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupModelTests.swift; sourceTree = "<group>"; };
 		107F0516F43606F715A04CAC /* ServerMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerMenuView.swift; sourceTree = "<group>"; };
 		12AE2904F18728288E8C2218 /* TagModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagModelTests.swift; sourceTree = "<group>"; };
@@ -200,6 +203,7 @@
 		367B9B783BB9B16DC5A78564 /* SyncApplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncApplyTests.swift; sourceTree = "<group>"; };
 		367F11DDCEA44032C3674833 /* Reminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reminder.swift; sourceTree = "<group>"; };
 		3744DE7F4CFD2EF1B4D4067B /* Blackbook.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Blackbook.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3AC89F208DED881F3BEFA245 /* ContactSuggestionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSuggestionEngine.swift; sourceTree = "<group>"; };
 		3C395757BFF2A510337F73D5 /* ContactDeduplicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDeduplicationService.swift; sourceTree = "<group>"; };
 		3CA28E6E954153EB857D2D17 /* UserActionLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserActionLogger.swift; sourceTree = "<group>"; };
 		4353ABA45B9630F4CF7DBF0C /* ReminderModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderModelTests.swift; sourceTree = "<group>"; };
@@ -433,6 +437,7 @@
 				9C6BD1DE0B2466EA3DCFB985 /* ClaudeAPIService.swift */,
 				3C395757BFF2A510337F73D5 /* ContactDeduplicationService.swift */,
 				67485481A0ED6072989C3A0D /* ContactMergeService.swift */,
+				3AC89F208DED881F3BEFA245 /* ContactSuggestionEngine.swift */,
 				DC159C3515CC1B41D178A551 /* ContactSyncService.swift */,
 				2382E25FE6BDF339DA44560D /* GoogleCalendarService.swift */,
 				D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */,
@@ -518,6 +523,7 @@
 				FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */,
 				D95AA83A5437DFA01312E219 /* ContactModelTests.swift */,
 				5D94FB331F41A7E2A777101F /* ContactRelationshipModelTests.swift */,
+				0F30DE3186049895D31C581D /* ContactSuggestionEngineTests.swift */,
 				8211A08153FF7DE2A707EB06 /* DashboardViewModelTests.swift */,
 				B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */,
 				4DCA116B785721C8942FD325 /* FeatureGatingTests.swift */,
@@ -813,6 +819,7 @@
 				7FD59E02711302FDE3365206 /* ContactLocationPickerView.swift in Sources */,
 				138F6CF8015FD8C3F5728519 /* ContactMergeService.swift in Sources */,
 				8B2CB978D413E80BD9F38F3D /* ContactRelationship.swift in Sources */,
+				3882488C9E1137855A4160D3 /* ContactSuggestionEngine.swift in Sources */,
 				FE2725ADA73D3CD058F2D403 /* ContactSyncApply.swift in Sources */,
 				DB5A2A585D046B17B96EA4E2 /* ContactSyncService.swift in Sources */,
 				90834021AE7B9E22B64F9497 /* ContactTagPickerView.swift in Sources */,
@@ -891,6 +898,7 @@
 				28092BCCCBD27C677F28E65F /* ContactMergeServiceTests.swift in Sources */,
 				69E8237701B2BDD1763EEE1F /* ContactModelTests.swift in Sources */,
 				ACFC1AC1A920460AF58376E2 /* ContactRelationshipModelTests.swift in Sources */,
+				391963EE7FEDF8139B2F90F5 /* ContactSuggestionEngineTests.swift in Sources */,
 				55E07EAEBFC82392133172C8 /* DashboardViewModelTests.swift in Sources */,
 				FC4D35EB1F0F93963E0499E2 /* DateHelpersTests.swift in Sources */,
 				0143CB904AAF1E6B53CCBAD1 /* FeatureGatingTests.swift in Sources */,

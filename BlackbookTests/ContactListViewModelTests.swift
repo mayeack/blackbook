@@ -120,7 +120,7 @@ final class ContactListViewModelTests: XCTestCase {
         let c2 = makeContact(firstName: "Alice", lastName: "Zeller")
         let c3 = makeContact(firstName: "Bob", lastName: "Adams")
 
-        vm.sortOrder = .name
+        vm.sortColumn = .name // ascending by default
         let result = vm.filteredContacts([c1, c2, c3], tags: [])
 
         // Sorted by lastName then firstName: Adams (Bob), Adams (Zoe), Zeller (Alice)
@@ -134,12 +134,53 @@ final class ContactListViewModelTests: XCTestCase {
         let c2 = makeContact(firstName: "High", lastName: "Score", score: 90)
         let c3 = makeContact(firstName: "Mid", lastName: "Score", score: 50)
 
-        vm.sortOrder = .score
+        vm.toggleSort(.score) // numeric columns default to descending (highest first)
         let result = vm.filteredContacts([c1, c2, c3], tags: [])
 
         XCTAssertEqual(result[0].firstName, "High")
         XCTAssertEqual(result[1].firstName, "Mid")
         XCTAssertEqual(result[2].firstName, "Low")
+    }
+
+    // MARK: - Click-to-sort column behavior
+
+    func testToggleSortFlipsDirectionOnSameColumn() throws {
+        let c1 = makeContact(firstName: "Zoe", lastName: "Apple")
+        let c2 = makeContact(firstName: "Alice", lastName: "Mango")
+        let c3 = makeContact(firstName: "Bob", lastName: "Zephyr")
+
+        vm.toggleSort(.name) // .name is the default column → first toggle flips to descending
+        XCTAssertFalse(vm.sortAscending)
+        XCTAssertEqual(vm.filteredContacts([c1, c2, c3], tags: []).map(\.lastName), ["Zephyr", "Mango", "Apple"])
+
+        vm.toggleSort(.name) // back to ascending
+        XCTAssertTrue(vm.sortAscending)
+        XCTAssertEqual(vm.filteredContacts([c1, c2, c3], tags: []).map(\.lastName), ["Apple", "Mango", "Zephyr"])
+    }
+
+    func testStringColumnSortsEmptyValuesLastBothDirections() throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let work = Group(name: "Work"); context.insert(work)
+        let school = Group(name: "School"); context.insert(school)
+
+        let a = makeContact(firstName: "Has", lastName: "Work"); a.groups = [work]
+        let b = makeContact(firstName: "Has", lastName: "School"); b.groups = [school]
+        let c = makeContact(firstName: "No", lastName: "Group") // empty → always last
+
+        vm.toggleSort(.groups) // ascending by first group name
+        XCTAssertEqual(vm.filteredContacts([a, b, c], tags: []).map(\.lastName), ["School", "Work", "Group"])
+
+        vm.toggleSort(.groups) // descending; empties still last
+        XCTAssertEqual(vm.filteredContacts([a, b, c], tags: []).map(\.lastName), ["Work", "School", "Group"])
+    }
+
+    func testSelectableHelperExcludesHiddenAndMerged() throws {
+        let visible = makeContact(firstName: "Ann", lastName: "Visible")
+        let hidden = makeContact(firstName: "Hank", lastName: "Hidden", isHidden: true)
+        let merged = makeContact(firstName: "Mona", lastName: "Merged", isMergedAway: true)
+
+        XCTAssertEqual([visible, hidden, merged].selectable.map(\.firstName), ["Ann"])
     }
 
     func testEmptySearchReturnsAll() throws {

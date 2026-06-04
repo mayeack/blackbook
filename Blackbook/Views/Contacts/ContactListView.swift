@@ -134,8 +134,12 @@ struct ContactListView: View {
                                 }
                             }
                         } header: {
-                            ContactTableHeaderView()
-                                .textCase(nil)
+                            ContactTableHeaderView(
+                                sortColumn: viewModel.sortColumn,
+                                ascending: viewModel.sortAscending,
+                                onTap: { viewModel.toggleSort($0) }
+                            )
+                            .textCase(nil)
                         }
                     }
                     .navigationDestination(for: UUID.self) { id in
@@ -153,8 +157,16 @@ struct ContactListView: View {
                 ToolbarItem(placement: .primaryAction) { Button { showAddContact = true } label: { Image(systemName: "plus") } }
                 ToolbarItem(placement: .automatic) {
                     Menu {
-                        Picker("Sort", selection: $viewModel.sortOrder) {
-                            ForEach(ContactListViewModel.ContactSortOrder.allCases) { Text($0.rawValue).tag($0) }
+                        ForEach([ContactListViewModel.SortColumn.name, .score, .recent, .dateAdded]) { column in
+                            Button {
+                                viewModel.toggleSort(column)
+                            } label: {
+                                if viewModel.sortColumn == column {
+                                    Label(column.rawValue, systemImage: viewModel.sortAscending ? "chevron.up" : "chevron.down")
+                                } else {
+                                    Text(column.rawValue)
+                                }
+                            }
                         }
                         Divider()
                         NavigationLink { SmartGroupsView() } label: { Label("Smart Groups", systemImage: "folder.badge.gearshape") }
@@ -266,6 +278,9 @@ struct CollapsibleFilterSection<Content: View>: View {
 // MARK: - Table Header
 
 struct ContactTableHeaderView: View {
+    let sortColumn: ContactListViewModel.SortColumn
+    let ascending: Bool
+    let onTap: (ContactListViewModel.SortColumn) -> Void
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -281,24 +296,34 @@ struct ContactTableHeaderView: View {
     var body: some View {
         if !isCompact {
             HStack(spacing: 0) {
-                Text("Name")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Groups")
-                    .frame(width: ColumnWidth.groups, alignment: .leading)
-                Text("Locations")
-                    .frame(width: ColumnWidth.locations, alignment: .leading)
-                Text("Tags")
-                    .frame(width: ColumnWidth.tags, alignment: .leading)
-                Text("Met via")
-                    .frame(width: ColumnWidth.metVia, alignment: .leading)
-                Text("Introduced to")
-                    .frame(width: ColumnWidth.introducedTo, alignment: .leading)
-                Text("Score")
-                    .frame(width: ColumnWidth.score, alignment: .trailing)
+                headerCell("Name", .name, width: nil, alignment: .leading)
+                headerCell("Groups", .groups, width: ColumnWidth.groups, alignment: .leading)
+                headerCell("Locations", .locations, width: ColumnWidth.locations, alignment: .leading)
+                headerCell("Tags", .tags, width: ColumnWidth.tags, alignment: .leading)
+                headerCell("Met via", .metVia, width: ColumnWidth.metVia, alignment: .leading)
+                headerCell("Introduced to", .introducedTo, width: ColumnWidth.introducedTo, alignment: .leading)
+                headerCell("Score", .score, width: ColumnWidth.score, alignment: .trailing)
             }
             .font(.title3.weight(.bold))
             .foregroundStyle(.primary)
         }
+    }
+
+    /// A tappable column header. Tapping sorts by the column; tapping the active column flips the
+    /// direction. The active column shows a ▲/▼ chevron.
+    @ViewBuilder
+    private func headerCell(_ title: String, _ column: ContactListViewModel.SortColumn, width: CGFloat?, alignment: Alignment) -> some View {
+        Button { onTap(column) } label: {
+            HStack(spacing: 3) {
+                Text(title)
+                Image(systemName: ascending ? "chevron.up" : "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .opacity(sortColumn == column ? 1 : 0)
+            }
+            .frame(maxWidth: width == nil ? .infinity : width, alignment: alignment)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

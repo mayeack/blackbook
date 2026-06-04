@@ -13,7 +13,7 @@ struct MergeContactPickerView: View {
     @State private var showPrimarySelection = false
 
     private var eligible: [Contact] {
-        allContacts.filter { $0.id != initialPrimary.id && !$0.isHidden && !$0.isMergedAway }
+        allContacts.selectable.filter { $0.id != initialPrimary.id }
     }
 
     private var filtered: [Contact] {
