@@ -45,9 +45,16 @@ final class ContactSyncService {
             return
         }
 
-        // Run synchronously on the main thread to keep ModelContext safe.
-        importContacts(into: modelContext)
-        startObservingChanges()
+        // Defer the launch import by one second so the first frame renders before the import
+        // runs. Combined with the background-context apply in importContacts, this prevents the
+        // launch-time re-import from faulting a live @Query mid-insert — the crash loop that
+        // left the app unable to reopen after an "Import All" (work_log: import crash).
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self else { return }
+            self.importContacts(into: modelContext)
+            self.startObservingChanges()
+        }
     }
 
     func startObservingChanges() {
@@ -95,9 +102,15 @@ final class ContactSyncService {
         let started = Date()
         do {
             let cnContacts = try fetchAllSystemContacts()
-            let outcome = try mergeOrInsert(cnContacts, into: modelContext)
-            try modelContext.save()
+            // Apply on a background context with a single settled commit so the main context's
+            // @Queries (ContactListView, etc.) never observe the partial-state insert window —
+            // the SwiftData inverse fault that crashed "Import All" (mirrors the PR #43 pull fix).
+            let bgContext = ModelContext(modelContext.container)
+            bgContext.autosaveEnabled = false
+            let outcome = try mergeOrInsert(cnContacts, into: bgContext)
+            try bgContext.save()
             lastSyncDate = Date()
+            NotificationCenter.default.post(name: .blackbookSyncDidComplete, object: nil)
             logger.info("Contact sync completed — processed=\(cnContacts.count) updated=\(outcome.identifierMatched) reattached=\(outcome.reattached) inserted=\(outcome.inserted)")
             let durationMs = Int(Date().timeIntervalSince(started) * 1000)
             Log.action("contacts.sync", metadata: [
@@ -153,9 +166,14 @@ final class ContactSyncService {
         do {
             let allSystem = fetchSystemContacts()
             let selected = allSystem.filter { identifiers.contains($0.identifier) }
-            let outcome = try mergeOrInsert(selected, into: modelContext)
-            try modelContext.save()
+            // Background-context apply + single commit, as in importContacts (avoids the
+            // partial-state @Query fault during bulk insert).
+            let bgContext = ModelContext(modelContext.container)
+            bgContext.autosaveEnabled = false
+            let outcome = try mergeOrInsert(selected, into: bgContext)
+            try bgContext.save()
             lastSyncDate = Date()
+            NotificationCenter.default.post(name: .blackbookSyncDidComplete, object: nil)
             logger.info("Selective import completed — \(selected.count) contacts imported")
             let durationMs = Int(Date().timeIntervalSince(started) * 1000)
             Log.action("contacts.sync.selective", metadata: [
