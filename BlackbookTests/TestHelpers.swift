@@ -20,7 +20,8 @@ enum TestHelpers {
             ContactRelationship.self,
             Reminder.self,
             Activity.self,
-            RejectedCalendarEvent.self
+            RejectedCalendarEvent.self,
+            AppNotification.self
         ])
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [config])

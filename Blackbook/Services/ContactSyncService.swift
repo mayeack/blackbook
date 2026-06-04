@@ -107,7 +107,7 @@ final class ContactSyncService {
             // the SwiftData inverse fault that crashed "Import All" (mirrors the PR #43 pull fix).
             let bgContext = ModelContext(modelContext.container)
             bgContext.autosaveEnabled = false
-            let outcome = try mergeOrInsert(cnContacts, into: bgContext)
+            let outcome = try mergeOrInsert(cnContacts, into: bgContext, detectArchives: true)
             try bgContext.save()
             lastSyncDate = Date()
             NotificationCenter.default.post(name: .blackbookSyncDidComplete, object: nil)
@@ -223,7 +223,7 @@ final class ContactSyncService {
     /// Resolves each CNContact to an existing Blackbook Contact (reattaching by name +
     /// email/phone if the cnContactIdentifier no longer matches), or inserts a new one.
     /// Returns counts of each outcome.
-    private func mergeOrInsert(_ cnContacts: [CNContact], into modelContext: ModelContext) throws -> MergeOutcome {
+    private func mergeOrInsert(_ cnContacts: [CNContact], into modelContext: ModelContext, detectArchives: Bool = false) throws -> MergeOutcome {
         var outcome = MergeOutcome()
 
         let allActive = try modelContext.fetch(
@@ -287,6 +287,20 @@ final class ContactSyncService {
                 "displayName": Self.displayName(inserted),
                 "cnIdentifier": cnContact.identifier
             ])
+        }
+
+        // After a full import, flag contacts that were imported before but are no longer in the
+        // address book (their cnContactIdentifier is gone from the live set) as archive suggestions.
+        if detectArchives {
+            for c in allActive where !c.isHidden {
+                guard let cn = c.cnContactIdentifier, !liveIdentifiers.contains(cn) else { continue }
+                if NotificationService.suggestArchive(contactId: c.id, displayName: Self.displayName(c), context: modelContext) {
+                    Log.action("contact.import.archiveSuggested", metadata: [
+                        "contactId": c.id.uuidString,
+                        "displayName": Self.displayName(c)
+                    ])
+                }
+            }
         }
         return outcome
     }

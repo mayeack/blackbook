@@ -469,3 +469,32 @@ Server-side one-time SQL heal applied directly to the master store while the dae
 - The fix is per-edit-going-forward. The existing 643-record backlog clears only as users naturally touch each contact (or via a deliberate one-time migration, which we deliberately skipped because it would overwrite iOS edits for any field where the two devices disagree).
 - BlackbookServer is local-deploy only (not TestFlight). After this PR lands, rebuild + reinstall `/Applications/BlackbookServer.app` from main so the iMessage-lookup fix takes effect.
 - Verified: iOS Simulator + macOS clean builds, BlackbookServer clean build, 13 Swift Testing tests pass.
+
+---
+
+## 2026-06-03 — Import-crash hotfix + 5 features (PRs #48 → #49 → #50)
+
+### Hotfix (#48)
+- **Import All no longer crashes:** Settings → Import from Contacts → **Import All**. The import completes; the app does not crash and relaunching works (no crash loop).
+- **Recent interactions raise the score:** for a priority contact stuck at 20/"Fading" with recent texts (e.g. Hugo Dooner), after the next sync the score rises above 20 to reflect the recency. Works on whichever tab is visible (recalc runs after each sync pull).
+
+### Suggested records (#49)
+- Open a contact → **Introduced to** (or **Met via**) edit. With the search box empty, a **Suggested** section shows 3 contacts that share tags/groups/locations with the subject; the rest appear under **All Contacts**. Typing switches to a plain filtered search.
+
+### Click-to-sort columns (#49)
+- In Contacts (macOS / iPad regular width), click a column header (Name, Groups, Locations, Tags, Met via, Introduced to, Score). The list sorts by that column; the active column shows ▲/▼. Click the same header again to reverse. String columns put blanks last; Score sorts highest-first on first click.
+
+### Hidden contacts everywhere (#49)
+- Hide a contact (swipe → Hide, or Settings → Hidden Contacts). It must not appear in any picker: Introduced to, Met via, Merge, Met-via in the contact form, group/tag/location "add contact", network graph. (If it still shows on a *different* device, that's sync propagation — re-touch it or wait for the next sync.)
+
+### Notifications chiclet (#50)
+- Overview shows a **bell** chiclet (top-right) with a red count badge when there are active notifications.
+- Tap it → a sheet lists suggestions newest-first. Tap a row (or swipe right/leading) → navigates to the related contact. Swipe left/trailing → **Dismiss** (it disappears and stays gone, across relaunch and sync).
+- Fading suggestions appear for contacts whose score dropped into the fading band (0 < score < 30).
+
+### Archive-on-import (#50)
+- Remove a previously-imported contact from the system address book, then run **Import All**. An **Archive** suggestion appears in the bell list for that contact. Swipe → **Archive** hides them. Dismiss instead to keep them.
+
+### Notes / required steps
+- iOS Simulator couldn't run in the dev env (CoreSimulator drift); suite run on the macOS destination (232 tests green) — CI runs the iOS path.
+- **After #50 merges:** rebuild + reinstall `/Applications/BlackbookServer.app` (Release) so the server relays `appNotifications`. The new `AppNotification` schema is additive (no store wipe).

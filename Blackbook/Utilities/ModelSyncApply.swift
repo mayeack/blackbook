@@ -548,6 +548,79 @@ enum ModelSyncApply {
 
     // MARK: - ContactRelationship
 
+    // MARK: - AppNotification
+
+    static func appNotificationToDict(_ n: AppNotification) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": n.id.uuidString,
+            "kindRaw": n.kindRaw,
+            "title": n.title,
+            "message": n.message,
+            "isRead": n.isRead,
+            "isDismissed": n.isDismissed,
+            "createdAt": iso8601.string(from: n.createdAt),
+            "updatedAt": iso8601.string(from: n.updatedAt)
+        ]
+        if let cid = n.contactId { dict["contactId"] = cid.uuidString }
+        appendProvenance(&dict,
+                         createdByDeviceId: n.createdByDeviceId,
+                         createdByPlatform: n.createdByPlatform,
+                         createdByDeviceName: n.createdByDeviceName,
+                         lastEditedByDeviceId: n.lastEditedByDeviceId,
+                         lastEditedByPlatform: n.lastEditedByPlatform,
+                         lastEditedByDeviceName: n.lastEditedByDeviceName)
+        return dict
+    }
+
+    static func applyRemoteAppNotification(_ dict: [String: Any], to context: ModelContext) throws {
+        guard let idString = dict["id"] as? String,
+              let remoteId = UUID(uuidString: idString) else { return }
+
+        let predicate = #Predicate<AppNotification> { $0.id == remoteId }
+        let existing = try context.fetch(FetchDescriptor<AppNotification>(predicate: predicate)).first
+
+        guard let remoteUpdatedStr = dict["updatedAt"] as? String,
+              let remoteUpdated = iso8601.date(from: remoteUpdatedStr) else { return }
+
+        if let local = existing {
+            if local.updatedAt > remoteUpdated && local.syncStatus != SyncStatus.synced.rawValue { return }
+            applyDictToAppNotification(dict, notification: local)
+            local.updatedAt = remoteUpdated
+            local.syncStatus = SyncStatus.synced.rawValue
+            local.lastSyncedAt = Date()
+        } else {
+            let n = AppNotification(
+                kind: AppNotificationKind(rawValue: (dict["kindRaw"] as? String) ?? "") ?? .fadingRelationship,
+                title: (dict["title"] as? String) ?? "",
+                message: (dict["message"] as? String) ?? ""
+            )
+            n.id = remoteId
+            applyDictToAppNotification(dict, notification: n)
+            n.updatedAt = remoteUpdated
+            n.syncStatus = SyncStatus.synced.rawValue
+            n.lastSyncedAt = Date()
+            context.insert(n)
+        }
+    }
+
+    private static func applyDictToAppNotification(_ dict: [String: Any], notification n: AppNotification) {
+        if let v = dict["kindRaw"] as? String { n.kindRaw = v }
+        if let v = dict["title"] as? String { n.title = v }
+        if let v = dict["message"] as? String { n.message = v }
+        if let v = dict["isRead"] as? Bool { n.isRead = v }
+        if let v = dict["isDismissed"] as? Bool { n.isDismissed = v }
+        if let v = dict["createdAt"] as? String, let d = iso8601.date(from: v) { n.createdAt = d }
+        n.contactId = (dict["contactId"] as? String).flatMap { UUID(uuidString: $0) }
+
+        let p = readProvenance(dict)
+        n.createdByDeviceId = p.createdByDeviceId
+        n.createdByPlatform = p.createdByPlatform
+        n.createdByDeviceName = p.createdByDeviceName
+        n.lastEditedByDeviceId = p.lastEditedByDeviceId
+        n.lastEditedByPlatform = p.lastEditedByPlatform
+        n.lastEditedByDeviceName = p.lastEditedByDeviceName
+    }
+
     static func contactRelationshipToDict(_ rel: ContactRelationship) -> [String: Any] {
         var dict: [String: Any] = [
             "id": rel.id.uuidString,
