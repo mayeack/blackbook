@@ -184,6 +184,15 @@ final class Contact {
     }
 }
 
+extension Sequence where Element == Contact {
+    /// Contacts eligible to appear in any list, picker, or search surface — excludes hidden and
+    /// merged-away contacts. Single chokepoint for the CLAUDE.md rule "Hidden contacts must never
+    /// appear outside Settings > Hidden Contacts." Use everywhere contacts are offered for selection.
+    var selectable: [Contact] {
+        filter { !$0.isHidden && !$0.isMergedAway }
+    }
+}
+
 /// Buckets for relationship health based on numeric score thresholds.
 enum ScoreCategory: String, Codable {
     case strong = "Strong"

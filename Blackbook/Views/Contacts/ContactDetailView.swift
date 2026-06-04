@@ -396,7 +396,7 @@ struct MetViaPickerView: View {
     @State private var searchText = ""
 
     private var eligible: [Contact] {
-        allContacts.filter { $0.id != contact.id && !$0.isHidden && !$0.isMergedAway }
+        allContacts.selectable.filter { $0.id != contact.id }
     }
 
     private var filtered: [Contact] {
@@ -405,8 +405,37 @@ struct MetViaPickerView: View {
         return eligible.filter { $0.displayName.lowercased().contains(query) }
     }
 
+    /// Three likely introducers (shared tags/groups/locations, or the same `metVia` chain), shown
+    /// when not searching. Excludes the current selection.
+    private var suggestions: [Contact] {
+        let excluded = contact.metVia.map { Set([$0.id]) } ?? []
+        return ContactSuggestionEngine.suggestions(for: contact, field: .metVia, from: allContacts, excluding: excluded)
+    }
+
+    private func select(_ c: Contact) {
+        contact.metVia = c
+        contact.markLocallyEdited()
+        try? modelContext.save()
+        dismiss()
+    }
+
+    @ViewBuilder
+    private func metViaRow(_ c: Contact) -> some View {
+        Button { select(c) } label: {
+            HStack(spacing: 10) {
+                ContactAvatarView(contact: c, size: 32)
+                Text(c.displayName).font(.body)
+                Spacer()
+                if contact.metVia?.id == c.id {
+                    Image(systemName: "checkmark").foregroundStyle(AppConstants.UI.accentGold)
+                }
+            }
+        }.buttonStyle(.plain)
+    }
+
     var body: some View {
-        NavigationStack {
+        let suggestionIDs = Set(suggestions.map(\.id))
+        return NavigationStack {
             List {
                 Section {
                     Button {
@@ -424,24 +453,13 @@ struct MetViaPickerView: View {
                         }
                     }
                 }
-                Section {
-                    ForEach(filtered) { c in
-                        Button {
-                            contact.metVia = c
-                            contact.markLocallyEdited()
-                            try? modelContext.save()
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 10) {
-                                ContactAvatarView(contact: c, size: 32)
-                                Text(c.displayName).font(.body)
-                                Spacer()
-                                if contact.metVia?.id == c.id {
-                                    Image(systemName: "checkmark").foregroundStyle(AppConstants.UI.accentGold)
-                                }
-                            }
-                        }.buttonStyle(.plain)
+                if searchText.isEmpty && !suggestions.isEmpty {
+                    Section("Suggested") {
+                        ForEach(suggestions) { metViaRow($0) }
                     }
+                }
+                Section(searchText.isEmpty ? "All Contacts" : "") {
+                    ForEach(filtered.filter { !suggestionIDs.contains($0.id) }) { metViaRow($0) }
                 }
             }
             .searchable(text: $searchText, prompt: "Search contacts")
@@ -470,7 +488,7 @@ struct IntroducedToPickerView: View {
     @State private var selectedIDs: Set<UUID> = []
 
     private var eligible: [Contact] {
-        allContacts.filter { $0.id != contact.id && !$0.isHidden && !$0.isMergedAway }
+        allContacts.selectable.filter { $0.id != contact.id }
     }
 
     private var filtered: [Contact] {
@@ -482,34 +500,49 @@ struct IntroducedToPickerView: View {
         }
     }
 
+    /// Three contextually-similar contacts (shared tags/groups/locations), excluding any already
+    /// introduced. Shown only when not searching, so the right person is usually one tap away.
+    private var suggestions: [Contact] {
+        ContactSuggestionEngine.suggestions(for: contact, field: .introducedTo, from: allContacts, excluding: selectedIDs)
+    }
+
+    private func toggle(_ c: Contact) {
+        if selectedIDs.contains(c.id) { selectedIDs.remove(c.id) } else { selectedIDs.insert(c.id) }
+    }
+
+    @ViewBuilder
+    private func contactRow(_ c: Contact) -> some View {
+        Button { toggle(c) } label: {
+            HStack(spacing: 10) {
+                ContactAvatarView(contact: c, size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(c.displayName).font(.body)
+                    if let company = c.company, !company.isEmpty {
+                        Text(company).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if selectedIDs.contains(c.id) {
+                    Image(systemName: "checkmark").foregroundStyle(AppConstants.UI.accentGold)
+                }
+            }
+        }.buttonStyle(.plain)
+    }
+
     var body: some View {
-        NavigationStack {
+        let suggestionIDs = Set(suggestions.map(\.id))
+        return NavigationStack {
             List {
+                if searchText.isEmpty && !suggestions.isEmpty {
+                    Section("Suggested") {
+                        ForEach(suggestions) { contactRow($0) }
+                    }
+                }
                 if !searchText.isEmpty && filtered.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                 } else {
-                    ForEach(filtered) { c in
-                        Button {
-                            if selectedIDs.contains(c.id) {
-                                selectedIDs.remove(c.id)
-                            } else {
-                                selectedIDs.insert(c.id)
-                            }
-                        } label: {
-                            HStack(spacing: 10) {
-                                ContactAvatarView(contact: c, size: 32)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(c.displayName).font(.body)
-                                    if let company = c.company, !company.isEmpty {
-                                        Text(company).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if selectedIDs.contains(c.id) {
-                                    Image(systemName: "checkmark").foregroundStyle(AppConstants.UI.accentGold)
-                                }
-                            }
-                        }.buttonStyle(.plain)
+                    Section(searchText.isEmpty ? "All Contacts" : "") {
+                        ForEach(filtered.filter { !suggestionIDs.contains($0.id) }) { contactRow($0) }
                     }
                 }
             }

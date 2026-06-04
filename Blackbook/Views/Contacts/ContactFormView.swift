@@ -64,7 +64,7 @@ struct ContactFormView: View {
                 }
                 Section {
                     DisclosureGroup(isExpanded: sectionBinding("Met via")) {
-                        let eligible = allContacts.filter { $0.id != contact?.id && !$0.isHidden && !$0.isMergedAway }
+                        let eligible = allContacts.selectable.filter { $0.id != contact?.id }
                         Picker("Met via", selection: $metViaContactId) {
                             Text("None").tag(UUID?.none)
                             ForEach(eligible) { c in
