@@ -15,6 +15,9 @@ struct DashboardView: View {
     @State private var viewModel = DashboardViewModel()
     @State private var showingPrioritizePicker = false
     @State private var weeklyStats = WeeklyStats(totalInteractions: 0, uniqueContacts: 0, byType: [:])
+    @State private var notifications: [AppNotification] = []
+    @State private var showNotifications = false
+    @State private var navTarget: DashNavTarget?
     private var contacts: [Contact] { allContacts.filter { !$0.isHidden && !$0.isMergedAway } }
 
     private var contactsByID: [UUID: Contact] {
@@ -35,8 +38,38 @@ struct DashboardView: View {
             }
         }
         .navigationTitle("Overview")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showNotifications = true } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "bell")
+                        if !notifications.isEmpty {
+                            Text("\(notifications.count)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(AppConstants.UI.fadingRed, in: Capsule())
+                                .offset(x: 11, y: -9)
+                        }
+                    }
+                }
+                .accessibilityLabel("Notifications, \(notifications.count) active")
+            }
+        }
         .navigationDestination(for: UUID.self) { id in
             if let c = contactsByID[id] { ContactDetailView(contact: c) }
+        }
+        .navigationDestination(item: $navTarget) { target in
+            if let c = contactsByID[target.id] { ContactDetailView(contact: c) }
+        }
+        .sheet(isPresented: $showNotifications) {
+            NotificationsView(
+                notifications: notifications,
+                onOpen: openNotification,
+                onDismiss: dismissNotification,
+                onArchive: archiveFromNotification
+            )
         }
         .task {
             // Defer the first fetch briefly so any in-flight pull-apply finishes saving
@@ -72,7 +105,42 @@ struct DashboardView: View {
         if let reminders = try? modelContext.fetch(reminderDescriptor) {
             self.reminders = reminders
         }
+        let notifDescriptor = FetchDescriptor<AppNotification>(
+            predicate: #Predicate { !$0.isDismissed },
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        if let notifs = try? modelContext.fetch(notifDescriptor) {
+            notifications = notifs
+        }
         weeklyStats = viewModel.computeWeeklyStats(context: modelContext)
+    }
+
+    // MARK: - Notification actions
+
+    private func openNotification(_ n: AppNotification) {
+        if !n.isRead { n.isRead = true; n.markLocallyEdited() }
+        try? modelContext.save()
+        showNotifications = false
+        if let cid = n.contactId { navTarget = DashNavTarget(id: cid) }
+        Task { await refreshFromStore() }
+    }
+
+    private func dismissNotification(_ n: AppNotification) {
+        n.isDismissed = true
+        n.markLocallyEdited()
+        try? modelContext.save()
+        Task { await refreshFromStore() }
+    }
+
+    private func archiveFromNotification(_ n: AppNotification) {
+        if let cid = n.contactId, let c = contactsByID[cid] {
+            c.isHidden = true
+            c.markLocallyEdited()
+        }
+        n.isDismissed = true
+        n.markLocallyEdited()
+        try? modelContext.save()
+        Task { await refreshFromStore() }
     }
 
     private var weeklyStatsCard: some View {
@@ -342,5 +410,100 @@ struct PrioritizeContactPicker: View {
         #if os(macOS)
         .frame(minWidth: 400, minHeight: 500)
         #endif
+    }
+}
+
+// MARK: - Notifications
+
+/// Hashable navigation target for opening a contact from a notification (distinct from the
+/// value-based `UUID` destination so the two `navigationDestination`s don't collide).
+struct DashNavTarget: Hashable, Identifiable {
+    let id: UUID
+}
+
+/// The Notifications / suggested-actions list presented from the Overview bell chiclet. Sorted
+/// newest-first. Tap or swipe-leading opens the related contact; swipe-trailing dismisses; archive
+/// suggestions get an inline "Archive" action.
+struct NotificationsView: View {
+    @Environment(\.dismiss) private var dismiss
+    let notifications: [AppNotification]
+    let onOpen: (AppNotification) -> Void
+    let onDismiss: (AppNotification) -> Void
+    let onArchive: (AppNotification) -> Void
+
+    var body: some View {
+        NavigationStack {
+            SwiftUI.Group {
+                if notifications.isEmpty {
+                    ContentUnavailableView {
+                        Label("All caught up", systemImage: "bell.slash")
+                    } description: {
+                        Text("Suggested actions will appear here as your relationships change.")
+                    }
+                } else {
+                    List {
+                        ForEach(notifications) { notification in
+                            Button { onOpen(notification) } label: {
+                                NotificationRow(notification: notification)
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button { onOpen(notification) } label: { Label("Open", systemImage: "arrow.right.circle") }
+                                    .tint(AppConstants.UI.accentGold)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) { onDismiss(notification) } label: {
+                                    Label("Dismiss", systemImage: "xmark")
+                                }
+                                if notification.kind == .archiveSuggestion {
+                                    Button { onArchive(notification) } label: { Label("Archive", systemImage: "archivebox") }
+                                        .tint(.gray)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Notifications")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 380, idealWidth: 440, minHeight: 360, idealHeight: 500)
+        #endif
+    }
+}
+
+struct NotificationRow: View {
+    let notification: AppNotification
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: notification.kind.icon)
+                .font(.body)
+                .foregroundStyle(notification.kind == .fadingRelationship ? AppConstants.UI.fadingRed : AppConstants.UI.accentGold)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(notification.title)
+                    .font(.body.weight(notification.isRead ? .regular : .semibold))
+                    .lineLimit(1)
+                Text(notification.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Text(notification.createdAt.relativeDescription)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 }

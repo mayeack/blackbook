@@ -24,6 +24,7 @@
 		1D99B1A030BE9CA3B7CF9713 /* ContactDeduplicationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCD54BD3218CA370A819170 /* ContactDeduplicationServiceTests.swift */; };
 		1E261EB5A02886029E363553 /* SyncTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6169F3E4455CDCD77042D958 /* SyncTypesTests.swift */; };
 		1F15A9907F62206EA97F4555 /* NetworkGraphEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 682862BCC7F0F257DF35CEB8 /* NetworkGraphEngine.swift */; };
+		233530392EB2ADCFAA331164 /* AppNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9466FE0A50E27F3BABB99ABE /* AppNotification.swift */; };
 		25A80D3929B5841C1D224E29 /* TagModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12AE2904F18728288E8C2218 /* TagModelTests.swift */; };
 		25F4C43A32CF59B6B592D404 /* DateHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815CE74C56D359F1D0990254 /* DateHelpers.swift */; };
 		264F82AF586E5CA45E98051A /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA16574DE27E1A8A48DC9564 /* NetworkGraphView.swift */; };
@@ -35,6 +36,7 @@
 		3882488C9E1137855A4160D3 /* ContactSuggestionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC89F208DED881F3BEFA245 /* ContactSuggestionEngine.swift */; };
 		391963EE7FEDF8139B2F90F5 /* ContactSuggestionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F30DE3186049895D31C581D /* ContactSuggestionEngineTests.swift */; };
 		3C97130622FF6D29BACDEA77 /* Activity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21445D604CF5DB4A2F69B7DF /* Activity.swift */; };
+		3CDE87A5D86BE3E2306E8C77 /* AppNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9466FE0A50E27F3BABB99ABE /* AppNotification.swift */; };
 		3D5BA26EDD7B1258E870B1D4 /* BonjourBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB12E01D4EB1C6E3A68182E /* BonjourBrowser.swift */; };
 		3D6714171EE7057CBE848A07 /* BlackbookServerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F49097698C68BE415965A964 /* BlackbookServerApp.swift */; };
 		3DDF69D8B580022FFDE12FCA /* ServerModelContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AB554426E75CDDDB20498E2 /* ServerModelContainer.swift */; };
@@ -60,6 +62,7 @@
 		5C59F290C171167D7664BE76 /* ContactSyncApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAE3F1034482B48A2B7CCF08 /* ContactSyncApply.swift */; };
 		5D10E3A07EE83D1C213B9CBD /* IconAndColorPickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C76958AF5D1BEA2F22D389A /* IconAndColorPickers.swift */; };
 		5D65835C77649F257190DEB3 /* SyncTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F49D100318268DC2B37475CA /* SyncTypes.swift */; };
+		621D41D8C9FA0212D6730A6E /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73CB8F7063A295D786A0459 /* NotificationService.swift */; };
 		62218CD59C45E6A0B43B84AA /* RejectedCalendarEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88153A388C33AA1F9FCA3424 /* RejectedCalendarEvent.swift */; };
 		627F00BB1C55B4CD93AD362C /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B68EA01CC90E403184F8383 /* DashboardView.swift */; };
 		63AED38B279341EDDCFAA16A /* GroupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F85542EF75DA29ECB0FBC2 /* GroupDetailView.swift */; };
@@ -152,6 +155,7 @@
 		F92545D544AD003815547A34 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535A0087C38A75EF251D28DF /* DeviceIdentity.swift */; };
 		F9C8E6C6BBBDE1468720591E /* ContactListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBCBC491C2BFAA0AABA68B3 /* ContactListViewModelTests.swift */; };
 		FA0527F27C39C281C7287EBE /* IMessageSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530F5990544546A519FE2390 /* IMessageSyncService.swift */; };
+		FA992EA56F0A795E5F1E088F /* NotificationsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0940DAFA5EFF5AEB3F54BE9 /* NotificationsTests.swift */; };
 		FC428EE351F1C7F125A3E819 /* AIInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C58C1200FB5DE674799040E /* AIInsightsView.swift */; };
 		FC4D35EB1F0F93963E0499E2 /* DateHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */; };
 		FD356F0646511FD58F59CCEF /* RelationshipScoreEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7B07D8F95B7197892AB8D6 /* RelationshipScoreEngineTests.swift */; };
@@ -251,6 +255,7 @@
 		8C76958AF5D1BEA2F22D389A /* IconAndColorPickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconAndColorPickers.swift; sourceTree = "<group>"; };
 		9070FA35720DE1331E514BFF /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModelTests.swift; sourceTree = "<group>"; };
+		9466FE0A50E27F3BABB99ABE /* AppNotification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNotification.swift; sourceTree = "<group>"; };
 		950AC9FC1E76731546573DEA /* ReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderService.swift; sourceTree = "<group>"; };
 		970CC06BF6BA7D37D1C593DC /* InteractionLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLogView.swift; sourceTree = "<group>"; };
 		972BC195190AAFA50ABE3DC7 /* ContactGroupPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactGroupPickerView.swift; sourceTree = "<group>"; };
@@ -298,9 +303,11 @@
 		ED64DF1DD19F6ADC3991B97A /* DuplicateScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateScanView.swift; sourceTree = "<group>"; };
 		EF98EBF38277BBA19D0BA8C7 /* TagManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagManagerView.swift; sourceTree = "<group>"; };
 		F00610DA298D9C87714AF36E /* RejectedCalendarEventsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RejectedCalendarEventsView.swift; sourceTree = "<group>"; };
+		F0940DAFA5EFF5AEB3F54BE9 /* NotificationsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsTests.swift; sourceTree = "<group>"; };
 		F3DBA07B5E3D5EAA2BFA3446 /* BlackbookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlackbookApp.swift; sourceTree = "<group>"; };
 		F49097698C68BE415965A964 /* BlackbookServerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlackbookServerApp.swift; sourceTree = "<group>"; };
 		F49D100318268DC2B37475CA /* SyncTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTypes.swift; sourceTree = "<group>"; };
+		F73CB8F7063A295D786A0459 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		F767094E24F344D3643565AA /* LocationIconSuggestionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationIconSuggestionView.swift; sourceTree = "<group>"; };
 		F8A766A33F57F94C9BDF7ACF /* ConstantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConstantsTests.swift; sourceTree = "<group>"; };
 		F8CBD51D0C167CD7EB595D1F /* NetworkGraphEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphEngineTests.swift; sourceTree = "<group>"; };
@@ -442,6 +449,7 @@
 				2382E25FE6BDF339DA44560D /* GoogleCalendarService.swift */,
 				D876B79CE3D85BAABBEBD128 /* LocalServerSyncService.swift */,
 				682862BCC7F0F257DF35CEB8 /* NetworkGraphEngine.swift */,
+				F73CB8F7063A295D786A0459 /* NotificationService.swift */,
 				1D046FD999BC660D58C26E32 /* PhotoStorageService.swift */,
 				56EBAC598F8585225B1F09E4 /* RelationshipScoreEngine.swift */,
 				950AC9FC1E76731546573DEA /* ReminderService.swift */,
@@ -476,6 +484,7 @@
 			isa = PBXGroup;
 			children = (
 				21445D604CF5DB4A2F69B7DF /* Activity.swift */,
+				9466FE0A50E27F3BABB99ABE /* AppNotification.swift */,
 				CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */,
 				8222BEE7020B6711480F644E /* Contact.swift */,
 				364729C23FA9F3F62DDA06EF /* ContactRelationship.swift */,
@@ -535,6 +544,7 @@
 				F8CBD51D0C167CD7EB595D1F /* NetworkGraphEngineTests.swift */,
 				9111F21061CF4BB14E6FE866 /* NetworkGraphViewModelTests.swift */,
 				AD6C2B5FA5933483BFCEC3B4 /* NoteModelTests.swift */,
+				F0940DAFA5EFF5AEB3F54BE9 /* NotificationsTests.swift */,
 				AB7B07D8F95B7197892AB8D6 /* RelationshipScoreEngineTests.swift */,
 				4353ABA45B9630F4CF7DBF0C /* ReminderModelTests.swift */,
 				B10282AE3F76E876ADDB3A4A /* ReminderServiceTests.swift */,
@@ -794,6 +804,7 @@
 				C31D09F55E3735C61BE790F0 /* ActivityFormView.swift in Sources */,
 				B164427D17DE85E450AEA4C1 /* ActivityListView.swift in Sources */,
 				E93AF93D1470F43091DF3613 /* AddNoteView.swift in Sources */,
+				3CDE87A5D86BE3E2306E8C77 /* AppNotification.swift in Sources */,
 				82E24EDF90B4FDD321E60DC3 /* AuthGateView.swift in Sources */,
 				CFDEF705ED6BC7629FB51319 /* AuthenticationService.swift in Sources */,
 				A9C0AC72BC7536D4CA4B2702 /* BackupDetailView.swift in Sources */,
@@ -859,6 +870,7 @@
 				264F82AF586E5CA45E98051A /* NetworkGraphView.swift in Sources */,
 				F363626541A0478C9B36D5FC /* NetworkGraphViewModel.swift in Sources */,
 				56A7A484B95A560F451576D7 /* Note.swift in Sources */,
+				621D41D8C9FA0212D6730A6E /* NotificationService.swift in Sources */,
 				85EC2CFCD1D9D03FC6B07DCC /* PhotoStorageService.swift in Sources */,
 				CB7C648273262A5D3B49C2D4 /* RejectedCalendarEvent.swift in Sources */,
 				C3B6C1B2D9C55DCFB285AB82 /* RejectedCalendarEventsView.swift in Sources */,
@@ -910,6 +922,7 @@
 				B3D765199ED7FF84739621F0 /* NetworkGraphEngineTests.swift in Sources */,
 				FD484B077257640144869BCF /* NetworkGraphViewModelTests.swift in Sources */,
 				17FC135DAFA6AACBD52DFD7D /* NoteModelTests.swift in Sources */,
+				FA992EA56F0A795E5F1E088F /* NotificationsTests.swift in Sources */,
 				FD356F0646511FD58F59CCEF /* RelationshipScoreEngineTests.swift in Sources */,
 				E331D0D1AF87D4E1FA420AAC /* ReminderModelTests.swift in Sources */,
 				C853CFD3BB51EC978673715D /* ReminderServiceTests.swift in Sources */,
@@ -926,6 +939,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				54ED84A76C60399BC05F5C99 /* Activity.swift in Sources */,
+				233530392EB2ADCFAA331164 /* AppNotification.swift in Sources */,
 				E9C12D0FA76386A83E75A5A7 /* BackupMetadata.swift in Sources */,
 				9CFACF1D237FBFDB8BE35DA2 /* BackupServer.swift in Sources */,
 				3D6714171EE7057CBE848A07 /* BlackbookServerApp.swift in Sources */,

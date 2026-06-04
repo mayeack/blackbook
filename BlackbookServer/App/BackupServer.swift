@@ -674,6 +674,10 @@ final class BackupServer: @unchecked Sendable {
                 let relPred = #Predicate<ContactRelationship> { $0.updatedAt > since }
                 var relDesc = FetchDescriptor<ContactRelationship>(predicate: relPred); relDesc.fetchLimit = 2000
                 json["contactRelationships"] = try context.fetch(relDesc).map { ModelSyncApply.contactRelationshipToDict($0) }
+
+                let notifPred = #Predicate<AppNotification> { $0.updatedAt > since }
+                var notifDesc = FetchDescriptor<AppNotification>(predicate: notifPred); notifDesc.fetchLimit = 2000
+                json["appNotifications"] = try context.fetch(notifDesc).map { ModelSyncApply.appNotificationToDict($0) }
             } catch {
                 logger.error("Sync pull fetch failed: \(error.localizedDescription)")
             }
@@ -737,6 +741,9 @@ final class BackupServer: @unchecked Sendable {
                 }
                 if let rels = top["contactRelationships"] as? [[String: Any]] {
                     for dict in rels { try ModelSyncApply.applyRemoteContactRelationship(dict, to: context) }
+                }
+                if let appNotifications = top["appNotifications"] as? [[String: Any]] {
+                    for dict in appNotifications { try ModelSyncApply.applyRemoteAppNotification(dict, to: context) }
                 }
 
                 // Deletes (structured per model type)
@@ -823,6 +830,12 @@ final class BackupServer: @unchecked Sendable {
             for idStr in ids {
                 guard let id = UUID(uuidString: idStr) else { continue }
                 try context.delete(model: RejectedCalendarEvent.self, where: #Predicate<RejectedCalendarEvent> { $0.id == id })
+            }
+        }
+        if let ids = deletes["appNotifications"] as? [String] {
+            for idStr in ids {
+                guard let id = UUID(uuidString: idStr) else { continue }
+                try context.delete(model: AppNotification.self, where: #Predicate<AppNotification> { $0.id == id })
             }
         }
     }
