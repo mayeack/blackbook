@@ -466,6 +466,12 @@ final class LocalServerSyncService {
         }
 
         try bgContext.save()
+
+        // Re-derive lastInteractionDate from the interaction records this device now holds and
+        // recompute relationship scores, so health reflects freshly-synced interactions even
+        // when the Dashboard isn't the visible tab (on macOS its @State recalc wouldn't run).
+        // Runs on the background context → the main context's @Queries see one settled commit.
+        RelationshipScoreEngine().recalculateAll(context: bgContext)
     }
 
     private func fetchPendingContacts(context: ModelContext) throws -> [Contact] {

@@ -12,14 +12,43 @@ final class RelationshipScoreEngine {
         UserDefaults.standard.object(forKey: "scoring.recencyWeight") as? Double ?? AppConstants.Scoring.recencyWeight
     }
 
-    /// Recalculates scores and trends for all contacts using only direct
-    /// Contact properties. Never accesses lazy SwiftData relationships.
+    /// Recalculates scores and trends for all contacts.
+    ///
+    /// First re-derives each contact's `lastInteractionDate` from its actual `Interaction`
+    /// records on *this* device, then scores from that field. This decouples the score from
+    /// cross-device propagation of the denormalized `lastInteractionDate`: synced interaction
+    /// rows arrive cleanly, but the contact-field update can be rejected by conflict resolution
+    /// (`ContactSyncApply.applyRemoteContact`) when the local copy is newer + pending, leaving
+    /// recency stuck at 0 even though the texts are present (work_log: Hugo Dooner).
+    ///
+    /// We deliberately read interactions via a single `FetchDescriptor<Interaction>` and group
+    /// by the to-one `interaction.contact?.id` — the same controlled service-side pattern used
+    /// by the server's `IMessageSyncService`. We never touch the `Contact.interactions` to-many
+    /// inverse, which is what faults under `@Query` re-renders (work_log 2026-06-01/02).
     func recalculateAll(context: ModelContext) {
         do {
             let contacts = try context.fetch(FetchDescriptor<Contact>())
             let sevenDaysAgo = Date.daysAgo(7)
 
+            // Latest interaction date per contact, derived from the records this device holds.
+            var latestInteraction: [UUID: Date] = [:]
+            for ix in try context.fetch(FetchDescriptor<Interaction>()) {
+                guard let cid = ix.contact?.id else { continue }
+                if let current = latestInteraction[cid] {
+                    if ix.date > current { latestInteraction[cid] = ix.date }
+                } else {
+                    latestInteraction[cid] = ix.date
+                }
+            }
+
             for contact in contacts {
+                // Heal a stale/missing denormalized date from real interaction records.
+                // Local-only correction — no markLocallyEdited(); each device derives its own.
+                if let derived = latestInteraction[contact.id],
+                   contact.lastInteractionDate == nil || derived > contact.lastInteractionDate! {
+                    contact.lastInteractionDate = derived
+                }
+
                 // Score based on recency of last interaction + priority boost
                 var score: Double = 0
                 if let lastDate = contact.lastInteractionDate {

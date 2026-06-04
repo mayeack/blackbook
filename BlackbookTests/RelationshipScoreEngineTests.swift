@@ -239,4 +239,53 @@ final class RelationshipScoreEngineTests: XCTestCase {
         XCTAssertGreaterThan(contact1.relationshipScore, contact2.relationshipScore, "Recent contact should score higher than old")
         XCTAssertGreaterThan(contact2.relationshipScore, contact3.relationshipScore, "Old contact should score higher than no-interaction")
     }
+
+    // MARK: - 14. Heal stale/missing lastInteractionDate from interaction records
+    //
+    // Regression: synced iMessage interaction *records* arrive, but the contact-field update that
+    // carries lastInteractionDate is rejected by conflict resolution (local newer + pending), so the
+    // device shows the texts yet recency stays 0 and the score sits at priority-only (Hugo Dooner: 20).
+    // recalculateAll must re-derive the date from the records the device already holds.
+
+    func testHealsStaleDateFromInteractionRecord() throws {
+        let contact = makeContact()
+        addInteraction(to: contact, type: .text, date: Date.daysAgo(2))
+        // Simulate the rejected field update: record present, denormalized date stale.
+        contact.lastInteractionDate = nil
+        try context.save()
+
+        let score = recalculateAndGetScore(for: contact)
+
+        XCTAssertNotNil(contact.lastInteractionDate, "date should be re-derived from the record")
+        XCTAssertGreaterThan(score, 80.0, "a 2-day-old interaction must lift recency, not leave the score at 0")
+        XCTAssertEqual(contact.scoreTrend, .up)
+    }
+
+    func testPriorityContactRecoversAboveBoostAfterHeal() throws {
+        // The exact Hugo Dooner shape: priority + recent texts but a stale date pinning the score at 20.
+        let contact = makeContact(isPriority: true)
+        addInteraction(to: contact, type: .text, date: Date.daysAgo(2))
+        contact.lastInteractionDate = nil
+        contact.relationshipScore = AppConstants.Scoring.priorityBoost // the stuck "20 / Fading" value
+        try context.save()
+
+        let score = recalculateAndGetScore(for: contact)
+
+        XCTAssertGreaterThan(score, AppConstants.Scoring.priorityBoost + 40,
+                             "recent interactions must contribute recency on top of the priority boost")
+    }
+
+    func testHealNeverLowersNewerManualDate() throws {
+        // A manual edit set a date newer than any record; recalc uses max() and must not regress it.
+        let contact = makeContact()
+        addInteraction(to: contact, type: .text, date: Date.daysAgo(30))
+        let newer = Date.daysAgo(1)
+        contact.lastInteractionDate = newer
+        try context.save()
+
+        engine.recalculateAll(context: context)
+
+        XCTAssertEqual(contact.lastInteractionDate?.timeIntervalSince1970 ?? 0,
+                       newer.timeIntervalSince1970, accuracy: 1.0)
+    }
 }
