@@ -28,8 +28,13 @@ schemes:
     build:
       targets:
         BlackbookServer: all
+        BlackbookServerTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - BlackbookServerTests
     profile:
       config: Release
 targets:
@@ -60,6 +65,22 @@ targets:
     supportedDestinations: [macOS]
     sources:
       - BlackbookServer
+      # Yeackbot Collector (loopback API on 127.0.0.1:4321). Tests and the dev-only SwiftPM
+      # manifest/tools stay out of the app.
+      - path: collector
+        excludes:
+          - Package.swift
+          - run-tests.sh
+          - ".build/**"
+          - "Tests/**"
+          - "Tools/**"
+          - Generated/SelfHandles.example.swift
+          - Generated/SelfHandlesFallback.swift
+          - Generated/SelfHandles.generated.swift
+      # Git-ignored; written by `npm run setup:self`. The pre-build script below creates an
+      # empty stub when it is missing so a fresh checkout builds (every send is then refused).
+      - path: collector/Generated/SelfHandles.generated.swift
+        optional: true
       - path: Blackbook/Models
         excludes:
           - BackupMetadata.swift
@@ -69,6 +90,20 @@ targets:
       - Blackbook/Utilities/ContactSyncApply.swift
       - Blackbook/Utilities/DateHelpers.swift
       - Blackbook/Utilities/DeviceIdentity.swift
+    preBuildScripts:
+      - name: Ensure SelfHandles.generated.swift
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/collector/Generated/SelfHandles.generated.swift
+        script: |
+          f="$SRCROOT/collector/Generated/SelfHandles.generated.swift"
+          if [ ! -f "$f" ]; then
+            printf '%s\n' \
+              '// Empty stub written by the Xcode pre-build phase; run `npm run setup:self` to fill it.' \
+              'enum GeneratedSelfHandles {' \
+              '    static let handles: [String] = []' \
+              '}' > "$f"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.blackbookdevelopment.server
@@ -77,9 +112,37 @@ targets:
         DEVELOPMENT_TEAM: 37NR4Z7NT6
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
-        INFOPLIST_KEY_CFBundleDisplayName: "Blackbook Server"
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_CFBundleDisplayName: "Yeackbot Collector"
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Yeackbot Collector sends your daily brief to your own iMessage address through Messages."
+        INFOPLIST_KEY_NSContactsUsageDescription: "Yeackbot Collector reads your address book so Yeackbot can match people across sources. It never changes your contacts."
+        # Hardened runtime stays off until a built product's designated requirement is verified
+        # identical to the installed app's (codesign -d -r-); see docs/design/architecture.md §1a.
+        ENABLE_HARDENED_RUNTIME: NO
+        MARKETING_VERSION: "2.0.0"
+        CURRENT_PROJECT_VERSION: "2"
+  BlackbookServerTests:
+    type: bundle.unit-test
+    supportedDestinations: [macOS]
+    # No host app: the collector sources are compiled straight into the bundle so tests never
+    # launch BlackbookServer (which would start the legacy sync server and chat.db poller).
+    sources:
+      - path: collector
+        excludes:
+          - Package.swift
+          - run-tests.sh
+          - ".build/**"
+          - "Tools/**"
+          - "Tests/Fixtures/**"
+          - "Tests/Golden/**"
+          - Generated/SelfHandles.example.swift
+          - Generated/SelfHandles.generated.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.blackbookdevelopment.server.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 37NR4Z7NT6
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
   BlackbookTests:
     type: bundle.unit-test
     supportedDestinations: [iOS, macOS]

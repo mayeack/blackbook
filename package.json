@@ -1,0 +1,37 @@
+{
+  "name": "yeackbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Yeackbot: agentic personal CRM (Node server + PWA + signed macOS collector)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @yb/server",
+    "build": "npm run typecheck && npm run build -w @yb/web && node scripts/build-server.mjs",
+    "build:server": "node scripts/build-server.mjs",
+    "typecheck": "tsc -p packages/shared && tsc -p packages/server && tsc -p packages/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:pii": "node scripts/lint-pii.mjs",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
+    "yb": "tsx packages/server/src/cli.ts",
+    "setup:self": "tsx packages/server/src/cli.ts setup-self",
+    "service:install": "bash scripts/service.sh install",
+    "service:restart": "bash scripts/service.sh restart",
+    "service:start": "bash scripts/service.sh start",
+    "service:stop": "bash scripts/service.sh stop",
+    "service:status": "bash scripts/service.sh status",
+    "service:uninstall": "bash scripts/service.sh uninstall"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

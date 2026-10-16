@@ -1,0 +1,47 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "items": [
+    {
+      "chat_rowid": 1,
+      "chat_guid": "any;-;+15555550101",
+      "style": 45,
+      "chat_identifier": "+15555550101",
+      "display_name": null,
+      "service": "iMessage",
+      "members": [
+        "+15555550101"
+      ],
+      "last_message_at": "2026-10-01T12:19:00.000Z"
+    },
+    {
+      "chat_rowid": 2,
+      "chat_guid": "any;+;chat100200300",
+      "style": 43,
+      "chat_identifier": "chat100200300",
+      "display_name": "Trail Crew",
+      "service": "iMessage",
+      "members": [
+        "+15555550101",
+        "+15555550102",
+        "carol@example.com"
+      ],
+      "last_message_at": "2026-10-01T12:19:30.000Z"
+    },
+    {
+      "chat_rowid": 3,
+      "chat_guid": "any;-;+15555550100",
+      "style": 45,
+      "chat_identifier": "+15555550100",
+      "display_name": null,
+      "service": "iMessage",
+      "members": [
+        "+15555550100"
+      ],
+      "last_message_at": "2026-10-01T12:20:00.000Z"
+    }
+  ],
+  "next_after_rowid": 3,
+  "has_more": false,
+  "max_rowid": 3
+}

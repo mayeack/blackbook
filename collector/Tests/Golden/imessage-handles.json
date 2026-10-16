@@ -1,0 +1,31 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "items": [
+    {
+      "rowid": 1,
+      "id": "+15555550101",
+      "service": "iMessage"
+    },
+    {
+      "rowid": 2,
+      "id": "+15555550102",
+      "service": "iMessage"
+    },
+    {
+      "rowid": 3,
+      "id": "carol@example.com",
+      "service": "iMessage"
+    },
+    {
+      "rowid": 4,
+      "id": "+15555550100",
+      "service": "iMessage"
+    },
+    {
+      "rowid": 5,
+      "id": "+15555550102",
+      "service": "SMS"
+    }
+  ]
+}

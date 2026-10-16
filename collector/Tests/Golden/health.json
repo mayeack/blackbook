@@ -1,0 +1,23 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "version": "2.0.0",
+  "build": "2",
+  "macos": "26.0.0",
+  "uptime_s": 3600,
+  "permissions": {
+    "fda": "granted",
+    "contacts": "granted",
+    "automation_messages": "not_determined"
+  },
+  "chatdb": {
+    "max_rowid": 23,
+    "newest_at": "2026-10-01T12:20:00.000Z"
+  },
+  "whatsapp": {
+    "installed": false,
+    "running": false,
+    "container_mtime": null
+  },
+  "messages_app_running": true
+}

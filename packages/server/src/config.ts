@@ -1,0 +1,187 @@
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { z } from 'zod';
+
+/** The repo root: nearest folder above this file holding packages/server (works from src/ and the dist bundle). */
+function findProjectRoot(from: string): string {
+  for (let dir = from; ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'packages', 'server', 'package.json'))) return dir;
+    if (path.dirname(dir) === dir) return path.resolve(from, '../../..');
+  }
+}
+
+export const PROJECT_ROOT = findProjectRoot(import.meta.dirname);
+export const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'Yeackbot');
+export const DEFAULT_PORT = 4320;
+
+/** macOS caps unix-socket paths at 104 bytes. A deep data dir falls back to a per-dir name in the per-user $TMPDIR (0700). */
+const MAX_SOCKET_PATH = 103;
+export function adminSocketPathFor(dataDir: string): string {
+  const preferred = path.join(dataDir, 'admin.sock');
+  if (Buffer.byteLength(preferred) <= MAX_SOCKET_PATH) return preferred;
+  const id = createHash('sha256').update(dataDir).digest('hex').slice(0, 16);
+  return path.join(os.tmpdir(), `yb-${id}.sock`);
+}
+
+const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'] as const;
+
+const flag = z
+  .enum(['1', '0', 'true', 'false', 'yes', 'no', ''])
+  .optional()
+  .transform((v) => v === '1' || v === 'true' || v === 'yes');
+
+const optionalText = z
+  .string()
+  .optional()
+  .transform((v) => (v?.trim() ? v.trim() : undefined));
+
+const Env = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.enum(LOOPBACK_HOSTS).default('127.0.0.1'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(DEFAULT_PORT),
+  YB_DATA_DIR: optionalText,
+  CF_ACCESS_TEAM: optionalText.refine((v) => v === undefined || /^[a-z0-9-]+$/i.test(v), 'team name only, e.g. "myteam"'),
+  CF_ACCESS_AUD: optionalText,
+  ALLOWED_EMAIL: optionalText.refine((v) => v === undefined || /^[^@\s]+@[^@\s]+$/.test(v), 'must be an email'),
+  SECRETS_KEY: optionalText,
+  COLLECTOR_URL: z
+    .url()
+    .default('http://127.0.0.1:4321')
+    .refine((u) => ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(u).hostname), 'collector must be on loopback'),
+  COLLECTOR_TOKEN_FILE: optionalText,
+  ANTHROPIC_API_KEY: optionalText,
+  VAPID_PUBLIC_KEY: optionalText,
+  VAPID_PRIVATE_KEY: optionalText,
+  VAPID_SUBJECT: optionalText,
+  DEV_AUTH_BYPASS: flag,
+  LOG_STDERR: flag,
+});
+
+export interface AppConfig {
+  nodeEnv: 'development' | 'production' | 'test';
+  host: (typeof LOOPBACK_HOSTS)[number];
+  port: number;
+  dataDir: string;
+  dbPath: string;
+  lockPath: string;
+  backupDir: string;
+  logDir: string;
+  adminSocketPath: string;
+  webDist: string;
+  access: { team: string; aud: string; allowedEmail: string } | null;
+  /** Non-production only: skips Cloudflare Access verification (refused when NODE_ENV=production). */
+  devAuthBypass: boolean;
+  /** 32-byte AES-256-GCM key for the secrets table (null = secrets unavailable). */
+  secretsKey: Buffer | null;
+  collectorUrl: string;
+  collectorTokenFile: string;
+  anthropicApiKey: string | null;
+  vapid: { publicKey: string; privateKey: string; subject: string } | null;
+  logToStderr: boolean;
+}
+
+export function parseSecretsKey(b64: string): Buffer {
+  const s = b64.trim();
+  const key = /^[A-Za-z0-9+/_-]{43}=?$/.test(s) ? Buffer.from(s, 'base64') : Buffer.alloc(0);
+  if (key.length !== 32) throw new Error('SECRETS_KEY must be 32 random bytes, base64-encoded (openssl rand -base64 32).');
+  return key;
+}
+
+export class ConfigError extends Error {}
+
+/** Parses the environment (zod) into the server config; throws ConfigError with every problem listed. */
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const parsed = Env.safeParse(env);
+  if (!parsed.success) {
+    const problems = parsed.error.issues.map((i) => `${i.path.join('.') || 'env'}: ${i.message}`);
+    throw new ConfigError(`Invalid configuration:\n  ${problems.join('\n  ')}`);
+  }
+  const e = parsed.data;
+  const production = e.NODE_ENV === 'production';
+  const problems: string[] = [];
+
+  if (e.DEV_AUTH_BYPASS && production) problems.push('DEV_AUTH_BYPASS is not allowed when NODE_ENV=production.');
+  const access =
+    e.CF_ACCESS_TEAM && e.CF_ACCESS_AUD && e.ALLOWED_EMAIL
+      ? { team: e.CF_ACCESS_TEAM, aud: e.CF_ACCESS_AUD, allowedEmail: e.ALLOWED_EMAIL.toLowerCase() }
+      : null;
+  if (!access && !(e.DEV_AUTH_BYPASS && !production)) {
+    problems.push('CF_ACCESS_TEAM, CF_ACCESS_AUD and ALLOWED_EMAIL are required (or DEV_AUTH_BYPASS=1 outside production).');
+  }
+  let secretsKey: Buffer | null = null;
+  if (e.SECRETS_KEY) {
+    try {
+      secretsKey = parseSecretsKey(e.SECRETS_KEY);
+    } catch (err) {
+      problems.push((err as Error).message);
+    }
+  } else if (production) {
+    problems.push('SECRETS_KEY is required in production.');
+  }
+  const vapidParts = [e.VAPID_PUBLIC_KEY, e.VAPID_PRIVATE_KEY, e.VAPID_SUBJECT];
+  if (vapidParts.some(Boolean) && !vapidParts.every(Boolean)) {
+    problems.push('VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must be set together.');
+  }
+
+  const dataDir = path.resolve(e.YB_DATA_DIR ?? DEFAULT_DATA_DIR);
+  // Tests must never touch the real data dir.
+  if (env.VITEST && dataDir === path.resolve(DEFAULT_DATA_DIR)) {
+    problems.push('Tests must set YB_DATA_DIR to a temporary directory.');
+  }
+  if (problems.length) throw new ConfigError(`Invalid configuration:\n  ${problems.join('\n  ')}`);
+
+  return {
+    nodeEnv: e.NODE_ENV,
+    host: e.HOST,
+    port: e.PORT,
+    dataDir,
+    dbPath: path.join(dataDir, 'yeackbot.db'),
+    lockPath: path.join(dataDir, 'yeackbot.pid'),
+    backupDir: path.join(dataDir, 'backups'),
+    logDir: path.join(dataDir, 'logs'),
+    adminSocketPath: adminSocketPathFor(dataDir),
+    webDist: path.join(PROJECT_ROOT, 'packages', 'web', 'dist'),
+    access,
+    devAuthBypass: e.DEV_AUTH_BYPASS && !production,
+    secretsKey,
+    collectorUrl: e.COLLECTOR_URL,
+    collectorTokenFile: path.resolve(e.COLLECTOR_TOKEN_FILE ?? path.join(dataDir, 'collector.token')),
+    anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
+    vapid:
+      e.VAPID_PUBLIC_KEY && e.VAPID_PRIVATE_KEY && e.VAPID_SUBJECT
+        ? { publicKey: e.VAPID_PUBLIC_KEY, privateKey: e.VAPID_PRIVATE_KEY, subject: e.VAPID_SUBJECT }
+        : null,
+    logToStderr: e.LOG_STDERR || e.NODE_ENV === 'development',
+  };
+}
+
+export type DataPaths = Pick<AppConfig, 'dataDir' | 'dbPath' | 'lockPath' | 'backupDir' | 'logDir' | 'adminSocketPath'>;
+
+/** Just the data-dir paths (no auth/secrets validation): what the `yb` CLI needs. */
+export function dataPaths(env: NodeJS.ProcessEnv = process.env): DataPaths {
+  const dataDir = path.resolve(env.YB_DATA_DIR?.trim() || DEFAULT_DATA_DIR);
+  return {
+    dataDir,
+    dbPath: path.join(dataDir, 'yeackbot.db'),
+    lockPath: path.join(dataDir, 'yeackbot.pid'),
+    backupDir: path.join(dataDir, 'backups'),
+    logDir: path.join(dataDir, 'logs'),
+    adminSocketPath: adminSocketPathFor(dataDir),
+  };
+}
+
+/** Loads <repo>/.env if present (existing environment variables win). */
+export function loadDotEnv(): void {
+  const file = path.join(PROJECT_ROOT, '.env');
+  if (fs.existsSync(file)) process.loadEnvFile(file);
+}
+
+/** Creates the data dir (0700) and its subfolders. */
+export function ensureDataDir(config: Pick<AppConfig, 'dataDir' | 'backupDir' | 'logDir'>): void {
+  for (const dir of [config.dataDir, config.backupDir, config.logDir]) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  fs.chmodSync(config.dataDir, 0o700);
+}

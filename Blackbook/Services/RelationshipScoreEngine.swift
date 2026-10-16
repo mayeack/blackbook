@@ -19,7 +19,7 @@ final class RelationshipScoreEngine {
     /// cross-device propagation of the denormalized `lastInteractionDate`: synced interaction
     /// rows arrive cleanly, but the contact-field update can be rejected by conflict resolution
     /// (`ContactSyncApply.applyRemoteContact`) when the local copy is newer + pending, leaving
-    /// recency stuck at 0 even though the texts are present (work_log: Hugo Dooner).
+    /// recency stuck at 0 even though the texts are present (work_log: Contact A).
     ///
     /// We deliberately read interactions via a single `FetchDescriptor<Interaction>` and group
     /// by the to-one `interaction.contact?.id` — the same controlled service-side pattern used

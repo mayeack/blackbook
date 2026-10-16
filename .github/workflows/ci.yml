@@ -11,6 +11,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Yeackbot (Node workspaces + collector). The repo is public: lint:pii runs first and gates everything else.
+  node:
+    name: Yeackbot server, web & PII lint
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: PII / secret lint
+        run: npm run lint:pii
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests (shared, server, web)
+        run: npm test
+
+      - name: Build (web + server bundle)
+        run: npm run build
+
+  collector:
+    name: Collector & BlackbookServer
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+
+      - name: Collector unit tests (SwiftPM)
+        run: collector/run-tests.sh
+
+      - name: Build & test BlackbookServer (macOS)
+        run: |
+          set -o pipefail
+          xcodebuild build test \
+            -project Blackbook.xcodeproj \
+            -scheme BlackbookServer \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            | xcpretty
+
   test:
     name: Build & Test
     runs-on: macos-15
@@ -89,7 +140,7 @@ jobs:
   deploy-testflight:
     name: Deploy to TestFlight
     runs-on: macos-15
-    needs: test
+    needs: [test, node, collector]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4

@@ -1,0 +1,19 @@
+# scripts/lint-pii.mjs baseline: known pre-existing findings, one per line:
+#   path<TAB>kind<TAB>sha256(match)[0:16]<TAB># reason
+# Only legacy values that were already in the repo belong here. New code and fixtures use synthetic data
+# (555-01xx numbers, example.com addresses). Delete a line once its file is scrubbed.
+BlackbookTests/AuthStateTests.swift	email	f660ab912ec121d1	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/AuthStateTests.swift	email	fb98d44ad7501a95	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	07f31350c8de820b	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	10a7c8f4b772496f	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	3c18af7c7db08690	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	46bb3d7caaf21795	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	478abec743056916	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	5145a36bb09ff35f	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	80af8064ec016b68	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	d2e87fa970598005	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	email	fe2cefe36d6ea66e	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	phone	29339168b9689eb9	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/ContactDeduplicationServiceTests.swift	phone	eb8acf7ee0994844	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/SyncApplyTests.swift	email	78e6f27253b39a11	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)
+BlackbookTests/SyncApplyTests.swift	email	fe2cefe36d6ea66e	# legacy Swift unit-test fixture (invented contact; pre-dates this linter)

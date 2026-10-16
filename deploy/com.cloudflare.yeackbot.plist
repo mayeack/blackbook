@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Tunnel yeackbot.com -> 127.0.0.1:4320 (Cloudflare Access in front). TEMPLATE: replace HOME_PATH with the
+  home directory, copy to ~/Library/LaunchAgents/com.cloudflare.yeackbot.plist, then
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cloudflare.yeackbot.plist
+  No log file, and no-autoupdate so cloudflared never rewrites its own binary. The config always passes an
+  explicit origincert so it never touches the other tunnels' cert.pem.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cloudflare.yeackbot</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/cloudflared</string>
+        <string>tunnel</string>
+        <string>--no-autoupdate</string>
+        <string>--config</string>
+        <string>HOME_PATH/.cloudflared/yeackbot.yml</string>
+        <string>run</string>
+        <string>yeackbot</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>

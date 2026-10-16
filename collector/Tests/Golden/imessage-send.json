@@ -1,0 +1,14 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "status": "delivered",
+  "message_guids": [
+    "SENT-GUID-1",
+    "SENT-GUID-2"
+  ],
+  "rowids": [
+    9001,
+    9002
+  ],
+  "error_code": null
+}
