@@ -21,15 +21,18 @@ const SETTINGS: NavItem = { to: '/settings', label: 'Settings', icon: Icons.sett
 const SIDEBAR = [TODAY, PEOPLE, ASK, NETWORK, CIRCLES, EVENTS, SOURCES, SETTINGS];
 /** Screens reached through the More tab on mobile. */
 export const MORE_ITEMS = [CIRCLES, EVENTS, SOURCES, SETTINGS];
-const MORE_PATHS = ['/more', ...MORE_ITEMS.map((i) => i.to)];
+/** An event page (/e/:id) belongs to Events, under More on mobile. */
+const MORE_PATHS = ['/more', '/e', ...MORE_ITEMS.map((i) => i.to)];
 
 const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined);
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const inMore = MORE_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  // A person page belongs to People.
+  // A person page belongs to People; an event page to Events.
   const inPeople = pathname.startsWith('/p/');
+  const inEvents = pathname.startsWith('/e/');
+  const activeFor = (n: NavItem) => (n === PEOPLE && inPeople) || (n === EVENTS && inEvents);
 
   return (
     <div className="shell">
@@ -40,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="shell-nav" aria-label="Main">
           {SIDEBAR.map((n) => (
-            <NavLink key={n.to} to={n.to} className={n === PEOPLE && inPeople ? 'active' : navClass}>
+            <NavLink key={n.to} to={n.to} className={activeFor(n) ? 'active' : navClass}>
               {n.icon}
               <span>{n.label}</span>
             </NavLink>

@@ -363,7 +363,8 @@ export class ImessageIngestor {
       this.stats.promoted += r.promoted;
       this.stats.reclassified_service += r.service;
       // A target that hasn't synced in 30 days never will (deleted, or older than Messages' retention).
-      this.stats.reactions_expired += this.q('DELETE FROM pending_reactions WHERE first_seen_at < ?').run(this.now - PENDING_REACTION_TTL_MS).changes;
+      this.stats.reactions_expired += this.q('DELETE FROM pending_reactions WHERE source = ? AND first_seen_at < ?')
+        .run(SOURCE, this.now - PENDING_REACTION_TTL_MS).changes;
     });
     return this.finish(true);
   }
@@ -473,7 +474,8 @@ export class ImessageIngestor {
   private resolvePending(): void {
     const ready = this.q(
         `SELECT p.*, m.id AS message_id FROM pending_reactions p
-         JOIN messages m ON m.source = ? AND m.source_msg_id = p.target_source_msg_id
+         JOIN messages m ON m.source = p.source AND m.source_msg_id = p.target_source_msg_id
+         WHERE p.source = ?
          ORDER BY p.removal, p.at`,
       )
       .all(SOURCE) as (PendingReactionRow & { message_id: number })[];

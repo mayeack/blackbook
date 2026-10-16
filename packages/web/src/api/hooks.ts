@@ -1,7 +1,9 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, qs } from './client';
+import { normalizeEventsPage, normalizeGoogleStatus, normalizeOccasionDetail } from '../lib/events';
+import { api, ApiError, isApiError, qs } from './client';
 import type {
   ActivityPage,
+  EventsWhen,
   HiddenPage,
   Me,
   PeoplePage,
@@ -23,7 +25,14 @@ export const keys = {
   sources: ['sources'] as const,
   activity: ['activity'] as const,
   hidden: ['settings', 'hidden'] as const,
+  events: (when: EventsWhen) => ['events', when] as const,
+  event: (id: string) => ['event', id] as const,
+  google: ['google', 'status'] as const,
 };
+
+/** 501 = that API hasn't landed on this server yet: show "not available", don't retry. */
+export const isNotImplemented = (e: unknown) => isApiError(e) && e.status === 501;
+const retryOnce = (count: number, e: unknown) => count < 1 && !(isApiError(e) && (e.status === 501 || (e.status >= 400 && e.status < 500)));
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => api.get<Me>('/me'), staleTime: 5 * 60_000 });
 
@@ -40,12 +49,16 @@ export function usePeople(q: string, sort: PeopleSort) {
 export const usePerson = (id: string) =>
   useQuery({ queryKey: keys.person(id), queryFn: () => api.get<PersonDetail>(`/people/${encodeURIComponent(id)}`) });
 
-export function useTimeline(id: string, enabled = true) {
+/** source: a channel ('whatsapp', 'instagram', …) or null for everything. */
+export function useTimeline(id: string, source: string | null = null, enabled = true) {
   return useInfiniteQuery({
-    queryKey: keys.timeline(id),
-    queryFn: ({ pageParam }) => api.get<TimelinePage>(`/people/${encodeURIComponent(id)}/timeline${qs({ cursor: pageParam, limit: 30 })}`),
+    queryKey: [...keys.timeline(id), source ?? 'all'],
+    queryFn: ({ pageParam }) =>
+      api.get<TimelinePage>(`/people/${encodeURIComponent(id)}/timeline${qs({ cursor: pageParam, limit: 30, source })}`),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
+    // Keep the old list while a filter change loads, but never show another person's timeline.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === id ? prev : undefined),
     enabled,
   });
 }
@@ -109,5 +122,72 @@ export function useUndo(target: 'batch' | 'run') {
     onSuccess: (res) => {
       if (!res.dryRun) void qc.invalidateQueries();
     },
+  });
+}
+
+// ---------------------------------------------------------------------------------------------- events
+
+export function useEvents(when: EventsWhen) {
+  return useInfiniteQuery({
+    queryKey: keys.events(when),
+    queryFn: async ({ pageParam }) => normalizeEventsPage(await api.get<unknown>(`/events${qs({ when, cursor: pageParam })}`)),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+    retry: retryOnce,
+  });
+}
+
+export const useEvent = (id: string) =>
+  useQuery({
+    queryKey: keys.event(id),
+    queryFn: async () => {
+      const ev = normalizeOccasionDetail(await api.get<unknown>(`/events/${encodeURIComponent(id)}`));
+      if (!ev) throw new ApiError(502, 'BAD_RESPONSE', 'The server sent an unexpected response.');
+      return ev;
+    },
+    retry: retryOnce,
+  });
+
+// ---------------------------------------------------------------------------------------------- Google Calendar
+
+/** Until the OAuth client exists every /google path answers 503 GOOGLE_NOT_CONFIGURED: that is a status, not an error. */
+export const useGoogleStatus = () =>
+  useQuery({
+    queryKey: keys.google,
+    queryFn: async () => {
+      try {
+        return normalizeGoogleStatus(await api.get<unknown>('/google/status'));
+      } catch (e) {
+        if (isApiError(e) && e.code === 'GOOGLE_NOT_CONFIGURED') return normalizeGoogleStatus({ configured: false });
+        throw e;
+      }
+    },
+    retry: retryOnce,
+    staleTime: 60_000,
+  });
+
+const invalidateCalendar = (qc: ReturnType<typeof useQueryClient>) => {
+  void qc.invalidateQueries({ queryKey: keys.google });
+  void qc.invalidateQueries({ queryKey: keys.sources });
+  void qc.invalidateQueries({ queryKey: ['events'] });
+};
+
+/** Sets how each calendar counts (attending / candidate / classify / excluded). Read-only toward Google. */
+export function useSetCalendarTreatments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (calendars: { id: string; treatment: string }[]) => api.post<unknown>('/google/calendars', { calendars }),
+    meta: { silent: true },
+    onSuccess: () => invalidateCalendar(qc),
+  });
+}
+
+/** Disconnects Google; `deleteData` also deletes every synced calendar and event on the server. */
+export function useGoogleDisconnect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (o: { deleteData?: boolean } = {}) => api.post<unknown>('/google/disconnect', o.deleteData ? { deleteData: true } : {}),
+    meta: { silent: true },
+    onSuccess: () => invalidateCalendar(qc),
   });
 }

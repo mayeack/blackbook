@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { useHidden, useMe, useUnhide } from '../api/hooks';
 import { MORE_ITEMS } from '../components/AppShell';
 import { EntityRow, IconTile } from '../components/EntityRow';
+import { GoogleCalendarPanel } from '../components/GoogleCalendar';
 import { Icons } from '../components/icons';
 import { Empty, PageHeader, PageState } from '../components/PageState';
 import { useToast } from '../components/Toast';
@@ -60,6 +61,8 @@ export function SettingsPage() {
           subtitle={me.data ? (me.data.via === 'access' ? 'Signed in through Cloudflare Access' : 'Development sign-in') : undefined}
         />
       </div>
+      <h2 className="section-title">Google Calendar</h2>
+      <GoogleCalendarPanel />
       <HiddenSection />
       <h2 className="section-title">Agent, digest and privacy</h2>
       <div className="card-list">

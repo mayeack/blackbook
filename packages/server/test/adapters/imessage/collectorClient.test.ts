@@ -123,7 +123,8 @@ describe('CollectorClient', () => {
       const paths = { backupDir: `${t.dir}/backups`, logDir: `${t.dir}/logs` };
       expect(buildJobs({ config: paths }).map((j) => j.name)).toEqual(['backup', 'logs-prune']);
       const jobs = buildJobs({ config: { ...paths, dataDir: t.dir } });
-      expect(jobs.map((j) => j.name)).toEqual(['backup', 'logs-prune', 'imessage-tail', 'imessage-overlap']);
+      // Other collector-backed sources register alongside; only the iMessage pair is asserted here.
+      expect(jobs.map((j) => j.name).filter((n) => n.startsWith('imessage-'))).toEqual(['imessage-tail', 'imessage-overlap']);
       expect(jobs.find((j) => j.name === 'imessage-tail')!.schedule).toEqual({ kind: 'interval', everyMs: 10_000 });
       expect(jobs.find((j) => j.name === 'imessage-overlap')!.schedule).toEqual({ kind: 'daily', at: '02:30' });
     } finally {

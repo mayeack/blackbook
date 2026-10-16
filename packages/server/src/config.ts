@@ -27,6 +27,23 @@ export function adminSocketPathFor(dataDir: string): string {
 
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'] as const;
 
+export const DEFAULT_BEEPER_URL = 'http://127.0.0.1:23373';
+export const DEFAULT_BROWSER_CDP_URL = 'http://127.0.0.1:4331';
+export const DEFAULT_GOOGLE_REDIRECT_URI = 'https://yeackbot.com/api/v1/google/callback';
+export const DEFAULT_IMPORTS_DIR = path.join(os.homedir(), 'Yeackbot Imports');
+
+/** An empty `KEY=` line in .env means "use the default". */
+const blankAsUnset = (v: unknown) => (typeof v === 'string' && !v.trim() ? undefined : v);
+
+const urlWithDefault = (fallback: string) => z.preprocess(blankAsUnset, z.url().default(fallback));
+
+/** A local URL (Beeper Desktop, the sandbox browser's DevTools port): never anything off this Mac. */
+const loopbackUrl = (fallback: string, what: string) =>
+  urlWithDefault(fallback).refine((u) => ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(u).hostname), `${what} must be on loopback`);
+
+/** "~/x" → "<home>/x" (.env files are not shell-expanded). */
+const expandHome = (p: string) => (p === '~' ? os.homedir() : p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p);
+
 const flag = z
   .enum(['1', '0', 'true', 'false', 'yes', 'no', ''])
   .optional()
@@ -55,6 +72,13 @@ const Env = z.object({
   VAPID_PUBLIC_KEY: optionalText,
   VAPID_PRIVATE_KEY: optionalText,
   VAPID_SUBJECT: optionalText,
+  BEEPER_URL: loopbackUrl(DEFAULT_BEEPER_URL, 'Beeper Desktop API'),
+  BEEPER_TOKEN: optionalText,
+  BROWSER_CDP_URL: loopbackUrl(DEFAULT_BROWSER_CDP_URL, 'the sandbox browser (CDP)'),
+  GOOGLE_CLIENT_ID: optionalText,
+  GOOGLE_CLIENT_SECRET: optionalText,
+  GOOGLE_REDIRECT_URI: urlWithDefault(DEFAULT_GOOGLE_REDIRECT_URI),
+  IMPORTS_DIR: optionalText,
   DEV_AUTH_BYPASS: flag,
   LOG_STDERR: flag,
 });
@@ -79,6 +103,17 @@ export interface AppConfig {
   collectorTokenFile: string;
   anthropicApiKey: string | null;
   vapid: { publicKey: string; privateKey: string; subject: string } | null;
+  /**
+   * Beeper Desktop API on loopback (Instagram network only, GET-only). The env token is a bootstrap: the adapter
+   * keeps its token in the secrets table. Never log it.
+   */
+  beeper: { url: string; token: string | null };
+  /** Chrome DevTools endpoint of the sandbox browser (Partiful session). */
+  browserCdpUrl: string;
+  /** Google Calendar OAuth web client (calendar.readonly); null until the owner creates it. */
+  google: { clientId: string; clientSecret: string; redirectUri: string } | null;
+  /** Watched folder for manual exports (Instagram "Download your information" zips). */
+  importsDir: string;
   logToStderr: boolean;
 }
 
@@ -124,6 +159,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (vapidParts.some(Boolean) && !vapidParts.every(Boolean)) {
     problems.push('VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must be set together.');
   }
+  if (Boolean(e.GOOGLE_CLIENT_ID) !== Boolean(e.GOOGLE_CLIENT_SECRET)) {
+    problems.push('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together.');
+  }
+  if (production && new URL(e.GOOGLE_REDIRECT_URI).protocol !== 'https:') {
+    problems.push('GOOGLE_REDIRECT_URI must be https in production.');
+  }
 
   const dataDir = path.resolve(e.YB_DATA_DIR ?? DEFAULT_DATA_DIR);
   // Tests must never touch the real data dir.
@@ -153,6 +194,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       e.VAPID_PUBLIC_KEY && e.VAPID_PRIVATE_KEY && e.VAPID_SUBJECT
         ? { publicKey: e.VAPID_PUBLIC_KEY, privateKey: e.VAPID_PRIVATE_KEY, subject: e.VAPID_SUBJECT }
         : null,
+    beeper: { url: e.BEEPER_URL, token: e.BEEPER_TOKEN ?? null },
+    browserCdpUrl: e.BROWSER_CDP_URL,
+    google:
+      e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET
+        ? { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET, redirectUri: e.GOOGLE_REDIRECT_URI }
+        : null,
+    importsDir: path.resolve(expandHome(e.IMPORTS_DIR ?? DEFAULT_IMPORTS_DIR)),
     logToStderr: e.LOG_STDERR || e.NODE_ENV === 'development',
   };
 }
