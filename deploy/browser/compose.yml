@@ -1,0 +1,36 @@
+# Isolated, persistent Chromium shared by yeackbot's jobs and Claude Code sessions (OrbStack/Docker).
+#   - You sign in to sites once through the viewer (HTTPS + basic auth, self-signed cert); I never type passwords.
+#   - Automation uses Chrome DevTools Protocol on 127.0.0.1:4331 (relayed, since headful Chrome only binds
+#     its debugging port to the container's loopback).
+#   - Profile and cookies persist in $YB_DATA_DIR/browser (outside the repo). Both ports are loopback-only and
+#     never routed through the yeackbot.com tunnel: anything on this Mac that can reach 4331 can act as you
+#     on the signed-in sites, the same residual risk as the collector token.
+# Managed by scripts/browser.sh, which keeps the env file (viewer password etc.) at $YB_DATA_DIR/browser.env.
+name: yb-browser
+
+services:
+  chromium:
+    image: lscr.io/linuxserver/chromium:latest
+    container_name: yb-browser
+    environment:
+      PUID: "${YB_UID}"
+      PGID: "${YB_GID}"
+      TZ: "${YB_TZ}"
+      CUSTOM_USER: "${YB_BROWSER_USER}"
+      PASSWORD: "${YB_BROWSER_PASSWORD}"
+      # A non-default --user-data-dir is required: Chrome ignores --remote-debugging-port on its default profile.
+      CHROME_CLI: "--user-data-dir=/config/yb-profile --remote-debugging-port=9222 --no-first-run --no-default-browser-check"
+    volumes:
+      - "${YB_DATA_DIR}/browser:/config"
+    ports:
+      - "127.0.0.1:4330:3001" # viewer: https://127.0.0.1:4330
+      - "127.0.0.1:4331:9223" # DevTools Protocol (via cdp-relay)
+    shm_size: "1gb"
+    restart: unless-stopped
+
+  # Shares the chromium container's network namespace and forwards 9223 -> Chrome's loopback-only 9222.
+  cdp-relay:
+    image: docker.io/alpine/socat:latest
+    network_mode: "service:chromium"
+    command: ["TCP-LISTEN:9223,fork,reuseaddr", "TCP:127.0.0.1:9222"]
+    restart: unless-stopped

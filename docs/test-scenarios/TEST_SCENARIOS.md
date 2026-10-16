@@ -551,3 +551,37 @@ Tools. The app build needs Xcode.
 - No Xcode on the Mac mini (CLT only), so the BlackbookServer app build, `xcodebuild test` and the macOS Blackbook build
   were not run locally. The new CI `collector` job covers them.
 - Not exercised: real iMessage send / note-to-self (spike a), Cloudflare tunnel + Access (spike c), iOS PWA push (spike g).
+
+---
+
+## 2026-10-15 — Sandbox browser (persistent Chromium on OrbStack for yeackbot jobs + Claude Code)
+
+**Summary:** `deploy/browser/compose.yml` runs Chromium (linuxserver/chromium) plus a socat relay in OrbStack. The
+profile persists in `$YB_DATA_DIR/browser`. There's a sign-in viewer on `https://127.0.0.1:4330` (basic auth; password in
+`$YB_DATA_DIR/browser.env`, 0600) and Chrome DevTools Protocol on `http://127.0.0.1:4331`. Claude Code reaches it through
+the user-scope MCP server `yb-browser` (`@playwright/mcp --cdp-endpoint`). Managed by `scripts/browser.sh`.
+
+### Scenario A — Up and healthy
+1. `bash scripts/browser.sh up` (idempotent) → "DevTools ready: Chrome/<version>".
+2. `bash scripts/browser.sh status` → both services `running`.
+3. `lsof -nP -iTCP:4330 -sTCP:LISTEN` and `:4331` → bound to `127.0.0.1` only.
+
+### Scenario B — Viewer auth
+1. `curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:4330/` → 401.
+2. With the user `yeackbot` and the password from `browser.env` → 200. In Safari/Chrome, accept the self-signed
+   certificate and you see the Chromium desktop.
+
+### Scenario C — Sign-ins persist
+1. In the viewer, sign in to a site (e.g. partiful.com).
+2. `bash scripts/browser.sh down && bash scripts/browser.sh up`, then reopen the viewer → still signed in.
+3. Reboot the Mac → OrbStack starts at login (`orbctl config show` → `app.start_at_login: true`) and the containers
+   restart (`restart: unless-stopped`) → still signed in.
+
+### Scenario D — Claude Code can drive it
+1. `claude mcp get yb-browser` → Connected.
+2. In a new Claude Code session, ask it to open a page in the yb-browser and read its title. The page shows up in the viewer.
+
+### Notes
+- Image size is ~4.5 GB. Keep an eye on free disk space.
+- Anything on this Mac that can reach 127.0.0.1:4331 can act as you on the signed-in sites (same residual risk as the
+  collector token). Never route 4330/4331 through a tunnel.
