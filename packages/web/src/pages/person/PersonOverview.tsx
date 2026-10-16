@@ -8,8 +8,14 @@ import { useToast } from '../../components/Toast';
 import { accountSubtitle, confidenceTone, orderAccounts } from '../../lib/accounts';
 import { percent, plural } from '../../lib/format';
 import { identityNetwork } from '../../lib/labels';
+import { PersonCollectionsSection } from './Collections';
+import { FactsSection } from './Facts';
+import { OpenLoopsSection } from './Loops';
+import { MergeHistorySection } from './Merges';
+import { NotesSection } from './Notes';
+import { StartersSection } from './Starters';
 
-function LinkedAccounts({ p }: { p: PersonDetail }) {
+export function LinkedAccounts({ p }: { p: PersonDetail }) {
   const reveal = useReveal(p.id);
   const toast = useToast();
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -72,35 +78,26 @@ function LinkedAccounts({ p }: { p: PersonDetail }) {
   );
 }
 
+/**
+ * Overview, in order: open loops, conversation starters (copy-only), facts & interests, linked accounts, circles /
+ * tags / places, notes, merge history. Each section loads on its own; one that isn't available yet stays out.
+ */
 export function PersonOverview({ p }: { p: PersonDetail }) {
   return (
     <>
-      <h2 className="section-title">Linked accounts</h2>
-      <LinkedAccounts p={p} />
-      {p.mergedCount > 0 && <p className="caption">Combined from {plural(p.mergedCount + 1, 'record')}.</p>}
+      <OpenLoopsSection personId={p.id} />
+      <StartersSection personId={p.id} />
+      <FactsSection personId={p.id} />
 
-      {(p.tags.length > 0 || p.locations.length > 0) && (
-        <>
-          <h2 className="section-title">Tags & places</h2>
-          <div className="chips">
-            {p.tags.map((t) => (
-              <span key={`t:${t}`} className="chip plain">
-                {t}
-              </span>
-            ))}
-            {p.locations.map((l) => (
-              <span key={`l:${l}`} className="chip plain">
-                {l}
-              </span>
-            ))}
-          </div>
-        </>
-      )}
+      <section className="person-section">
+        <h2 className="section-title">Linked accounts</h2>
+        <LinkedAccounts p={p} />
+        {p.mergedCount > 0 && <p className="caption">Combined from {plural(p.mergedCount + 1, 'record')}.</p>}
+      </section>
 
-      <h2 className="section-title">Facts & open loops</h2>
-      <div className="card-list">
-        <Empty title="Nothing learned yet.">Interests, promises and replies you owe appear here once the nightly agent runs.</Empty>
-      </div>
+      <PersonCollectionsSection p={p} />
+      <NotesSection personId={p.id} />
+      {p.mergedCount > 0 && <MergeHistorySection personId={p.id} displayName={p.displayName} />}
     </>
   );
 }

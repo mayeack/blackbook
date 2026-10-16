@@ -634,3 +634,72 @@ health and how to fix it. The Events screen shows occasions with inferred attend
 2. Address-book names replace masked handles. Instagram usernames from contact cards link to the right people.
 3. Two different people with the same name are never merged on name alone. Undo a merge on Today and it isn't redone the
    next night.
+
+## 2026-10-16 — LLM cost pass: Haiku 5.5 route table, caching, budgets
+
+All LLM calls now go through the route table in `packages/server/src/llm/models.ts` (Claude Haiku 5.5, effort low,
+thinking off except the Ask tool loop, 1 h cache on batch routes / 5 min on sync ones). Refusals are recorded and
+skipped (no fallbacks on Haiku). Budgets default to $1/day, $10/month, $20 backfill.
+
+**Setup**: worktree build; for B–D a server with `ANTHROPIC_API_KEY` (real calls — owner only).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npm test && npm run lint:pii && node scripts/build-server.mjs && npm run build -w packages/web`.
+2. `test/llm/models.test.ts`: route defaults, Opus rejected by `llm.route_overrides`, no sampling params / fallbacks on
+   any Haiku route, cache_control placement + byte-stable bodies, 100K guard, pricing (cache, batch, >100K card), and
+   the lint that no `claude-…` id appears outside `llm/models.ts`.
+
+### Scenario B — Backfill dry run
+1. `npm run yb -- backfill-extract --estimate`.
+2. **Expected**: counts (conversations, messages, windows, tokens), "estimated cost ≈ $… (Claude Haiku 5.5, batch
+   prices…)" and "allowance $20.00 (spent …, left …) · covers N of M windows". Nothing is sent; no rows are written.
+
+### Scenario C — Spend and cache visibility
+1. After a night with a key, open Sources → Pipeline cost.
+2. **Expected**: Today / This month against $1 / $10 (sub-cent amounts show four decimals), "Model: Claude Haiku 5.5 ·
+   nightly work batched (50% off)", and a cache hit rate for the last 7 days (it should climb well above 50% once the
+   nightly extraction batch runs: its ~5k-token system prompt is read from the cache for every window).
+
+### Scenario D — Route override (advanced)
+1. `PATCH /api/v1/settings` with `{"values":{"llm.route_overrides":{"digest_compose":{"model":"claude-sonnet-5-5"}}}}`.
+2. **Expected**: accepted; Sources shows "1 route overridden"; the next digest call is on Sonnet with `fallbacks`.
+3. The same with an Opus model id → 400 "model must be one of claude-haiku-5-5, claude-sonnet-5-5".
+4. Reset the key (`reset: ["llm.route_overrides"]`) to go back to Haiku everywhere.
+
+**Edge cases**: a refused extraction window shows status `refused` and is not retried; a window whose prompt would pass
+100K tokens is split before sending (never seen in practice: windows are ≤8k NEW tokens).
+**Platforms**: server + web (desktop/mobile). Real API behavior (cache hits, refusals) still needs the owner's key.
+
+---
+
+## LLM cost pass — review fixes (100K guard, refusal re-runs, TTLs, estimates) (2026-10-16)
+
+**What changed**: token estimates count every non-ASCII code point as ≥1 token (CJK/emoji can no longer slip past the
+≤100K guard); the Ask session budget is counted in estimated tokens; the Ask tool loop sizes each next request from the
+previous request's actual usage and swaps results that would cross 100K for the budget note; responses whose real
+prompt exceeded 100K log `llm_prompt_over_limit`. On a Sonnet 5.5 override, refused batch items are re-run only for
+`cyber` / `frontier_llm` declines and only while the route is still on Sonnet; tool loops drop the declined attempt's
+thinking/tool_use blocks before a `fallback` marker and never stream its partial text. `digest_compose` and `intent`
+send no cache marker; sync calls on batch routes write the cache at 5 min. Batch estimates assume 25% cache misses.
+The Ask footer shows sub-cent costs with four decimals.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npm test && npm run lint:pii && node scripts/build-server.mjs && npm run build -w packages/web`.
+2. `test/llm/models.test.ts` (TTLs incl. no-marker routes, estimates, `refusalRerunnable`, CJK token estimates),
+   `test/llm/client.test.ts` (fallback echo, result dropping near 100K, `llm_prompt_over_limit`),
+   `test/llm/batches.test.ts` + `test/extraction/pipeline.test.ts` (non-rescuable categories stay refused),
+   `test/ask/tools.test.ts` (token-counted session budget).
+
+### Scenario B — Ask cost footer
+1. Ask a question on the web that needs at least one lookup.
+2. **Expected**: the footer reads "N lookups · $0.000X" (four decimals under a cent; "<$0.0001" for tinier turns),
+   never "$0.000".
+
+### Scenario C — Digest request shape (owner, with a key)
+1. Let the 07:30 digest run, then inspect the ledger row for kind `digest`.
+2. **Expected**: `cache_creation` is 0 (no marker on the digest system prompt); the call costs plain input + output.
+
+**Edge cases**: an Ask whose lookups return mostly CJK text stops adding results before the next request would pass
+100K tokens (status `tool_limit` or an answer built from the kept results); a Sonnet-override `general_harms` batch
+refusal is recorded `refused` with no synchronous re-run.
+**Platforms**: server + web. Real-API behavior (fallback blocks, cache usage) needs the owner's key.

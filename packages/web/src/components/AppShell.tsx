@@ -21,18 +21,22 @@ const SETTINGS: NavItem = { to: '/settings', label: 'Settings', icon: Icons.sett
 const SIDEBAR = [TODAY, PEOPLE, ASK, NETWORK, CIRCLES, EVENTS, SOURCES, SETTINGS];
 /** Screens reached through the More tab on mobile. */
 export const MORE_ITEMS = [CIRCLES, EVENTS, SOURCES, SETTINGS];
-/** An event page (/e/:id) belongs to Events, under More on mobile. */
-const MORE_PATHS = ['/more', '/e', ...MORE_ITEMS.map((i) => i.to)];
+/** Detail screens of the More items: events and trips belong to Events, collections to Circles. */
+const EVENT_PATHS = ['/e', '/trips'];
+const CIRCLE_PATHS = ['/c', '/tags', '/locations'];
+const MORE_PATHS = ['/more', ...EVENT_PATHS, ...CIRCLE_PATHS, ...MORE_ITEMS.map((i) => i.to)];
+const under = (pathname: string, paths: readonly string[]) => paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
 const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined);
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
-  const inMore = MORE_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  // A person page belongs to People; an event page to Events.
+  const inMore = under(pathname, MORE_PATHS);
+  // A person page belongs to People; an event or trips page to Events; a circle, tag or place to Circles.
   const inPeople = pathname.startsWith('/p/');
-  const inEvents = pathname.startsWith('/e/');
-  const activeFor = (n: NavItem) => (n === PEOPLE && inPeople) || (n === EVENTS && inEvents);
+  const inEvents = under(pathname, EVENT_PATHS);
+  const inCircles = under(pathname, CIRCLE_PATHS);
+  const activeFor = (n: NavItem) => (n === PEOPLE && inPeople) || (n === EVENTS && inEvents) || (n === CIRCLES && inCircles);
 
   return (
     <div className="shell">

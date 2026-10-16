@@ -9,6 +9,16 @@ import * as partiful from './migrations/007_partiful';
 import * as calendar from './migrations/008_calendar';
 import * as identity from './migrations/009_identity';
 import * as occasions from './migrations/010_occasions';
+import * as agentLoop from './migrations/011_agent_loop';
+import * as obligations from './migrations/012_obligations';
+import * as suggestions from './migrations/013_suggestions';
+import * as delivery from './migrations/014_delivery';
+import * as commands from './migrations/015_commands';
+import * as llm from './migrations/016_llm';
+import * as extraction from './migrations/017_extraction';
+import * as ask from './migrations/018_ask';
+import * as eventsTravel from './migrations/019_events_travel';
+import * as evalSets from './migrations/020_eval';
 
 export interface Migration {
   version: number;
@@ -33,9 +43,10 @@ const slot = (version: number, name: string, m: MigrationModule): Migration => (
 
 /**
  * Ordered schema migrations; PRAGMA user_version records the last one applied. 5–10 are reserved slots, one per
- * source-adapter workstream, so parallel branches never collide on a version number: each fills only its own
- * file. A slot applied while still empty is never re-run, so every slot must be filled (or carry a
- * `-- no schema changes` comment) before a deploy.
+ * source-adapter workstream, and 11–20 one per agent-loop workstream (ties/graph, obligations, suggestions,
+ * delivery, commands, llm, extraction, ask, events/travel, eval), so parallel branches never collide on a version
+ * number: each fills only its own file. A slot applied while still empty is never re-run, so every slot must be
+ * filled (or carry a `-- no schema changes` comment) before a deploy.
  */
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'init', sql: init },
@@ -48,6 +59,16 @@ export const MIGRATIONS: Migration[] = [
   slot(8, 'calendar', calendar),
   slot(9, 'identity', identity),
   slot(10, 'occasions', occasions),
+  slot(11, 'agent_loop', agentLoop),
+  slot(12, 'obligations', obligations),
+  slot(13, 'suggestions', suggestions),
+  slot(14, 'delivery', delivery),
+  slot(15, 'commands', commands),
+  slot(16, 'llm', llm),
+  slot(17, 'extraction', extraction),
+  slot(18, 'ask', ask),
+  slot(19, 'events_travel', eventsTravel),
+  slot(20, 'eval', evalSets),
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

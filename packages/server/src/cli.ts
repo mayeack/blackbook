@@ -7,6 +7,8 @@
  *   yb run-job <name>    run a scheduled job now and wait for it
  *   yb migrate-legacy    import the legacy SwiftData store (offline; --dry-run, --phase core|reconcile)
  *   yb setup-self        your own iMessage handles → settings + the collector's compiled send allowlist
+ *   yb backfill-extract  the one-time historical LLM extraction backfill (its own budget; --estimate = dry run)
+ *   yb eval              the evaluation harness (report / status / sample / shadow; also npm run eval)
  */
 import fs from 'node:fs';
 import { adminRequest, AdminUnavailableError, serverStatus, type AdminRequest, type AdminResponse } from './admin/socket';
@@ -15,6 +17,8 @@ import { dataPaths, loadDotEnv, PROJECT_ROOT, type DataPaths } from './config';
 import { closeDatabase, openDatabase } from './db/connection';
 import { acquireLock, lockOwner, releaseLock } from './db/lock';
 import { currentVersion, LATEST_VERSION } from './db/migrate';
+import { evalCommand } from './eval/cli';
+import { backfillExtractCommand } from './extraction/cli';
 import { migrateLegacyCommand } from './migration/cli';
 import { buildJobs } from './scheduler/jobs/index';
 import { Scheduler, type JobStatus } from './scheduler/scheduler';
@@ -32,6 +36,10 @@ const USAGE = `usage: yb <command>
   status            server, schema and job status
   run-job <name>    run a scheduled job now and wait for it
   migrate-legacy    import the legacy SwiftData store (offline; see yb migrate-legacy --help)
+  backfill-extract [--estimate] [--json]
+                    one-time historical LLM extraction (backfill allowance only; --estimate prints counts and $, sends nothing)
+  eval [report|status|sample|shadow|shadow-report|reset]
+                    the evaluation harness: golden-set metrics, shadow runs of a new prompt (counts and rates only)
   setup-self [--file <path>]
                     read your own phone/email handles (one per line; default ./${SELF_HANDLES_FILE}, git-ignored),
                     write settings.self_handles and collector/Generated/SelfHandles.generated.swift`;
@@ -142,6 +150,10 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'migrate-legacy':
       return migrateLegacyCommand(args, paths, { out, err });
+    case 'backfill-extract':
+      return backfillExtractCommand(args, paths, { out, err });
+    case 'eval':
+      return evalCommand(args, paths, { out, err });
     case 'setup-self':
       return setupSelf(paths, args);
     case undefined:

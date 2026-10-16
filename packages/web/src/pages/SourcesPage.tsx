@@ -7,6 +7,8 @@ import { SourceTile } from '../components/SourceBadge';
 import { date, dateTime, relativeDay } from '../lib/format';
 import { channelOf, sourceCardLabel } from '../lib/labels';
 import { cardStatus, countRows, googleFix, hasData } from '../lib/sources';
+import { useSettings } from './settings/api';
+import { normalizeSpend, pct, spendUsd, usd } from './settings/logic';
 
 const TONE_CLASS = { ok: 'pill pill-ok', warn: 'pill pill-warn', bad: 'pill pill-bad', neutral: 'pill' } as const;
 
@@ -73,6 +75,60 @@ function SourceCard({ s, google }: { s: SourceView; google?: GoogleStatusView })
   );
 }
 
+/** The agent pipeline's cost: Claude spend against the budgets and the prompt-cache hit rate (PLAN "Web app"). */
+function PipelineCard() {
+  const q = useSettings();
+  const env = q.data?.environment;
+  const v = q.data?.values;
+  if (!env || !v) return null;
+  const spend = normalizeSpend(env);
+  const claude = !env.llmConfigured ? 'Not set up' : v['llm.enabled'] ? 'On' : 'Off';
+  const tone = !env.llmConfigured || !v['llm.enabled'] ? 'pill' : 'pill pill-ok';
+  return (
+    <section className="card source-card" aria-label="Pipeline cost">
+      <div className="sc-head">
+        <span className="sc-name">
+          <h2 style={{ margin: 0 }}>Pipeline cost</h2>
+        </span>
+        <span className={tone}>Claude {claude.toLowerCase()}</span>
+      </div>
+      {spend ? (
+        <dl>
+          <dt>Today</dt>
+          <dd>
+            {spendUsd(spend.todayUsd)} of {usd(v['llm.daily_budget_usd'])}
+            {spend.requestsToday != null ? ` · ${spend.requestsToday.toLocaleString()} requests` : ''}
+          </dd>
+          <dt>This month</dt>
+          <dd>
+            {spendUsd(spend.monthUsd)} of {usd(v['llm.monthly_budget_usd'])}
+          </dd>
+          {spend.backfillUsd > 0 && (
+            <>
+              <dt>History backfill</dt>
+              <dd>{spendUsd(spend.backfillUsd)}</dd>
+            </>
+          )}
+          {env.llmModel && (
+            <>
+              <dt>Model</dt>
+              <dd>
+                {env.llmModel.label}
+                {env.llmModel.overriddenRoutes > 0 ? ` · ${env.llmModel.overriddenRoutes} route${env.llmModel.overriddenRoutes === 1 ? '' : 's'} overridden` : ''} · nightly work batched (50% off)
+              </dd>
+            </>
+          )}
+          <dt>Cache hit rate</dt>
+          <dd>{spend.cacheHitRate == null ? '— (no requests in the last 7 days)' : `${pct(spend.cacheHitRate)} of input tokens, last 7 days`}</dd>
+        </dl>
+      ) : (
+        <p className="caption">Spend isn’t reported by this server.</p>
+      )}
+      {!env.llmConfigured && <p className="caption">Without an API key the agent runs on rules and templates only; nothing is sent to Claude.</p>}
+    </section>
+  );
+}
+
 export function SourcesPage() {
   const q = useSources();
   // Optional: a server without the Google routes answers 501 and the card falls back to its health row.
@@ -93,6 +149,8 @@ export function SourcesPage() {
           ))}
         </div>
       )}
+      <h2 className="section-title">Agent pipeline</h2>
+      <PipelineCard />
     </>
   );
 }

@@ -1,0 +1,217 @@
+/* Shared bits for the person / pair / circles / network / ask screens: sheets, ⋯ menus, fields, pickers. */
+
+/* ---------------------------------------------------------------- Sheet (bottom sheet on phones) */
+dialog.dialog.yb-sheet {
+  width: min(480px, calc(100vw - 32px));
+}
+dialog.dialog.yb-sheet.wide {
+  width: min(560px, calc(100vw - 32px));
+}
+.yb-sheet .dialog-body {
+  max-height: calc(100dvh - 160px);
+  overflow-y: auto;
+}
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.sheet-head h2 {
+  margin: 4px 0 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+@media (max-width: 599px) {
+  dialog.dialog.yb-sheet,
+  dialog.dialog.yb-sheet.wide {
+    width: 100vw;
+    max-width: 100vw;
+    margin: auto 0 0;
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
+    border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .yb-sheet .dialog-body {
+    max-height: calc(100dvh - 180px);
+  }
+}
+
+/* ---------------------------------------------------------------- ⋯ menu */
+.yb-menu {
+  position: relative;
+  flex: none;
+}
+.yb-menu > summary {
+  list-style: none;
+  font-size: 17px;
+  line-height: 1;
+}
+.yb-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.yb-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 60;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-pop);
+}
+.yb-menu-list button {
+  text-align: left;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.yb-menu-list button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.yb-menu-list button.danger {
+  color: var(--danger);
+}
+.yb-menu-list button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- Fields */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  min-width: 0;
+}
+.form-stack .field:first-child {
+  margin-top: 0;
+}
+.input.textarea,
+textarea.input {
+  height: auto;
+  min-height: 38px;
+  padding: 8px 12px;
+  resize: vertical;
+  line-height: 1.4;
+  width: 100%;
+}
+.search-input {
+  width: 100%;
+}
+.link-btn {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent-text);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.section-head .section-title {
+  margin-bottom: 8px;
+}
+.section-head > .btn,
+.section-head > .head-actions {
+  margin-top: 16px;
+}
+.head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.section-note {
+  margin: -4px 0 8px;
+}
+.person-section + .person-section {
+  margin-top: 4px;
+}
+
+/* ---------------------------------------------------------------- Chips extras */
+.chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -4px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  flex: none;
+}
+.chip-x:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.coll-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--state-dormant);
+  display: inline-block;
+}
+.chip.plain .coll-dot {
+  margin-left: -2px;
+}
+
+/* ---------------------------------------------------------------- Pickers */
+.pick-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 6px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.pick-row:first-child {
+  border-top: 0;
+}
+.pick-row:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.pick-row .pick-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pick-row.create {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.pick-plus {
+  width: 22px;
+  text-align: center;
+  font-size: 18px;
+}

@@ -58,8 +58,9 @@ describe('job registry', () => {
     expect(f.beeper).toMatchObject({ url: DEFAULT_BEEPER_URL, token: null });
     expect(f.calendar?.google.clientId).toBe('cid');
     expect(sourceJobDeps({ config: loadConfig({ ...base, BEEPER_TOKEN: 'synthetic' }) }).beeper?.token).toBe('synthetic');
-    // Every source's jobs are registered through the real registry, in order, with their cadences.
-    expect(buildJobs({ config: full }).map((j) => [j.name, j.schedule])).toEqual([
+    // Every source's jobs are registered through the real registry, in order, with their cadences. Agent-loop
+    // jobs follow them (gated and checked in agentWiring.test.ts).
+    expect(buildJobs({ config: full }).slice(0, 13).map((j) => [j.name, j.schedule])).toEqual([
       ['backup', { kind: 'daily', at: '02:15' }],
       ['logs-prune', { kind: 'daily', at: '04:45' }],
       ['imessage-tail', { kind: 'interval', everyMs: 10_000 }],
