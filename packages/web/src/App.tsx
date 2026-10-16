@@ -4,6 +4,8 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { isApiError } from './api/client';
 import { AppShell } from './components/AppShell';
 import { ToastProvider, useToast } from './components/Toast';
+import { EventPage } from './pages/events/EventPage';
+import { EventsPage } from './pages/events/EventsPage';
 import { MorePage, NotFoundPage, Placeholder, SettingsPage } from './pages/MorePages';
 import { PeoplePage } from './pages/PeoplePage';
 import { PersonPage } from './pages/person/PersonPage';
@@ -38,7 +40,10 @@ function Providers({ children }: { children: ReactNode }) {
 /** New screen, top of page (the window scrolls, not an inner box). */
 function ScrollToTop() {
   const { pathname } = useLocation();
-  useEffect(() => window.scrollTo(0, 0), [pathname]);
+  // A block body: newer browsers return a Promise from scrollTo, which React would call as the effect's cleanup.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
   return null;
 }
 
@@ -57,7 +62,8 @@ export function App() {
               <Route path="/ask" element={<Placeholder title="Ask">Ask questions about your network — “who do I know in Austin?” — with cited answers.</Placeholder>} />
               <Route path="/network" element={<Placeholder title="Network">An interactive map of who knows whom, colored by circle.</Placeholder>} />
               <Route path="/circles" element={<Placeholder title="Circles">Auto circles from group chats and events, plus your tags and places.</Placeholder>} />
-              <Route path="/events" element={<Placeholder title="Events">Get-togethers from Partiful and your calendar, with who was there.</Placeholder>} />
+              <Route path="/events" element={<EventsPage />} />
+              <Route path="/e/:id" element={<EventPage />} />
               <Route path="/sources" element={<SourcesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/more" element={<MorePage />} />

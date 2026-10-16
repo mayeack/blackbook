@@ -10,6 +10,7 @@ const SOURCES: Record<string, string> = {
   whatsapp: 'WhatsApp',
   instagram: 'Instagram',
   instagram_dyi: 'Instagram export',
+  ig_dyi: 'Instagram export',
   beeper: 'Beeper',
   partiful: 'Partiful',
   addressbook: 'Contacts',
@@ -19,6 +20,12 @@ const SOURCES: Record<string, string> = {
   collector: 'Mac helper',
   user: 'You',
   phone: 'Phone',
+  email: 'Email',
+  x: 'X',
+  linkedin: 'LinkedIn',
+  inference: 'Inferred',
+  llm: 'Inferred',
+  manual: 'You',
 };
 export const sourceLabel = (s: string) => SOURCES[s] ?? humanize(s);
 
@@ -27,6 +34,7 @@ const SOURCE_SHORT: Record<string, string> = {
   imessage: 'iM',
   whatsapp: 'WA',
   instagram: 'IG',
+  instagram_dyi: 'IG',
   beeper: 'Bp',
   partiful: 'Pf',
   addressbook: 'Ct',
@@ -35,19 +43,73 @@ const SOURCE_SHORT: Record<string, string> = {
   legacy: 'Bb',
   collector: 'Mc',
   phone: 'Ph',
+  email: '@',
+  x: 'X',
+  linkedin: 'in',
+  inference: 'AI',
 };
 export const sourceShort = (s: string) => SOURCE_SHORT[s] ?? s.slice(0, 2).replace(/^./, (c) => c.toUpperCase());
+
+/** Source names that are one network on screen (Beeper is read for Instagram only). */
+const CHANNELS: Record<string, string> = {
+  beeper: 'instagram',
+  instagram_dyi: 'instagram',
+  ig_dyi: 'instagram',
+  gcal: 'calendar',
+  google_calendar: 'calendar',
+};
+/** The network a source name belongs to: beeper → instagram, gcal → calendar, others unchanged. */
+export const channelOf = (source: string) => CHANNELS[source] ?? source;
+
+const CHANNEL_ORDER = ['addressbook', 'imessage', 'whatsapp', 'instagram', 'partiful', 'calendar'];
+/** Distinct networks for badges, in a fixed order (Contacts first). */
+export function channelsOf(sources: readonly string[]): string[] {
+  const rank = (c: string) => {
+    const i = CHANNEL_ORDER.indexOf(c);
+    return i === -1 ? CHANNEL_ORDER.length : i;
+  };
+  return [...new Set(sources.map(channelOf))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+/** Sources-screen card titles. */
+const CARD_LABELS: Record<string, string> = {
+  beeper: 'Instagram (Beeper)',
+  instagram_dyi: 'Instagram export',
+  gcal: 'Google Calendar',
+  addressbook: 'Contacts',
+};
+export const sourceCardLabel = (s: string) => CARD_LABELS[s] ?? sourceLabel(s);
+
+/** The network an identity belongs to, for its badge on the person page. */
+const IDENTITY_NETWORKS: Record<string, string> = {
+  phone: 'phone',
+  email: 'email',
+  whatsapp_jid: 'whatsapp',
+  whatsapp_lid: 'whatsapp',
+  instagram_id: 'instagram',
+  instagram_username: 'instagram',
+  instagram_name: 'instagram',
+  beeper_user: 'instagram',
+  partiful_user: 'partiful',
+  addressbook_id: 'addressbook',
+  x_username: 'x',
+  linkedin_url: 'linkedin',
+  legacy_id: 'legacy',
+  shortcode: 'imessage',
+  business_chat: 'imessage',
+};
+export const identityNetwork = (kind: string, source: string) => IDENTITY_NETWORKS[kind] ?? channelOf(source);
 
 const IDENTITY_KINDS: Record<string, string> = {
   phone: 'Phone',
   email: 'Email',
   whatsapp_jid: 'WhatsApp',
-  whatsapp_lid: 'WhatsApp',
-  instagram_id: 'Instagram',
+  whatsapp_lid: 'WhatsApp ID',
+  instagram_id: 'Instagram ID',
   instagram_username: 'Instagram',
   instagram_name: 'Instagram name',
   partiful_user: 'Partiful',
-  addressbook_id: 'Contacts',
+  addressbook_id: 'Contacts card',
   beeper_user: 'Beeper',
   x_username: 'X',
   linkedin_url: 'LinkedIn',
@@ -120,8 +182,8 @@ const SOURCE_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad'
   stale: { label: 'Stale', tone: 'warn' },
   error: { label: 'Error', tone: 'bad' },
   auth_required: { label: 'Needs you', tone: 'bad' },
-  contract_broken: { label: 'Needs a fix', tone: 'bad' },
-  disabled: { label: 'Off', tone: 'neutral' },
+  contract_broken: { label: 'Error', tone: 'bad' },
+  disabled: { label: 'Disabled', tone: 'neutral' },
   unknown: { label: 'No report yet', tone: 'neutral' },
 };
 export const sourceStatus = (s: string) => SOURCE_STATUS[s] ?? { label: humanize(s), tone: 'neutral' as const };
@@ -138,3 +200,65 @@ const INTERACTION_KINDS: Record<string, string> = {
   group_session: 'Group chat',
 };
 export const interactionLabel = (k: string) => INTERACTION_KINDS[k] ?? humanize(k);
+
+/** Attendance status words (Partiful RSVPs and inferred attendance). */
+const ATTENDEE_STATUS: Record<string, string> = {
+  going: 'Going',
+  approved: 'Going',
+  checked_in: 'Checked in',
+  attended: 'Was there',
+  host: 'Host',
+  maybe: 'Maybe',
+  invited: 'Invited',
+  waitlist: 'Waitlist',
+  declined: 'Can’t go',
+  possible: 'Possibly there',
+};
+export const attendeeStatusLabel = (s: string) => ATTENDEE_STATUS[s] ?? humanize(s);
+
+const ATTENDEE_ROLES: Record<string, string> = {
+  companion: 'With you',
+  host: 'Host',
+  co_host: 'Co-host',
+  guest: 'Guest',
+  ticket_holder: 'Has a ticket',
+  plus_one: 'Plus-one',
+  mentioned_only: 'Mentioned',
+};
+export const attendeeRoleLabel = (r: string) => ATTENDEE_ROLES[r] ?? humanize(r);
+
+/** Where an attendee came from: the calendar invite, the Partiful guest list, or yeackbot's inference. */
+const ATTENDEE_SOURCES: Record<string, string> = {
+  calendar: 'Calendar',
+  gcal: 'Calendar',
+  partiful: 'Partiful',
+  inference: 'Inferred',
+  inferred: 'Inferred',
+  llm: 'Inferred',
+  user: 'Added by you',
+  legacy: 'Blackbook',
+};
+export const attendeeSourceLabel = (s: string) => ATTENDEE_SOURCES[s] ?? humanize(s);
+
+const OCCASION_KINDS: Record<string, string> = {
+  social: 'Social',
+  logistics: 'Logistics',
+  appointment: 'Appointment',
+  work: 'Work',
+  lodging: 'Stay',
+  travel: 'Travel',
+  meeting: 'Meeting',
+  trip: 'Trip',
+};
+export const occasionKindLabel = (k: string) => OCCASION_KINDS[k] ?? humanize(k);
+
+/** Google Calendar treatments (PLAN "Google Calendar → Calendars"). */
+const TREATMENTS: Record<string, { label: string; hint: string }> = {
+  attending: { label: 'Attending', hint: 'Events here are ones you go to.' },
+  candidate: { label: 'Candidate only', hint: 'Counts only when messages or an RSVP back it up.' },
+  classify: { label: 'Include, then classify', hint: 'Included; yeackbot sorts social from logistics.' },
+  excluded: { label: 'Excluded', hint: 'Never read for people or digests.' },
+};
+export const treatmentLabel = (t: string) => TREATMENTS[t]?.label ?? humanize(t);
+export const treatmentHint = (t: string) => TREATMENTS[t]?.hint ?? null;
+export const DEFAULT_TREATMENTS = Object.keys(TREATMENTS);

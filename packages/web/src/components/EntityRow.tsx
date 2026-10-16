@@ -13,10 +13,13 @@ export interface EntityRowProps {
   personId?: string;
   /** Row links elsewhere. */
   to?: string;
+  /** Extra class on the row (e.g. "possible" for a low-confidence attendee). */
+  className?: string;
 }
 
 /** The shared list row: 36px icon, title up to two lines, caption subtitle, trailing slot. */
-export function EntityRow({ icon, title, subtitle, trailing, personId, to }: EntityRowProps) {
+export function EntityRow({ icon, title, subtitle, trailing, personId, to, className }: EntityRowProps) {
+  const cls = className ? `entity-row ${className}` : 'entity-row';
   const body = (
     <>
       {icon}
@@ -29,17 +32,17 @@ export function EntityRow({ icon, title, subtitle, trailing, personId, to }: Ent
   );
   if (personId)
     return (
-      <PersonLink id={personId} className="entity-row">
+      <PersonLink id={personId} className={cls}>
         {body}
       </PersonLink>
     );
   if (to)
     return (
-      <Link to={to} className="entity-row">
+      <Link to={to} className={cls}>
         {body}
       </Link>
     );
-  return <div className="entity-row">{body}</div>;
+  return <div className={cls}>{body}</div>;
 }
 
 /** A 36px rounded tile with an icon or short text (for non-person rows). */

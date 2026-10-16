@@ -7,6 +7,8 @@ import type { AppConfig } from '../config';
 import type { DB } from '../db/connection';
 import type { Logger } from '../ops/logger';
 import { activityRoutes } from './activity';
+import { eventsRouter } from './events';
+import { googleRouter } from './google';
 import { meRoutes } from './me';
 import { peopleRoutes } from './people';
 import { settingsRoutes } from './settings';
@@ -20,7 +22,15 @@ export interface RouteDeps {
 
 export type RouteModule = (deps: RouteDeps) => Router;
 
-export const ROUTES: RouteModule[] = [meRoutes, activityRoutes, peopleRoutes, sourcesRoutes, settingsRoutes];
+export const ROUTES: RouteModule[] = [
+  meRoutes,
+  activityRoutes,
+  peopleRoutes,
+  sourcesRoutes,
+  settingsRoutes,
+  eventsRouter,
+  googleRouter,
+];
 
 export function apiRouter(deps: RouteDeps): Router {
   const r = Router();

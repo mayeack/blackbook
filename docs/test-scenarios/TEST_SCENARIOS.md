@@ -585,3 +585,52 @@ the user-scope MCP server `yb-browser` (`@playwright/mcp --cdp-endpoint`). Manag
 - Image size is ~4.5 GB. Keep an eye on free disk space.
 - Anything on this Mac that can reach 127.0.0.1:4331 can act as you on the signed-in sites (same residual risk as the
   collector token). Never route 4330/4331 through a tunnel.
+
+---
+
+## 2026-10-16 — Source adapters: Instagram (Beeper + export), WhatsApp, Partiful, Google Calendar, Contacts, matcher, occasions
+
+**Summary:** Every source feeds the same episode tables through `adapters/common/episodes.ts`. Cross-source identity
+links are journaled pointer merges (undoable). Jobs register only when their config exists. Sources page cards show
+health and how to fix it. The Events screen shows occasions with inferred attendees.
+
+### Scenario A — Automated
+1. `npm run typecheck && npm test` (60 files / 598 tests), `npx vitest run --sequence.shuffle`, `npm run lint:pii`, both builds.
+2. Migrations 004–010 apply on a fresh DB and on a DB at schema version 3 (production's version before this deploy).
+
+### Scenario B — Instagram via Beeper (after deploy)
+1. Beeper running, Instagram connected, `BEEPER_TOKEN` in `.env`.
+2. Within ~30 min the Sources → Instagram card shows Healthy with message counts. Instagram people show an Instagram badge
+   under Linked accounts, and their timeline has Instagram sessions.
+3. Disconnect Instagram in Beeper → the card shows "Needs you". iMessage/WhatsApp accounts in Beeper are ignored.
+
+### Scenario C — Instagram export
+1. Drop the "Download your information" zip into `~/Yeackbot Imports/`.
+2. Within an hour the Instagram export card shows the imported threads. Accented/emoji names render correctly. The zip is
+   neither moved nor deleted. Dropping it again imports 0 new rows.
+
+### Scenario D — WhatsApp (official Mac app)
+1. WhatsApp for Mac linked and running.
+2. Within ~30 min the Sources → WhatsApp card shows Healthy. A contact you text on both WhatsApp and iMessage shows both badges
+   and one interleaved timeline. Group members show up as connections.
+3. Quit WhatsApp for 3+ days → the card turns Stale with "Open WhatsApp on your phone".
+
+### Scenario E — Partiful
+1. Signed in to partiful.com in the sandbox browser (https://127.0.0.1:4330).
+2. After the 02:00 run (or `yb run-job partiful`), the Events → Past tab lists Partiful events. Guest lists fill in over
+   several nights (~40 events/night). Co-attendees appear as connections.
+3. Sign out of Partiful in the sandbox → the card shows "Sign in to Partiful in the sandbox browser". Sign back in → it
+   recovers on the next run without a restart.
+
+### Scenario F — Google Calendar
+1. Sources → Connect Google Calendar → Google consent (Advanced → Go to yeackbot) → back on yeackbot as Connected.
+2. Calendars listed with treatments: Personal + Partiful = attending, shared group calendar = candidate, holidays = excluded.
+3. After the next sync and the 03:00 occasions run, a "Drinks w/ <name>" event shows that person as attendee (or "possible").
+   A Gmail "Reservation at <venue>" plus your own event at the same time become one occasion. Maid/HOA/medical entries are
+   not social.
+
+### Scenario G — Contacts + matcher
+1. On the first Contacts fetch, macOS asks "Yeackbot Collector would like to access your contacts" → Allow.
+2. Address-book names replace masked handles. Instagram usernames from contact cards link to the right people.
+3. Two different people with the same name are never merged on name alone. Undo a merge on Today and it isn't redone the
+   next night.

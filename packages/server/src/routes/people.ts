@@ -6,14 +6,16 @@
  *                                                      status=new: provisional people only ("New people")
  *   GET /people/:id                                    header, stats, linked accounts (masked)
  *   GET /people/:id/identities/:identityId/reveal      one full phone/email value (the owner asked)
- *   GET /people/:id/timeline?cursor=&limit=&source=    sessions + non-session interactions, newest first
+ *   GET /people/:id/timeline?cursor=&limit=&source=    sessions + non-session interactions, newest first;
+ *                                                      source = a raw source or a channel ('instagram' = Beeper
+ *                                                      + the Instagram export)
  *   GET /people/:id/sessions/:sessionId/messages       one session's messages (timeline expand)
  *
  * List views never carry raw phone numbers or emails: names, titles and labels that look like one are masked.
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { maskPhone, toE164 } from '@yb/shared';
+import { maskPhone, normalizeNamePart, toE164 } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { badRequest, notFound } from '../http/errors';
 import type { RouteDeps } from './index';
@@ -33,7 +35,7 @@ export interface PersonListItem {
   lastName: string | null;
   company: string | null;
   jobTitle: string | null;
-  /** '@username' (Instagram / X) for the subtitle when there is no company. */
+  /** For the subtitle when there is no company: '@username' (Instagram / X), else a masked phone or email. */
   handle: string | null;
   isPriority: boolean;
   lastAt: number | null;
@@ -110,6 +112,8 @@ export type TimelineItem =
       id: string;
       conversationId: string;
       source: string;
+      /** The network for the badge: imessage, whatsapp, instagram (Beeper and the export both), … */
+      channel: string;
       conversationKind: string;
       title: string | null;
       memberCount: number | null;
@@ -125,14 +129,20 @@ export type TimelineItem =
       id: string;
       kind: string;
       channel: string | null;
+      /** null for a sensitive occasion (medical and the like). */
       title: string | null;
       startedAt: number;
       endedAt: number | null;
+      /** The get-together this came from (Events screen /e/:id); null for a sensitive one, which isn't served. */
+      occasionId: string | null;
+      eventId: string | null;
     };
 
 export interface TimelinePage {
   items: TimelineItem[];
   nextCursor: string | null;
+  /** Every channel the person has conversations on (for the source filter), in a fixed order. */
+  channels: string[];
 }
 
 export interface SessionMessage {
@@ -188,6 +198,49 @@ export function maskText(s: string): string {
   return s.replace(EMAIL_RE, (m) => maskEmail(m)).replace(PHONE_RUN_RE, (m) => (isPhoneRun(m) ? maskPhoneLike(m) : m));
 }
 
+/**
+ * Names of hidden people in a title are blanked: a calendar title the owner typed can name someone he has since
+ * hidden, and hidden contacts never show up outside Settings → Hidden. A word is blanked when it is a hidden
+ * person's first name or nickname that no visible person shares; their last name goes too when it follows one.
+ */
+export function hiddenNameRedactor(db: DB): (title: string | null) => string | null {
+  let sets: { first: Set<string>; last: Set<string>; visible: Set<string> } | null = null;
+  const load = () => {
+    const first = new Set<string>();
+    const last = new Set<string>();
+    for (const r of db.prepare(`SELECT first_name, last_name, nickname, display_name FROM people WHERE is_hidden = 1 AND kind = 'person'`).all() as {
+      first_name: string | null;
+      last_name: string | null;
+      nickname: string | null;
+      display_name: string;
+    }[]) {
+      const parts = normalizeNamePart(r.display_name).split(' ').filter(Boolean);
+      for (const n of [normalizeNamePart(r.first_name), normalizeNamePart(r.nickname), parts[0] ?? '']) if (n) first.add(n);
+      for (const n of [normalizeNamePart(r.last_name), parts.length > 1 ? parts[parts.length - 1]! : '']) if (n) last.add(n);
+    }
+    const visible = new Set<string>();
+    for (const r of db.prepare(`SELECT first_name, nickname, display_name FROM person_visible`).all() as { first_name: string | null; nickname: string | null; display_name: string }[]) {
+      for (const n of [normalizeNamePart(r.first_name), normalizeNamePart(r.nickname), normalizeNamePart(r.display_name).split(' ')[0] ?? '']) if (n) visible.add(n);
+    }
+    return { first, last, visible };
+  };
+  return (title) => {
+    if (!title) return title;
+    sets ??= load();
+    const { first, last, visible } = sets;
+    if (!first.size) return maskText(title);
+    let previousBlanked = false;
+    const out = title.replace(/[\p{L}][\p{L}'’-]*/gu, (word) => {
+      const bare = word.replace(/['’]s$/u, '');
+      const n = normalizeNamePart(bare);
+      const blank = (first.has(n) && !visible.has(n)) || (previousBlanked && last.has(n));
+      previousBlanked = blank;
+      return blank ? `…${word.slice(bare.length)}` : word;
+    });
+    return maskText(out);
+  };
+}
+
 const opaque = (prefix: string, key: string) => `${prefix} ••${key.slice(-4)}`;
 
 const REVEALABLE = new Set(['phone', 'email', 'whatsapp_jid', 'whatsapp_lid', 'instagram_id', 'partiful_user', 'beeper_user']);
@@ -204,7 +257,8 @@ export function identityValue(kind: string, key: string): { value: string; maske
       return { value: d.length >= 7 ? maskPhoneLike(`+${d}`) : opaque('WhatsApp', key), masked: true };
     }
     case 'whatsapp_lid':
-      return { value: opaque('WhatsApp ID', key), masked: true };
+      // Keys are "<digits>@lid": the tail of the digits, not of the server suffix.
+      return { value: opaque('WhatsApp ID', key.split('@')[0] || key), masked: true };
     case 'instagram_id':
       return { value: opaque('Instagram ID', key), masked: true };
     case 'partiful_user':
@@ -214,6 +268,11 @@ export function identityValue(kind: string, key: string): { value: string; maske
     case 'instagram_username':
     case 'x_username':
       return { value: `@${key.replace(/^@/, '')}`, masked: false };
+    case 'instagram_name': {
+      // Export participants are keyed `ig_dyi:<thread>:<name>`: show the name, never the thread id.
+      const name = key.startsWith('ig_dyi:') ? key.split(':').slice(2).join(':') : key;
+      return { value: maskText(name.trim()) || 'Instagram name', masked: false };
+    }
     case 'addressbook_id':
       return { value: 'Contacts card', masked: true };
     case 'legacy_id':
@@ -398,20 +457,22 @@ function pageExtras(db: DB, ids: string[]): Map<string, { sources: string[]; han
        ORDER BY i.created_at`,
     )
     .all(JSON.stringify(ids)) as { pid: string; kind: string; key: string; source: string }[];
-  const acc = new Map<string, { sources: Set<string>; ig: string | null; x: string | null }>();
+  const acc = new Map<string, { sources: Set<string>; handles: Map<string, string> }>();
   for (const r of rows) {
     let a = acc.get(r.pid);
-    if (!a) acc.set(r.pid, (a = { sources: new Set(), ig: null, x: null }));
+    if (!a) acc.set(r.pid, (a = { sources: new Set(), handles: new Map() }));
     a.sources.add(r.source);
-    if (r.kind === 'instagram_username' && !a.ig) a.ig = r.key;
-    if (r.kind === 'x_username' && !a.x) a.x = r.key;
+    if (HANDLE_KINDS.includes(r.kind) && !a.handles.has(r.kind)) a.handles.set(r.kind, r.key);
   }
   for (const [pid, a] of acc) {
-    const h = a.ig ?? a.x;
-    out.set(pid, { sources: sortSources(a.sources), handle: h ? `@${h.replace(/^@/, '')}` : null });
+    const kind = HANDLE_KINDS.find((k) => a.handles.has(k));
+    out.set(pid, { sources: sortSources(a.sources), handle: kind ? identityValue(kind, a.handles.get(kind)!).value : null });
   }
   return out;
 }
+
+/** The list subtitle's handle when there is no company, best first; phones and emails come out masked. */
+const HANDLE_KINDS = ['instagram_username', 'x_username', 'phone', 'whatsapp_jid', 'email'];
 
 // ---------------------------------------------------------------------------------------------- one person
 
@@ -554,6 +615,25 @@ export function revealIdentity(db: DB, personId: string, identityId: string): Re
 
 // ---------------------------------------------------------------------------------------------- timeline
 
+/** Conversation sources that are one network on screen. Beeper is read for Instagram only. */
+const CHANNEL_SOURCES: Record<string, readonly string[]> = {
+  instagram: ['instagram', 'beeper', 'instagram_dyi', 'ig_dyi'],
+};
+const CHANNEL_ORDER = ['imessage', 'whatsapp', 'instagram'];
+
+export function channelOf(source: string): string {
+  for (const [channel, sources] of Object.entries(CHANNEL_SOURCES)) if (sources.includes(source)) return channel;
+  return source;
+}
+
+/** The raw sources a ?source= filter matches: a channel's family, or just itself. */
+const sourcesFor = (filter: string) => [...new Set([filter, ...(CHANNEL_SOURCES[filter] ?? [])])];
+
+const channelRank = (c: string) => {
+  const i = CHANNEL_ORDER.indexOf(c);
+  return i === -1 ? CHANNEL_ORDER.length : i;
+};
+
 /** [conversationId, joinedAt|null, leftAt|null]: where the person is a member or has posted. */
 type ConvWindow = [string, number | null, number | null];
 
@@ -591,6 +671,8 @@ interface TimelineRow {
   title: string | null;
   member_count: number | null;
   ikind: string | null;
+  occasion_id: string | null;
+  event_id: string | null;
 }
 
 const TimelineCursor = z.string().regex(/^\d{1,15}:[\w.:-]{1,128}$/);
@@ -618,12 +700,15 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
        ),
        items AS (
          SELECT 'session' AS type, s.id, s.started_at, s.ended_at, s.msg_count, s.initiated_by_me,
-                c.id AS conversation_id, c.source, c.kind AS conv_kind, c.title, c.member_count, NULL AS ikind
+                c.id AS conversation_id, c.source, c.kind AS conv_kind, c.title, c.member_count, NULL AS ikind,
+                NULL AS occasion_id, NULL AS event_id
          FROM conv JOIN sessions s ON s.conversation_id = conv.cid JOIN conversations c ON c.id = s.conversation_id
          WHERE (conv.j IS NULL OR s.ended_at >= conv.j) AND (conv.l IS NULL OR s.started_at <= conv.l)
          UNION ALL
          SELECT 'interaction', i.id, i.started_at, i.ended_at, NULL, i.initiated_by_me,
-                i.conversation_id, i.channel, NULL, coalesce(e.title, o.title, i.summary), NULL, i.kind
+                i.conversation_id, i.channel, NULL,
+                CASE WHEN o.sensitive = 1 THEN NULL ELSE coalesce(e.title, o.title, i.summary) END, NULL, i.kind,
+                CASE WHEN o.sensitive = 1 THEN NULL ELSE i.occasion_id END, i.event_id
          FROM interactions i
          LEFT JOIN events e ON e.id = i.event_id
          LEFT JOIN occasions o ON o.id = i.occasion_id
@@ -631,7 +716,7 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
        )
        SELECT * FROM items
        WHERE (@cursorAt IS NULL OR started_at < @cursorAt OR (started_at = @cursorAt AND id < @cursorId))
-         AND (@source IS NULL OR source = @source)
+         AND (@sources IS NULL OR source IN (SELECT value FROM json_each(@sources)))
        ORDER BY started_at DESC, id DESC
        LIMIT @limit`,
     )
@@ -640,7 +725,7 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
       cluster: JSON.stringify(cluster),
       cursorAt,
       cursorId,
-      source: o.source ?? null,
+      sources: o.source ? JSON.stringify(sourcesFor(o.source)) : null,
       limit: o.limit + 1,
     }) as TimelineRow[];
 
@@ -651,6 +736,8 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
      FROM messages WHERE conversation_id = ? AND sent_at BETWEEN ? AND ? AND dup_of IS NULL`,
   );
   const idsJson = JSON.stringify(identityIds);
+  // Occasion titles come from the owner's calendar, which can name people he has since hidden (as on /events).
+  const redact = hiddenNameRedactor(db);
 
   const items: TimelineItem[] = page.map((r) => {
     if (r.type === 'session') {
@@ -660,6 +747,7 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
         id: r.id,
         conversationId: r.conversation_id!,
         source: r.source!,
+        channel: channelOf(r.source!),
         conversationKind: r.conv_kind!,
         title: safe(r.title),
         memberCount: r.member_count,
@@ -671,10 +759,25 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
         initiatedByMe: r.initiated_by_me === 1,
       };
     }
-    return { type: 'interaction', id: r.id, kind: r.ikind!, channel: r.source, title: safe(r.title), startedAt: r.started_at, endedAt: r.ended_at };
+    return {
+      type: 'interaction',
+      id: r.id,
+      kind: r.ikind!,
+      channel: r.source,
+      title: r.occasion_id ? redact(r.title) : safe(r.title),
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      occasionId: r.occasion_id,
+      eventId: r.event_id,
+    };
   });
   const last = page[page.length - 1];
-  return { items, nextCursor: rows.length > o.limit && last ? `${last.started_at}:${last.id}` : null };
+  const convSources = db
+    .prepare('SELECT DISTINCT source FROM conversations WHERE id IN (SELECT value FROM json_each(?))')
+    .pluck()
+    .all(JSON.stringify(convs.map((c) => c[0]))) as string[];
+  const channels = [...new Set(convSources.map(channelOf))].sort((a, b) => channelRank(a) - channelRank(b) || a.localeCompare(b));
+  return { items, nextCursor: rows.length > o.limit && last ? `${last.started_at}:${last.id}` : null, channels };
 }
 
 const MESSAGE_CAP = 500;

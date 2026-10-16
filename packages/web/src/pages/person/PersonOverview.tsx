@@ -1,21 +1,13 @@
 import { useState } from 'react';
 import { useReveal } from '../../api/hooks';
-import type { IdentityView, PersonDetail } from '../../api/types';
+import type { PersonDetail } from '../../api/types';
 import { EntityRow } from '../../components/EntityRow';
 import { Empty } from '../../components/PageState';
 import { SourceTile } from '../../components/SourceBadge';
 import { useToast } from '../../components/Toast';
+import { accountSubtitle, confidenceTone, orderAccounts } from '../../lib/accounts';
 import { percent, plural } from '../../lib/format';
-import { identityKindLabel, matchMethodLabel, sourceLabel } from '../../lib/labels';
-
-function accountSubtitle(i: IdentityView): string {
-  const kind = i.label ? `${identityKindLabel(i.kind)} (${i.label})` : identityKindLabel(i.kind);
-  const parts = [kind, `via ${sourceLabel(i.source)}`, matchMethodLabel(i.matchMethod)];
-  if (i.confidence < 1) parts.push(percent(i.confidence));
-  if (i.shared) parts.push('shared');
-  if (i.status !== 'active') parts.push(i.status);
-  return parts.join(' · ');
-}
+import { identityNetwork } from '../../lib/labels';
 
 function LinkedAccounts({ p }: { p: PersonDetail }) {
   const reveal = useReveal(p.id);
@@ -31,13 +23,13 @@ function LinkedAccounts({ p }: { p: PersonDetail }) {
 
   return (
     <div className="card-list">
-      {p.identities.map((i) => {
+      {orderAccounts(p.identities).map((i) => {
         const shown = revealed[i.id];
         const name = i.displayName && i.displayName !== i.value ? i.displayName : null;
         return (
           <EntityRow
             key={i.id}
-            icon={<SourceTile source={i.source} />}
+            icon={<SourceTile source={identityNetwork(i.kind, i.source)} />}
             title={
               <>
                 <span className="wrap-anywhere">{shown ?? i.value}</span>
@@ -46,25 +38,32 @@ function LinkedAccounts({ p }: { p: PersonDetail }) {
             }
             subtitle={accountSubtitle(i)}
             trailing={
-              i.revealable ? (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost"
-                  disabled={reveal.isPending && reveal.variables === i.id}
-                  onClick={() => {
-                    if (shown) {
-                      setRevealed(({ [i.id]: _gone, ...rest }) => rest);
-                      return;
-                    }
-                    reveal.mutate(i.id, {
-                      onSuccess: (r) => setRevealed((m) => ({ ...m, [r.id]: r.value })),
-                      onError: (e) => toast((e as Error).message, 'error'),
-                    });
-                  }}
-                >
-                  {shown ? 'Hide' : 'Reveal'}
-                </button>
-              ) : undefined
+              <>
+                {i.confidence < 1 && (
+                  <span className={`pill ${confidenceTone(i.confidence)}`} title="Match confidence">
+                    {percent(i.confidence)}
+                  </span>
+                )}
+                {i.revealable ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    disabled={reveal.isPending && reveal.variables === i.id}
+                    onClick={() => {
+                      if (shown) {
+                        setRevealed(({ [i.id]: _gone, ...rest }) => rest);
+                        return;
+                      }
+                      reveal.mutate(i.id, {
+                        onSuccess: (r) => setRevealed((m) => ({ ...m, [r.id]: r.value })),
+                        onError: (e) => toast((e as Error).message, 'error'),
+                      });
+                    }}
+                  >
+                    {shown ? 'Hide' : 'Reveal'}
+                  </button>
+                ) : null}
+              </>
             }
           />
         );

@@ -908,3 +908,340 @@ dialog.dialog::backdrop {
 .chevron.open {
   transform: rotate(90deg);
 }
+
+/* ---------------------------------------------------------------- Sources: fixes and calendars */
+.source-card .sc-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.source-card .sc-name h2 {
+  overflow-wrap: anywhere;
+}
+.fix-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  background: var(--accent-soft);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.fix-box.bad {
+  background: var(--danger-soft);
+}
+.fix-box strong {
+  display: block;
+  margin-bottom: 2px;
+}
+.fix-box p {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+}
+.fix-box p:last-child {
+  margin-bottom: 0;
+}
+.fix-box .fix-folder {
+  color: var(--text-primary);
+}
+.cal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.cal-list {
+  display: flex;
+  flex-direction: column;
+}
+.cal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  min-width: 0;
+}
+.cal-row + .cal-row {
+  border-top: 1px solid var(--border);
+}
+.cal-row .er-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cal-row .er-title {
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.cal-row .er-subtitle {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.cal-row select {
+  flex: none;
+  max-width: 48%;
+}
+@media (max-width: 400px) {
+  .cal-row {
+    flex-wrap: wrap;
+  }
+  .cal-row select {
+    max-width: none;
+    width: 100%;
+  }
+}
+.cal-primary {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.input-sm,
+select.input-sm {
+  height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------- Events */
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.event-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  overflow: hidden;
+  min-width: 0;
+}
+.ev-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+.ev-head:hover {
+  background: var(--surface-hover);
+}
+.ev-head .er-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ev-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ev-meta {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.ev-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+}
+.ev-people {
+  padding: 10px 14px 0;
+}
+.ev-foot {
+  padding: 8px 14px 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.date-tile {
+  flex-direction: column;
+  gap: 0;
+  line-height: 1;
+}
+.date-tile .dt-m {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.date-tile .dt-d {
+  font-size: 15px;
+  font-weight: 700;
+}
+.event-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+  min-width: 0;
+}
+.event-header .date-tile {
+  --size: 48px;
+}
+.event-header .date-tile .dt-d {
+  font-size: 19px;
+}
+.event-header .eh-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.event-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.event-header .eh-line {
+  color: var(--text-secondary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.event-header .ev-badges {
+  padding: 4px 0 0;
+}
+.back-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+}
+.back-link:hover {
+  color: var(--text-primary);
+}
+.sub-title {
+  margin: 14px 0 6px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+/* Attendee confidence: confirmed is a normal chip; "possible" (0.5–0.75) is dashed and dimmed, never solid. */
+.chip.attendee.tier-possible {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.chip.attendee.tier-possible .avatar {
+  opacity: 0.7;
+}
+.chip.attendee.tier-maybe {
+  border-style: dotted;
+}
+.chip.attendee.tier-declined {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.tier-mark {
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.chip .tier-mark {
+  margin-left: -2px;
+}
+.more-chip {
+  color: var(--text-secondary);
+}
+.possible-list {
+  border-style: dashed;
+}
+.entity-row.possible .avatar {
+  opacity: 0.7;
+}
+.entity-row.possible .er-title {
+  color: var(--text-secondary);
+}
+.badge.src-inference {
+  border-style: dashed;
+}
+.ev-foot-gap {
+  height: 10px;
+}
+
+/* ---------------------------------------------------------------- Filters & confidence */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.filter-chips button.chip {
+  cursor: pointer;
+  min-height: 30px;
+}
+.filter-chips button.chip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.pill.conf-high {
+  background: var(--ok-soft);
+  color: var(--state-strong);
+}
+.pill.conf-mid {
+  background: var(--warning-soft);
+  color: var(--state-cooling);
+}
+.pill.conf-low {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-strong);
+}
+
+/* ---------------------------------------------------------------- Notices (OAuth outcome) */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-m);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.notice span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.notice.ok {
+  background: var(--ok-soft);
+}
+.notice.bad {
+  background: var(--danger-soft);
+}
+.google-panel > .fix-box:first-child,
+.google-panel > .cal-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.google-panel > .notice + .fix-box,
+.google-panel > .notice + .cal-section {
+  margin-top: 10px;
+}
+
+/* A checkbox with its sentence (dialogs). */
+.check-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.check-line input {
+  margin-top: 3px;
+  flex: none;
+}

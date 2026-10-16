@@ -24,6 +24,11 @@ describe('source hygiene', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('the write-capable Beeper SDK is never imported (adapters/beeper has its own GET-only client)', () => {
+    const bad = files(SRC).filter((f) => /['"]@beeper\/desktop-api['"/]/.test(fs.readFileSync(f, 'utf8')));
+    expect(bad).toEqual([]);
+  });
+
   it('only the admin socket and loopback listener exist (no 0.0.0.0 binds)', () => {
     const bad = files(SRC).filter((f) => /listen\([^)]*['"]0\.0\.0\.0['"]/.test(fs.readFileSync(f, 'utf8')));
     expect(bad).toEqual([]);

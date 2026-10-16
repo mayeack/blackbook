@@ -27,6 +27,26 @@ describe('migrations', () => {
     closeDatabase(again);
   });
 
+  it('registers the source-adapter migrations in order (004 shared, 005–010 per source and pipeline)', () => {
+    expect(MIGRATIONS.map((m) => m.version)).toEqual(MIGRATIONS.map((_, i) => i + 1));
+    expect(LATEST_VERSION).toBeGreaterThanOrEqual(10);
+    expect(MIGRATIONS.slice(3, 10).map((m) => m.name)).toEqual(['sources_common', 'beeper', 'whatsapp', 'partiful', 'calendar', 'identity', 'occasions']);
+    const db = memDb();
+    expect(currentVersion(db)).toBe(LATEST_VERSION);
+    const cols = (db.prepare(`SELECT name FROM pragma_table_info('pending_reactions')`).pluck().all() as string[]);
+    expect(cols).toContain('source');
+  });
+
+  it('004 keeps parked iMessage reactions (source defaults to imessage)', () => {
+    const db = openDatabase(':memory:');
+    migrate(db, 3);
+    db.prepare(
+      `INSERT INTO pending_reactions (source_reaction_id, target_source_msg_id, is_from_me, type, at, first_seen_at) VALUES ('g1', 'g0', 0, 'like', 1, 1)`,
+    ).run();
+    migrate(db);
+    expect(db.prepare('SELECT source FROM pending_reactions').pluck().get()).toBe('imessage');
+  });
+
   it('refuses a database from a newer build', () => {
     const db = memDb();
     db.pragma(`user_version = ${LATEST_VERSION + 1}`);
