@@ -244,7 +244,7 @@ final class RelationshipScoreEngineTests: XCTestCase {
     //
     // Regression: synced iMessage interaction *records* arrive, but the contact-field update that
     // carries lastInteractionDate is rejected by conflict resolution (local newer + pending), so the
-    // device shows the texts yet recency stays 0 and the score sits at priority-only (Hugo Dooner: 20).
+    // device shows the texts yet recency stays 0 and the score sits at priority-only (Contact A: 20).
     // recalculateAll must re-derive the date from the records the device already holds.
 
     func testHealsStaleDateFromInteractionRecord() throws {
@@ -262,7 +262,7 @@ final class RelationshipScoreEngineTests: XCTestCase {
     }
 
     func testPriorityContactRecoversAboveBoostAfterHeal() throws {
-        // The exact Hugo Dooner shape: priority + recent texts but a stale date pinning the score at 20.
+        // The exact Contact A shape: priority + recent texts but a stale date pinning the score at 20.
         let contact = makeContact(isPriority: true)
         addInteraction(to: contact, type: .text, date: Date.daysAgo(2))
         contact.lastInteractionDate = nil

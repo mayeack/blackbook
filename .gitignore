@@ -32,3 +32,27 @@ Pods/
 .idea/
 *.code-workspace
 .claude/scheduled_tasks.lock
+
+# Personal research notes (machine-specific counts); never commit
+docs/private/
+
+# yeackbot (Node workspaces)
+# The SwiftPM "Packages/" rule above also matches "packages/" on case-insensitive macOS: re-include the workspace.
+!/packages/
+node_modules/
+packages/*/dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+*.sqlite-shm
+*.tsbuildinfo
+.vite/
+
+# Yeackbot collector: self handles compiled into the signed app (written by `npm run setup:self`); never commit
+collector/Generated/SelfHandles.generated.swift
+# The owner's own phone numbers / emails that `npm run setup:self` reads; never commit
+self-handles.local

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Yeackbot server (http://127.0.0.1:4320). TEMPLATE: scripts/service.sh replaces REPO_PATH with the stable
+  checkout (never a .claude/worktrees path) and writes the result to ~/Library/LaunchAgents.
+  Plain node on the prebuilt bundle (npm run build): no npm (it writes a log per run) and no tsx (it caches
+  transforms on disk). stdout/stderr go to /dev/null: the app writes its own scrubbed JSONL logs under the data dir.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yeackbot.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>--env-file-if-exists=REPO_PATH/.env</string>
+        <string>--enable-source-maps</string>
+        <string>REPO_PATH/packages/server/dist/index.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>REPO_PATH</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>/dev/null</string>
+</dict>
+</plist>

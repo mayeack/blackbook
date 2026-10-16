@@ -16,7 +16,8 @@ private struct HTTPRequest {
 }
 
 /// Lightweight HTTP server that handles backup storage and retrieval.
-/// Uses Network.framework (NWListener) for TCP, publishes via Bonjour.
+/// Uses Network.framework (NWListener) for TCP on 127.0.0.1 only. It is not advertised over Bonjour: LAN sync is
+/// disabled, so an advertisement would only tell the network that this Mac runs the CRM sync server.
 final class BackupServer: @unchecked Sendable {
     private let password: String
     private let container: ModelContainer?
@@ -27,7 +28,6 @@ final class BackupServer: @unchecked Sendable {
     /// Loopback-only listener serving the web console on `defaultConsolePort`. Never exposed via
     /// the Cloudflare tunnel (which forwards only the sync port), so it needs no password.
     private var consoleListener: NWListener?
-    private var bonjourService: NetService?
     private(set) var isRunning = false
     private(set) var port: UInt16 = 0
     private var configuredPort: UInt16 = 8765
@@ -37,7 +37,6 @@ final class BackupServer: @unchecked Sendable {
 
     static let defaultPort: UInt16 = 8765
     static let defaultConsolePort: UInt16 = 8766
-    static let bonjourType = "_blackbook-sync._tcp"
     static let passwordHeader = "X-Sync-Password"
     static let userEmailHeader = "X-User-Email"
 
@@ -63,11 +62,11 @@ final class BackupServer: @unchecked Sendable {
         guard !isRunning else { return }
         isStopping = false
         configuredPort = port
-        let params = NWParameters.tcp
-        params.allowLocalEndpointReuse = true
+        // Loopback only (127.0.0.1): the public tunnel is retired and LAN sync is disabled.
+        let params = LoopbackHTTPServer.loopbackParameters(port: port)
 
         do {
-            let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            let listener = try NWListener(using: params)
             self.listener = listener
             listener.stateUpdateHandler = { [weak self] state in
                 switch state {
@@ -75,7 +74,6 @@ final class BackupServer: @unchecked Sendable {
                     self?.port = listener.port?.rawValue ?? 0
                     self?.isRunning = true
                     self?.restartDelay = 1.0
-                    self?.publishBonjour(port: Int(self?.port ?? 0))
                     self?.startConsole()
                     logger.info("Backup server listening on port \(self?.port ?? 0)")
                 case .failed(let error):
@@ -106,8 +104,6 @@ final class BackupServer: @unchecked Sendable {
         listener = nil
         consoleListener?.cancel()
         consoleListener = nil
-        bonjourService?.stop()
-        bonjourService = nil
         isRunning = false
         port = 0
     }
@@ -119,12 +115,7 @@ final class BackupServer: @unchecked Sendable {
     /// only the sync port). Idempotent — a no-op if already listening.
     private func startConsole() {
         guard consoleListener == nil else { return }
-        let params = NWParameters.tcp
-        params.allowLocalEndpointReuse = true
-        params.requiredLocalEndpoint = NWEndpoint.hostPort(
-            host: NWEndpoint.Host("127.0.0.1"),
-            port: NWEndpoint.Port(rawValue: Self.defaultConsolePort)!
-        )
+        let params = LoopbackHTTPServer.loopbackParameters(port: Self.defaultConsolePort)
         do {
             let cl = try NWListener(using: params)
             self.consoleListener = cl
@@ -166,13 +157,7 @@ final class BackupServer: @unchecked Sendable {
     }
 
     private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
-        guard case let .hostPort(host, _) = endpoint else { return false }
-        switch host {
-        case .ipv4(let addr): return addr.isLoopback
-        case .ipv6(let addr): return addr.isLoopback
-        case .name(let name, _): return name == "localhost" || name == "127.0.0.1" || name == "::1"
-        @unknown default: return false
-        }
+        LoopbackHTTPServer.isLoopback(endpoint)
     }
 
     private func handleConsoleRoute(_ request: HTTPRequest?) -> (status: Int, headers: [String: String], body: Data?) {
@@ -354,8 +339,6 @@ final class BackupServer: @unchecked Sendable {
         listener = nil
         consoleListener?.cancel()
         consoleListener = nil
-        bonjourService?.stop()
-        bonjourService = nil
         isRunning = false
         port = 0
         let delay = restartDelay
@@ -367,17 +350,14 @@ final class BackupServer: @unchecked Sendable {
         }
     }
 
-    // MARK: - Bonjour
-
-    private func publishBonjour(port: Int) {
-        let service = NetService(domain: "local.", type: Self.bonjourType, name: "Blackbook", port: Int32(port))
-        bonjourService = service
-        service.publish()
-    }
-
     // MARK: - Connection Handling
 
     private func handle(connection: NWConnection) {
+        // Defense-in-depth on top of the loopback-only bind.
+        guard Self.isLoopback(connection.endpoint) else {
+            connection.cancel()
+            return
+        }
         connection.start(queue: queue)
         receiveRequest(connection: connection, accumulated: Data()) { [weak self] request in
             guard let self else { return }
@@ -1078,14 +1058,7 @@ final class BackupServer: @unchecked Sendable {
     }
 
     private func statusText(_ code: Int) -> String {
-        switch code {
-        case 200: return "OK"
-        case 400: return "Bad Request"
-        case 401: return "Unauthorized"
-        case 404: return "Not Found"
-        case 500: return "Internal Server Error"
-        default: return "Unknown"
-        }
+        HTTPStatus.text(code)
     }
 
     // MARK: - Stats

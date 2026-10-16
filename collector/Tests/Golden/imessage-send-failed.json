@@ -1,0 +1,8 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "status": "failed",
+  "message_guids": [],
+  "rowids": [],
+  "error_code": "automation_denied"
+}

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "recipient_not_allowed",
+    "message": "recipient is not one of the owner's own handles"
+  }
+}

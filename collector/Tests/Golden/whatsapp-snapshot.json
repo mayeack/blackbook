@@ -1,0 +1,14 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "unchanged": false,
+  "snapshot_dir": "/Users/owner/Library/Application Support/Yeackbot/snapshots/whatsapp/20261001T120000.000Z",
+  "files": {
+    "chat": "/Users/owner/Library/Application Support/Yeackbot/snapshots/whatsapp/20261001T120000.000Z/ChatStorage.sqlite",
+    "contacts": "/Users/owner/Library/Application Support/Yeackbot/snapshots/whatsapp/20261001T120000.000Z/ContactsV2.sqlite",
+    "lid": null
+  },
+  "source_mtime": "2026-10-01T12:00:00.000Z",
+  "max_pk": 4242,
+  "bytes": 1048576
+}

@@ -7,6 +7,8 @@ struct BlackbookServerApp: App {
     @State private var model: ServerStatusModel
 
     init() {
+        // Yeackbot Collector API on 127.0.0.1:4321; independent of the legacy sync server below.
+        CollectorRuntime.shared.start()
         let container = ServerModelContainer.make()
         self.modelContainer = container
         _model = State(initialValue: ServerStatusModel(modelContainer: container))

@@ -4,6 +4,7 @@ struct ServerMenuView: View {
     @Bindable var model: ServerStatusModel
     @State private var editingEmail = ""
     @State private var isEditingEmail = false
+    @State private var collectorStatus = CollectorRuntime.shared.status
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -91,6 +92,13 @@ struct ServerMenuView: View {
 
             Divider()
 
+            Label("Collector: \(collectorStatus)", systemImage: "antenna.radiowaves.left.and.right")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Divider()
+
             Button("Quit Blackbook Server") {
                 NSApplication.shared.terminate(nil)
             }
@@ -102,6 +110,7 @@ struct ServerMenuView: View {
                 editingEmail = model.email
             }
             model.refreshStatus()
+            collectorStatus = CollectorRuntime.shared.status
         }
     }
 

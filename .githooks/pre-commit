@@ -1,0 +1,12 @@
+#!/bin/sh
+# Blocks a commit while the working tree holds real-looking phone numbers, emails or secrets: this repo is PUBLIC
+# (scripts/lint-pii.mjs; legacy exceptions in scripts/pii-baseline.tsv). Enabled by `npm run hooks:install`
+# (also run by `npm install` via the prepare script), which sets core.hooksPath to .githooks.
+root="$(git rev-parse --show-toplevel)" || exit 1
+[ -f "$root/scripts/lint-pii.mjs" ] || exit 0
+PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: node not found, so lint:pii could not run; commit refused (git commit --no-verify to override)." >&2
+  exit 1
+fi
+exec node "$root/scripts/lint-pii.mjs"

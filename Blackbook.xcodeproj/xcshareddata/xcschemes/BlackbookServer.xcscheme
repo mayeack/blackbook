@@ -21,6 +21,20 @@
                ReferencedContainer = "container:Blackbook.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "291EC4C39C7558ED21E7A0CD"
+               BuildableName = "BlackbookServerTests.xctest"
+               BlueprintName = "BlackbookServerTests"
+               ReferencedContainer = "container:Blackbook.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -39,7 +53,20 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "291EC4C39C7558ED21E7A0CD"
+               BuildableName = "BlackbookServerTests.xctest"
+               BlueprintName = "BlackbookServerTests"
+               ReferencedContainer = "container:Blackbook.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

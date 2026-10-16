@@ -1,0 +1,15 @@
+# ~/.cloudflared/yeackbot.yml (copy, then fill in the tunnel id and HOME_PATH).
+# Created with an explicit cert so the other tunnels' cert.pem is never touched:
+#   cloudflared --origincert HOME_PATH/.cloudflared/cert.yeackbot.pem tunnel create yeackbot
+# The CNAME yeackbot.com -> <tunnel-uuid>.cfargotunnel.com is added in the Cloudflare dashboard.
+# Cloudflare Access (Google SSO, one allowed email) sits in front of the hostname; a separate Bypass app
+# covers /healthz, /manifest.webmanifest, /icons/* and /apple-touch-icon*. The server verifies the Access JWT
+# on every other path regardless.
+tunnel: <tunnel-uuid>
+credentials-file: HOME_PATH/.cloudflared/<tunnel-uuid>.json
+origincert: HOME_PATH/.cloudflared/cert.yeackbot.pem
+
+ingress:
+  - hostname: yeackbot.com
+    service: http://127.0.0.1:4320
+  - service: http_status:404

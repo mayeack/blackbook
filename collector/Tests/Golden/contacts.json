@@ -1,0 +1,78 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "hash": "bec7d426839c2ce46a82012c36ccdeec55a8e9d25c4e7911e64ff629b7f85319",
+  "items": [
+    {
+      "id": "A-0001",
+      "given": "Avery",
+      "family": "Sample",
+      "nickname": null,
+      "org": null,
+      "job": null,
+      "phones": [
+        {
+          "label": null,
+          "value": "+15555550101"
+        }
+      ],
+      "emails": [],
+      "postal": [],
+      "birthday": {
+        "y": 1990,
+        "m": 1,
+        "d": 31
+      },
+      "social": [],
+      "urls": []
+    },
+    {
+      "id": "B-0002",
+      "given": "Jordan",
+      "family": "Example",
+      "nickname": "Jo",
+      "org": "Acme Rentals",
+      "job": "Guide",
+      "phones": [
+        {
+          "label": "mobile",
+          "value": "(555) 555-0102"
+        }
+      ],
+      "emails": [
+        {
+          "label": "home",
+          "value": "jordan@example.com"
+        }
+      ],
+      "postal": [
+        {
+          "label": "home",
+          "street": "1 Sample St",
+          "city": "Springfield",
+          "state": "CA",
+          "postal_code": "90000",
+          "country": "United States",
+          "iso_country_code": "US"
+        }
+      ],
+      "birthday": {
+        "m": 7,
+        "d": 4
+      },
+      "social": [
+        {
+          "service": "Instagram",
+          "username": "jordan.example",
+          "url": null
+        }
+      ],
+      "urls": [
+        {
+          "label": "homepage",
+          "value": "https://example.com/jordan"
+        }
+      ]
+    }
+  ]
+}

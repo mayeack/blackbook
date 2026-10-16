@@ -79,12 +79,12 @@ Running, append-only log of manual test scenarios for completed features and bug
 **Summary:** macOS client now syncs with `sync.libersecretorum.com` (it previously did not), and both iOS and macOS now perform a full sync every 5 minutes while foregrounded, in addition to the existing launch sync.
 
 **Setup:**
-- Both apps signed in as `michaelyeack@gmail.com`.
+- Both apps signed in as `owner@example.com`.
 - Central sync server (`sync.libersecretorum.com` → this Mac:8765) reachable.
 - Clean launch (quit before first scenario).
 
 **Steps:**
-1. Launch macOS app cold → in Console.app (subsystem `com.blackbookdevelopment.app`, category `BonjourBrowser`) expect `Configured sync server: https://sync.libersecretorum.com for michaelyeack@gmail.com` within ~1s.
+1. Launch macOS app cold → in Console.app (subsystem `com.blackbookdevelopment.app`, category `BonjourBrowser`) expect `Configured sync server: https://sync.libersecretorum.com for owner@example.com` within ~1s.
 2. Same launch → category `LocalSync` should log `Pushing N record(s)` / `Pulled N …` lines, then `Local sync completed`, ~1–3s after launch.
 3. Wait 5 minutes with the macOS app foregrounded and untouched → expect a second `Local sync completed` line (and `Periodic sync started (interval: 300s)` should already be in the log from step 2).
 4. On iPhone, add a contact "SyncTest-iOS-<HHmm>" → within ≤5 min the contact appears in the macOS Contacts list without quitting/relaunching.
@@ -106,12 +106,12 @@ Running, append-only log of manual test scenarios for completed features and bug
 **Summary:** Added a server-side `POST /heartbeat` endpoint and client-side heartbeat pings sent at the start and end of every `performFullSync()` call (success, failure, or skip). Each heartbeat lands as a JSONL line in `<Application Support>/Blackbook/Logs/<sanitized_email>/heartbeats-YYYY-MM-DD.jsonl` on the macOS host so you can grep the file to verify both iOS and macOS are checking in.
 
 **Setup:**
-- Both apps signed in as `michaelyeack@gmail.com`.
+- Both apps signed in as `owner@example.com`.
 - macOS Blackbook running and serving port 8765 (status of `lsof -i :8765` shows `Blackbook (LISTEN)`).
 - Cloudflare tunnel `cloudflared-libersecretorum` running.
 
 **Steps:**
-1. Launch macOS app → within ~3s `tail -f ~/Library/Containers/com.blackbookdevelopment.app/Data/Library/Application\ Support/Blackbook/Logs/michaelyeack_at_gmail_com/heartbeats-$(date -u +%Y-%m-%d).jsonl` should show two entries: one `"status":"started"` and one `"status":"success"`, both `"platform":"macOS"`, `"device":"Michael's Mac mini"`.
+1. Launch macOS app → within ~3s `tail -f ~/Library/Containers/com.blackbookdevelopment.app/Data/Library/Application\ Support/Blackbook/Logs/owner_at_example_com/heartbeats-$(date -u +%Y-%m-%d).jsonl` should show two entries: one `"status":"started"` and one `"status":"success"`, both `"platform":"macOS"`, `"device":"Michael's Mac mini"`.
 2. Wait 5 minutes → expect two more entries (next periodic tick).
 3. Launch iOS app → expect two more entries with `"platform":"iOS"` and the iPhone's device name.
 4. Disconnect macOS from the network, wait for a tick → expect a `"status":"failed"` entry with an `"error"` field after reconnect.
@@ -133,7 +133,7 @@ Running, append-only log of manual test scenarios for completed features and bug
 **Summary:** Up to now the deployed sync server (`BlackbookServer.app`) only handled `/logs` + `/backups` + `/heartbeat`. Every `/sync/changes` request from any client returned 400 (missing `X-User-Email`) or 404 (route absent), silently. This change ports the sync handlers from the dead-code `Blackbook/Services/LocalSyncServer.swift` into `BlackbookServer/App/BackupServer.swift`, gives BlackbookServer its own SwiftData `ModelContainer` rooted at `~/Library/Application Support/Blackbook/Server/default.store`, and adds the missing `X-User-Email` header on the iOS and macOS Blackbook clients.
 
 **Setup:**
-- Both apps signed in as `michaelyeack@gmail.com`.
+- Both apps signed in as `owner@example.com`.
 - BlackbookServer.app freshly built from this branch and installed at `/Applications/BlackbookServer.app`.
 - Cloudflare tunnel `cloudflared-libersecretorum` running.
 
@@ -151,7 +151,7 @@ Running, append-only log of manual test scenarios for completed features and bug
 4. Probe with valid password + email header → expect `HTTP 200` and JSON `{"contacts":[],"tags":[],...}` (empty arrays on a fresh store).
 5. On iPhone (new TestFlight build with the client-side X-User-Email change): sign out + back in.
 6. Tail `~/Library/Application Support/Blackbook/Logs/_access/access-YYYY-MM-DD.jsonl` → expect `/sync/changes` rows with `"status":200` (no more 400s).
-7. Tail `~/Library/Application Support/Blackbook/RemoteBackups/michaelyeack_at_gmail_com/Logs/heartbeats-YYYY-MM-DD.jsonl` → expect `"status":"success"` (was `"failed"`).
+7. Tail `~/Library/Application Support/Blackbook/RemoteBackups/owner_at_example_com/Logs/heartbeats-YYYY-MM-DD.jsonl` → expect `"status":"success"` (was `"failed"`).
 8. Next heartbeat reports `"pushPending":0` (15 records pushed through).
 9. macOS Blackbook UI app: relaunch → its launch sync now succeeds, the 15 records pushed from iPhone appear in the UI within 5 minutes.
 
@@ -236,7 +236,7 @@ open /Applications/BlackbookServer.app
 2. Immediately background the app (Home gesture).
 3. Wait 10 seconds, then foreground the app.
 4. Tail server access log: `tail -f ~/Library/Application\ Support/Blackbook/Logs/_access/access-$(date -u +%Y-%m-%d).jsonl`.
-   - **Expected:** within ~1 second of foreground, a `POST /sync/changes` row with `status:200` and `email:michaelyeack@gmail.com`.
+   - **Expected:** within ~1 second of foreground, a `POST /sync/changes` row with `status:200` and `email:owner@example.com`.
 5. To exercise the fast retry: enable Airplane Mode on iPhone, attempt a merge or other edit, watch for `status:"failed"` heartbeat with a network error.
 6. Disable Airplane Mode within 30 seconds.
    - **Expected:** within ~30 seconds of disabling Airplane Mode, a follow-up `POST /sync/changes` with `status:200`. The new heartbeat entry reports `status:"success"` and `pushPending:0`.
@@ -439,16 +439,16 @@ Two changes ship together:
 
 ## 2026-06-02 — Silent sync drift fix: every contact edit now flips syncStatus to pending; iMessage handle lookup ignores merged-away
 
-**Context:** User reported three divergences between iOS and macOS for the same Contact records: (1) Hugo Dooner shows as "Hugo" on iOS but "Hugo Dooner" on macOS, (2) Kail Walker is priority=1 on iOS but priority=0 on macOS, (3) Hugo's recent iMessages don't show on the Hugo Dooner contact detail. Root cause for (1) and (2): 17 edit sites across the iOS/macOS app wrote `contact.updatedAt = Date()` (or just mutated a syncable field) without calling `contact.markLocallyEdited()` to flip `syncStatus` to `.pending`. The next push filters by `syncStatus != .synced`, so silently-edited records never leave the device — server stays stale, the other device pulls the stale version. Audit on the user's macOS store found **643 contacts** with `updatedAt > lastSyncedAt && syncStatus = .synced` — silently-edited but never pushed. Root cause for (3): `BlackbookServer/App/IMessageSyncService.buildHandleLookup` fetched every Contact including merged-away ones, so when a live duplicate and a merged-away version shared a phone/email, the dict-assignment order could pick the merged-away one and attach incoming iMessages to a hidden record. Confirmed on server: 4 Hugo iMessages were attached to merged-away Z_PK 1210, not live Z_PK 313.
+**Context:** User reported three divergences between iOS and macOS for the same Contact records: (1) Contact A shows as "Contact A" on iOS but "Contact A" on macOS, (2) Contact B is priority=1 on iOS but priority=0 on macOS, (3) Contact A's recent iMessages don't show on the Contact A contact detail. Root cause for (1) and (2): 17 edit sites across the iOS/macOS app wrote `contact.updatedAt = Date()` (or just mutated a syncable field) without calling `contact.markLocallyEdited()` to flip `syncStatus` to `.pending`. The next push filters by `syncStatus != .synced`, so silently-edited records never leave the device — server stays stale, the other device pulls the stale version. Audit on the user's macOS store found **643 contacts** with `updatedAt > lastSyncedAt && syncStatus = .synced` — silently-edited but never pushed. Root cause for (3): `BlackbookServer/App/IMessageSyncService.buildHandleLookup` fetched every Contact including merged-away ones, so when a live duplicate and a merged-away version shared a phone/email, the dict-assignment order could pick the merged-away one and attach incoming iMessages to a hidden record. Confirmed on server: 4 Contact A iMessages were attached to merged-away Z_PK 1210, not live Z_PK 313.
 
 Changes:
 1. **17 edit sites updated** to call `markLocallyEdited()` instead of direct `updatedAt = Date()` / unmarked field writes. Files: `ContactDetailView`, `ContactListView`, `ContactFormView`, `AddNoteView`, `LogInteractionView`, `ContactTagPickerView`, `ContactGroupPickerView`, `ContactLocationPickerView`, `DashboardView`, `SettingsView`, `ContactSyncService`, `SocialEnrichmentService`, `ContactMergeService`.
 2. **`IMessageSyncService`** fetches contacts with `#Predicate<Contact> { !$0.isMergedAway && !$0.isHidden }` before building the handle lookup.
 
 Server-side one-time SQL heal applied directly to the master store while the daemon was stopped:
-- `UPDATE ZINTERACTION SET ZCONTACT=313, ZUPDATEDAT=<now> WHERE ZCONTACT=1210;` — relink 4 Hugo iMessages from merged-away Hugo to live Hugo Dooner.
-- `UPDATE ZCONTACT SET ZLASTNAME='Dooner', ZUPDATEDAT=<now> WHERE Z_PK=313;` — restore the last name and force a re-pull.
-- `UPDATE ZCONTACT SET ZUPDATEDAT=<now> WHERE Z_PK=1197;` — bump Kail Walker so macOS adopts the server's `isPriority=1`.
+- `UPDATE ZINTERACTION SET ZCONTACT=313, ZUPDATEDAT=<now> WHERE ZCONTACT=1210;` — relink 4 Contact A iMessages from merged-away Contact A to live Contact A.
+- `UPDATE ZCONTACT SET ZLASTNAME='<last name>', ZUPDATEDAT=<now> WHERE Z_PK=313;` — restore the last name and force a re-pull.
+- `UPDATE ZCONTACT SET ZUPDATEDAT=<now> WHERE Z_PK=1197;` — bump Contact B so macOS adopts the server's `isPriority=1`.
 
 ### Scenario A — single-edit propagation
 1. On either device (build 119+), open any contact, change one field (last name, priority toggle, add tag), save.
@@ -476,7 +476,7 @@ Server-side one-time SQL heal applied directly to the master store while the dae
 
 ### Hotfix (#48)
 - **Import All no longer crashes:** Settings → Import from Contacts → **Import All**. The import completes; the app does not crash and relaunching works (no crash loop).
-- **Recent interactions raise the score:** for a priority contact stuck at 20/"Fading" with recent texts (e.g. Hugo Dooner), after the next sync the score rises above 20 to reflect the recency. Works on whichever tab is visible (recalc runs after each sync pull).
+- **Recent interactions raise the score:** for a priority contact stuck at 20/"Fading" with recent texts (e.g. Contact A), after the next sync the score rises above 20 to reflect the recency. Works on whichever tab is visible (recalc runs after each sync pull).
 
 ### Suggested records (#49)
 - Open a contact → **Introduced to** (or **Met via**) edit. With the search box empty, a **Suggested** section shows 3 contacts that share tags/groups/locations with the subject; the rest appear under **All Contacts**. Typing switches to a plain filtered search.
@@ -498,3 +498,56 @@ Server-side one-time SQL heal applied directly to the master store while the dae
 ### Notes / required steps
 - iOS Simulator couldn't run in the dev env (CoreSimulator drift); suite run on the macOS destination (232 tests green) — CI runs the iOS path.
 - **After #50 merges:** rebuild + reinstall `/Applications/BlackbookServer.app` (Release) so the server relays `appNotifications`. The new `AppNotification` schema is additive (no store wipe).
+
+---
+
+## 2026-10-14 — Yeackbot foundation: TS monorepo, collector API, legacy migration dry-run, iMessage ingest, web shell
+
+**Summary:** First slice of the agentic rebuild (`docs/design/PLAN.md`). The old public sync tunnel is disabled. Yeackbot
+now has: a Node/Express server with the full schema, an undo journal, a scheduler and Cloudflare Access auth; the Swift
+collector (inside the BlackbookServer target) serving a loopback API that decodes `attributedBody`; a legacy SwiftData
+migration; iMessage ingest; and a PWA shell (People / Person / Sources / Today / Settings → Hidden).
+
+**Setup:** Node 25, `npm install` at the repo root. The collector's SwiftPM tests and dev runner need only the Command Line
+Tools. The app build needs Xcode.
+
+### Scenario A — Automated suites
+1. `npm run typecheck && npm test` → 32 files / 282 tests pass (also passes with `npx vitest run --sequence.shuffle`).
+2. `npm run lint:pii` → "files clean" (the repo is public; any real phone/email/name in a tracked file fails).
+3. `collector/run-tests.sh` → 64 Swift tests pass (synthetic chat.db built from the real schema).
+4. `node scripts/build-server.mjs && npm run build -w packages/web` → both bundles build.
+
+### Scenario B — Public endpoint closed (Day 0)
+1. `curl -sI https://sync.libersecretorum.com` → HTTP 530 (no origin).
+2. `launchctl print-disabled gui/$(id -u) | grep libersecretorum` → `disabled`.
+
+### Scenario C — Real chat.db decode (aggregates only)
+1. `cd collector && swift run yb-collector-verify` → last-90-day non-reaction messages: ≥99% of text-bearing rows decoded
+   (measured 99.92%). `group_sends_from_me` equals the raw SQL count of `handle_id=0` group sends.
+
+### Scenario D — End-to-end iMessage ingest into a scratch DB (no install)
+1. `YB_DATA_DIR=<scratch> swift run yb-collector-dev` (from `collector/`). It listens on 127.0.0.1:4321 and writes a 0600 token.
+2. `NODE_ENV=development YB_DATA_DIR=<scratch> PORT=4398 DEV_AUTH_BYPASS=1 node packages/server/dist/index.js`.
+3. Within ~30 s, `messages` ≈ chat.db non-reaction rows (within 0.5%; measured +0.17%). `message_reactions` ≈ chat.db
+   add-tapbacks (measured 13,628 / 13,670; the rest are parked in `pending_reactions` because their target never synced).
+   Replies are linked (2,721 / 2,730). Zero error logs.
+4. Stop both processes **by PID** and delete the scratch dir, which holds real message text.
+- **Edge:** a tapback that syncs before its target (iCloud out-of-order rowids) waits in `pending_reactions` and attaches
+  when the target arrives. Unresolved ones expire after 30 days in the nightly pass.
+- **Edge:** with the collector down, `imessage-tail` logs `collector_unavailable` and retries. Nothing crashes.
+
+### Scenario E — Legacy migration dry-run (counts only)
+1. Server stopped → `npm run yb -- migrate-legacy --dry-run` → report shows every equation OK (people = ZCONTACT, merged
+   649 = 654 − 5 orphans, tags/circles/locations links minus dupes) and a second pass inserts 0 rows. No names or handles
+   appear in the output.
+
+### Scenario F — Web shell + Access (local, dev bypass)
+1. Run the scratch server as in D → open `http://127.0.0.1:4398/people`: sorted by last name A–Z, search works, and a hidden
+   person never appears (only under Settings → Hidden, with Unhide).
+2. A request carrying a `Cf-Ray` header gets 403 under dev bypass (tunnel traffic can never use the bypass).
+3. `curl http://127.0.0.1:4398/healthz` → `{"ok":true}` only.
+
+### Platforms / not yet verified
+- No Xcode on the Mac mini (CLT only), so the BlackbookServer app build, `xcodebuild test` and the macOS Blackbook build
+  were not run locally. The new CI `collector` job covers them.
+- Not exercised: real iMessage send / note-to-self (spike a), Cloudflare tunnel + Access (spike c), iOS PWA push (spike g).
