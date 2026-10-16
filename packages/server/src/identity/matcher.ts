@@ -9,7 +9,8 @@
  *                       evidence (bits, families, counts; never handles or names), so undo splits the pair and writes
  *                       do_not_merge, which G3 then respects on every later night.
  *   possible_duplicate  0.70 ≤ p < 0.98, or p ≥ 0.98 without enough families: kept apart, stored in
- *                       match_candidates for the (future) LLM tie-break and the person page's one-tap merge.
+ *                       match_candidates for the LLM tie-break (identity/tiebreak.ts, 02:50: p ≥ 0.85 with ≥2
+ *                       families only) and the person page's one-tap merge.
  *   blocked             in band but a guard fails (a vetoed pair whose score without the veto is in band too).
  *   separate            below the band: no action (an earlier candidate row is closed).
  * A 'dismissed' candidate (the user said "not the same") is never merged and keeps its status.

@@ -2,75 +2,33 @@ import { useEffect } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { isApiError } from '../../api/client';
 import { usePerson } from '../../api/hooks';
-import type { PersonDetail } from '../../api/types';
-import { Avatar } from '../../components/Avatar';
 import { Empty, PageState } from '../../components/PageState';
-import { PersonLink, personPath } from '../../components/PersonLink';
-import { relativeDay, roleLine } from '../../lib/format';
-import { stateLabel } from '../../lib/labels';
+import { personPath } from '../../components/PersonLink';
+import { useTies } from './api';
+import { personTab, type PersonTab } from './logic';
+import { PersonHeader } from './Header';
+import { PersonConnections } from './PersonConnections';
 import { PersonOverview } from './PersonOverview';
 import { PersonTimeline } from './PersonTimeline';
+import './person.css';
 
-type Tab = 'overview' | 'timeline';
-
-function cadenceLine(p: PersonDetail): string | null {
-  const s = p.stats;
-  if (!s) return null;
-  const parts: string[] = [];
-  if (s.expectedGapD != null && s.expectedGapD > 0) parts.push(`usually every ~${Math.max(1, Math.round(s.expectedGapD))}d`);
-  if (s.lastAt != null) parts.push(`last ${relativeDay(s.lastAt)}`);
-  return parts.length ? parts.join(' · ') : null;
-}
-
-function PersonHeader({ p }: { p: PersonDetail }) {
-  const role = roleLine(p.jobTitle, p.company);
-  const cadence = cadenceLine(p);
-  return (
-    <div className="person-header">
-      <PersonLink id={p.id} title={p.displayName}>
-        <Avatar id={p.id} name={p.displayName} size={64} />
-      </PersonLink>
-      <div className="ph-text">
-        <h1>
-          {p.displayName}
-          {p.isPriority && (
-            <span className="star" aria-label="Priority">
-              {' '}
-              ★
-            </span>
-          )}
-          {p.status === 'provisional' && <span className="pill pill-accent new-badge">New</span>}
-        </h1>
-        {p.nickname && <div className="ph-line">“{p.nickname}”</div>}
-        {role && <div className="ph-line">{role}</div>}
-        {p.locations.length > 0 && <div className="ph-line">{p.locations.join(' · ')}</div>}
-        {(cadence || p.stats?.state) && (
-          <div className="ph-line">
-            {p.stats?.state && (
-              <>
-                <span className={`state-dot ${p.stats.state}`} style={{ display: 'inline-block', marginRight: 6 }} />
-                {stateLabel(p.stats.state)}
-                {cadence ? ' · ' : ''}
-              </>
-            )}
-            {cadence}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+const TABS: { id: PersonTab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'connections', label: 'Connections' },
+];
 
 export function PersonPage() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab: Tab = params.get('tab') === 'timeline' ? 'timeline' : 'overview';
+  const tab = personTab(params);
   const navigate = useNavigate();
   const location = useLocation();
   const person = usePerson(id);
+  const resolvedId = person.data?.id ?? '';
+  const ties = useTies(resolvedId && resolvedId === id ? resolvedId : '');
 
   // A merged-away id resolves to the survivor: move the URL there.
-  const resolvedId = person.data?.id;
   useEffect(() => {
     if (resolvedId && resolvedId !== id) void navigate(personPath(resolvedId) + location.search, { replace: true });
   }, [resolvedId, id, navigate, location.search]);
@@ -89,10 +47,14 @@ export function PersonPage() {
   }
 
   const p = person.data;
-  const setTab = (t: Tab) =>
+  const setTab = (t: PersonTab) =>
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
+        if (t !== 'timeline') {
+          next.delete('m');
+          next.delete('at');
+        }
         if (t === 'overview') next.delete('tab');
         else next.set('tab', t);
         return next;
@@ -102,19 +64,15 @@ export function PersonPage() {
 
   return (
     <>
-      <PersonHeader p={p} />
+      <PersonHeader p={p} ties={ties.data ?? null} />
       <div className="segmented" role="tablist" aria-label="Person sections">
-        <button type="button" role="tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')}>
-          Overview
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'timeline'} onClick={() => setTab('timeline')}>
-          Timeline
-        </button>
-        <button type="button" role="tab" aria-selected={false} disabled title="Coming with relationship inference">
-          Connections
-        </button>
+        {TABS.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
       </div>
-      {tab === 'overview' ? <PersonOverview p={p} /> : <PersonTimeline p={p} />}
+      {tab === 'overview' ? <PersonOverview p={p} /> : tab === 'timeline' ? <PersonTimeline p={p} /> : <PersonConnections p={p} />}
     </>
   );
 }

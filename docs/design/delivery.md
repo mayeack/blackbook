@@ -2,6 +2,8 @@
 
 # Yeackbot delivery plan, UX and risk
 
+> **Model update (2026-10-16, owner):** every LLM call now runs on **Claude Haiku 5.5** (`low` effort, thinking off except the Ask tool loop) through the route table in `packages/server/src/llm/models.ts`; see PLAN.md "Models, cost and caching". Haiku has no server-side refusal fallback, so refusals are recorded and skipped (only a route overridden to Sonnet 5.5 sends `fallbacks` and re-runs a refused batch item). Mentions of Opus 5.5, its prices, effort `medium` or `fallbacks` on every synchronous call below are superseded.
+
 ## What I checked on this Mac today
 
 These findings change the plan.
@@ -64,7 +66,7 @@ Spikes run in the order below.
 | e | **WhatsApp for Mac schema** | Helper `POST /v1/whatsapp/snapshot` copies `ChatStorage`, `ContactsV2` and `LID.sqlite` with their `-wal` files (never `-shm`) to `…/Yeackbot/snapshots/wa/<ts>/` with 0600 permissions, then runs `wal_checkpoint(TRUNCATE)` on the copy. Run `PRAGMA table_info` on ZWAMESSAGE, ZWACHATSESSION, ZWAGROUPMEMBER, ZWAPROFILEPUSHNAME, ZWAZACCOUNT and ZWAADDRESSBOOKCONTACT. Print aggregates only. | Expected columns exist. ≥95% of group-member `@lid` IDs map to a phone. History reaches at least 3 months back. | Adjust the queries. If history is shallow, plan the optional iPhone-backup backfill. |
 | d | **Beeper Instagram history depth** | Check at +24 h and +72 h after connecting: `/v1/accounts` status; `/v1/chats` count by type; per-chat oldest timestamp; share of participants with a username. Compare with the DYI thread count when the export arrives. | ≥80% of threads active in the last 90 days are present with their full 90 days. Group participants carry IG IDs. No checkpoint. | DYI becomes a monthly reconciliation. If Beeper is unusable, Instagram is DYI-only and stale by design. |
 | f | **Partiful token and one read** | He pastes the refresh token into `npm run setup:partiful` (stored in Keychain). The probe refreshes via securetoken with `Referer: https://partiful.com/`, then calls the home-page upcoming and past lists, `getGuests` for one past event, and `getContacts` page 1. It prints counts and key shapes only. | All return 200. Guest lists include `userId`. Some `socials.instagram` values present. | Parse Partiful texts in chat.db, plus the `.ics` feed. No guest lists in that case. |
-| h | **Anthropic batch smoke test** (added) | One Message Batch with 3 requests: `claude-opus-5-5`, `effort:"low"`, `output_config.format` from Zod, beta header `server-side-fallback-2026-07-01`, `fallbacks:"default"`, 1-hour cached system prompt. | Schema-valid output. `cache_read_input_tokens` > 0 on requests 2–3. `stop_reason` handled. Cost recorded. | Drop the fallback header from batch requests if it is rejected there, and keep it for interactive calls. |
+| h | **Anthropic batch smoke test** (added) | One Message Batch with 3 requests: Haiku 5.5 (route table), `effort:"low"`, thinking disabled, `output_config.format` from Zod, no `fallbacks`, 1-hour cached system prompt. | Schema-valid output. `cache_read_input_tokens` > 0 on requests 2–3. `stop_reason` handled. Cost recorded. | Drop the fallback header from batch requests if it is rejected there, and keep it for interactive calls. |
 
 **Exit:** each spike is recorded as pass or fail, with the fallback chosen, in `docs/yeackbot/SPIKES.md`. Any fallback that changes one of his decisions (bot Apple ID, or the passkey instead of Access) is put to him before Phase 1.
 
@@ -217,7 +219,7 @@ curl -s -H "Authorization: Bearer $(cat ~/Library/Application\ Support/Yeackbot/
 
 **Scope:**
 - **Pseudonymizer:** replace known handles exactly from the identity table, plus regex for unknown phones and emails. URLs become their domain. OTP, short-code and business messages are dropped. Per-person and per-chat exclusion list. A **pre-send scanner fails the batch** if a raw E.164 number or email remains.
-- **Extraction:** nightly Opus 5.5 batch at effort low, with a byte-stable 1-hour cached prefix. Output is ADD/UPDATE/INVALIDATE/NOOP deltas. Each fact must quote its cited message verbatim, or it is rejected.
+- **Extraction:** nightly Haiku 5.5 batch at effort low, with a byte-stable 1-hour cached prefix. Output is ADD/UPDATE/INVALIDATE/NOOP deltas. Each fact must quote its cited message verbatim, or it is rejected.
 - **Interests:** auto-applied at confidence ≥0.85 with ≥2 supporting messages. `sensitive=true` facts are never rendered in iMessage or push.
 - **Commitments:** auto-close when a later interaction, a calendar event or an RSVP matches.
 - **Reply debt v2:** an LLM `needs_reply` check on the deterministic candidates.
@@ -536,7 +538,7 @@ L = likelihood, I = impact.
 - Messenger, Signal and other Beeper networks.
 - Splink: a TypeScript scorer is enough at this scale.
 - Presidio: the identity table plus regex has better recall here.
-- A multi-model cascade or Apple on-device triage: Opus at effort low throughout.
+- A multi-model cascade or Apple on-device triage: Haiku 5.5 at effort low throughout (one route can move to Sonnet 5.5 if the eval demands it).
 - Offline data caching in the PWA: the shell only.
 - Real-time WebSocket and file-system watchers: nightly runs plus the 10 s self-thread poll.
 - Attachments and media.

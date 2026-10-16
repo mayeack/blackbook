@@ -113,6 +113,13 @@ export function EventPage() {
     <>
       <p style={{ margin: '0 0 8px' }}>{back}</p>
       <Header o={o} />
+      {!o.sensitive && (o.kind === 'social' || o.kind == null || o.kind === 'unknown') && o.attendees.some((a) => a.personId) && (
+        <p className="caption" style={{ margin: '0 0 12px' }}>
+          <Link to={`/e/${encodeURIComponent(o.id)}/brief`} className="btn btn-sm">
+            Brief: who you know, what’s open
+          </Link>
+        </p>
+      )}
       {(o.url || o.calendars.length > 0) && (
         <div className="card source-card">
           <dl>

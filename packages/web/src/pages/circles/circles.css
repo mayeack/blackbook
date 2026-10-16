@@ -1,0 +1,171 @@
+/* Circles / Tags / Locations: lists, detail, member rows, people picker. */
+
+.coll-icon {
+  display: inline-flex;
+  flex: none;
+}
+.coll-icon .icon-tile {
+  font-size: 17px;
+  font-weight: 600;
+}
+.coll-icon.colored .icon-tile {
+  background: color-mix(in srgb, var(--coll-color) 22%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--coll-color) 45%, transparent);
+  color: var(--text-primary);
+}
+.badge.badge-auto {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: transparent;
+  text-transform: lowercase;
+}
+.entity-row .count {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------- Detail */
+.coll-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 10px 0 14px;
+  min-width: 0;
+}
+.coll-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.coll-head-text h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.coll-head-text .ph-line {
+  color: var(--text-secondary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.facet-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.facet-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.facet-title {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding-top: 7px;
+}
+.facet-row .filter-chips {
+  margin-bottom: 6px;
+}
+
+/* A member row: the person part is a link, the trailing button sits outside it. */
+.member-row {
+  padding: 0 14px 0 0;
+}
+.member-row .member-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 0 8px 14px;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-m);
+}
+.member-row .member-link:hover {
+  background: var(--surface-hover);
+}
+.member-row .er-text {
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- People picker */
+.chips.picked {
+  margin-top: 8px;
+}
+.chips.picked .chip {
+  cursor: pointer;
+}
+.pick-list.people {
+  max-height: min(52dvh, 460px);
+  overflow-y: auto;
+}
+.pick-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.pick-person:first-child {
+  border-top: 0;
+}
+.pick-person > a {
+  flex: none;
+  display: inline-flex;
+  text-decoration: none;
+}
+.pick-person-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.pick-person-btn:hover {
+  background: var(--surface-hover);
+}
+.pick-person-btn .er-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pick-person-btn .er-title {
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.pick-person-btn .er-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.pick-check {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+.pick-check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.pick-person.on .pick-person-btn {
+  background: var(--accent-soft);
+}

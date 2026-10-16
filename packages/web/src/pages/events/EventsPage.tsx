@@ -79,7 +79,14 @@ export function EventsPage() {
 
   return (
     <>
-      <PageHeader title="Events" sub="Get-togethers from Partiful and your calendar, and who was there." />
+      <PageHeader
+        title="Events"
+        sub={
+          <>
+            Get-togethers from Partiful and your calendar, and who was there. <Link to="/trips">Trips →</Link>
+          </>
+        }
+      />
       <div className="segmented" role="tablist" aria-label="When">
         {TABS.map((t) => (
           <button key={t.value} type="button" role="tab" aria-selected={when === t.value} onClick={() => setWhen(t.value)}>

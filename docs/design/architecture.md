@@ -2,6 +2,8 @@
 
 # Yeackbot system architecture and reliability spec
 
+> **Model update (2026-10-16, owner):** every LLM call now runs on **Claude Haiku 5.5** (`low` effort, thinking off except the Ask tool loop) through the route table in `packages/server/src/llm/models.ts`; see PLAN.md "Models, cost and caching". Haiku has no server-side refusal fallback, so refusals are recorded and skipped (only a route overridden to Sonnet 5.5 sends `fallbacks` and re-runs a refused batch item). Mentions of Opus 5.5, its prices, effort `medium` or `fallbacks` on every synchronous call below are superseded.
+
 ## 0. Constraints found during design
 
 These change some of the brief's details. None of the user's decisions change.
@@ -157,7 +159,7 @@ pipeline/  nightly.ts (stage machine) sessionize.ts signals.ts edges.ts scoring.
            candidates/{fading,replyDebt,commitments,eventFollowup,preEvent,travel,intros}.ts ranker.ts digest.ts
 agent/     commandParser.ts (deterministic grammar → LLM intent fallback) commandHandlers.ts ask.ts (FTS+facts+graph, cited)
 delivery/  imessageOut.ts (outbound ledger, marker, loop guard) webPush.ts (web-push, VAPID)
-llm/       client.ts (@anthropic-ai/sdk; model claude-opus-5-5) batches.ts parse.ts budget.ts (daily $ cap) prices.ts
+llm/       client.ts (@anthropic-ai/sdk) models.ts (route table: Haiku 5.5, prices) batches.ts ledger.ts (daily $ cap) caching.ts
 scheduler/ scheduler.ts registry.ts
 ops/       logger.ts (PII-safe JSONL) redact.ts health.ts alerts.ts
 ```
@@ -178,7 +180,7 @@ ops/       logger.ts (PII-safe JSONL) redact.ts health.ts alerts.ts
 | `whatsapp` | 60 min (skipped if the snapshot is unchanged) | Snapshot, schema guard, ingest by `Z_PK` watermark. If `MAX(Z_PK)` went down, run a full upsert pass (the device was re-linked). |
 | `addressbook` | 60 min and at boot | Diff the full dump. Upsert identities. Fill only unlocked name fields. |
 | `calendar` | 60 min | Window from −1 to +60 days → `events(kind=calendar)` and `trips`. |
-| `pre-event-brief` | 15 min | Events starting in 2–4 hours with no brief yet → one synchronous Opus call → suggestion plus push. |
+| `pre-event-brief` | 15 min | Events starting in 2–4 hours with no brief yet → one synchronous LLM call → suggestion plus push. |
 | `partiful` | daily 02:30 | Token refresh (with `Referer` header), RSVPs, home-page lists, published events, `getGuests` for new or changed events or those within ±14 days, `getUsers` for new ids. Contract check. |
 | `backup` | daily 02:45 (checked hourly) | `VACUUM INTO`, prune. Doubles as the restore point taken before the nightly run. |
 | `nightly` | daily 03:00 | The stage machine (below), up to batch submit. |
@@ -205,7 +207,7 @@ ops/       logger.ts (PII-safe JSONL) redact.ts health.ts alerts.ts
 7. Re-run refusals, errored items and max_tokens cut-offs synchronously (constraint 1). Expired items go back into the next night's queue.
 8. Score, in a worker.
 9. Generate candidates and rank: diversity, cooldown, cap of 3–5.
-10. Compose: one synchronous Opus call writes the copy and openers (drafts only). If it fails, use a template.
+10. Compose: one synchronous Haiku call writes the copy and openers (drafts only). If it fails, use a template.
 
 **LLM budget guard.** `llm/budget.ts` adds up cost from `usage` using a price table. If the daily cap (default $5) is exceeded, skip extraction and keep the template digest.
 

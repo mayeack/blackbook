@@ -2,7 +2,9 @@
 
 # yeackbot intelligence pipeline spec (identity, graph, ties, extraction, features, chat, ask, evals)
 
-Correction to the brief first. Server-side refusal fallbacks (`fallbacks:"default"` with beta `server-side-fallback-2026-07-01`) are rejected by the Message Batches API. Batch extraction requests must therefore be sent without `fallbacks`. When a batch result comes back with `stop_reason:"refusal"`, that one window is re-run on the synchronous API with fallbacks turned on (§4.7). The fallback parameter is used only on synchronous calls: digest, ask, intent parsing and identity tie-breaks.
+> **Model update (2026-10-16, owner):** every LLM call now runs on **Claude Haiku 5.5** (`low` effort, thinking off except the Ask tool loop) through the route table in `packages/server/src/llm/models.ts`; see PLAN.md "Models, cost and caching". Haiku has no server-side refusal fallback, so refusals are recorded and skipped (only a route overridden to Sonnet 5.5 sends `fallbacks` and re-runs a refused batch item). Mentions of Opus 5.5, its prices, effort `medium` or `fallbacks` on every synchronous call below are superseded.
+
+Correction to the brief first. Server-side refusal fallbacks (`fallbacks:"default"` with beta `server-side-fallback-2026-07-01`) are rejected by the Message Batches API, so batch requests are sent without `fallbacks`. Claude Haiku 5.5 (the model every route now uses) has no server-side fallback at all: a refusal is recorded and the item skipped (§4.7). Only a route the owner overrides to Sonnet 5.5 sends `fallbacks` on synchronous calls.
 
 ---
 
@@ -30,7 +32,7 @@ Correction to the brief first. Server-side refusal fallbacks (`fallbacks:"defaul
 | hourly | Recompute reply-debt candidates; auto-close commitments and debts |
 | 02:00 | Partiful sync; AddressBook sync; Calendar pull (21 days ahead) |
 | 02:30 | Nightly run: 24–48h overlap re-read → identity resolution (probabilistic + tie-break) → sessionize → windows → submit extraction batch → poll → validate/apply → graph → ties → circles (weekly, Sun) → candidates → ranker |
-| 07:30 | Digest compose (sync Opus call) |
+| 07:30 | Digest compose (sync Haiku call) |
 | 08:00 (configurable) | Send iMessage digest + Web Push |
 
 **Intelligence-layer tables.** Every write by the agent goes through `journal.apply(run_id, actor, kind, target, before_json, after_json)` so it can be undone.
@@ -150,7 +152,7 @@ Worked examples:
 - **G7.** A priority or hidden person never absorbs into another probabilistically. The other person is merged *into* it; this keeps priority and hidden semantics intact.
 
 ### 1.7 LLM tie-break (synchronous; about 5/night steady, about 200 once at backfill)
-- **Call:** `claude-opus-5-5`, `output_config:{effort:"low", format}`, `betas:["server-side-fallback-2026-07-01"], fallbacks:"default"`, max_tokens 4000. Thinking is omitted (adaptive).
+- **Call:** route `tiebreak` (Haiku 5.5), `output_config:{effort:"low", format}`, `thinking:{type:"disabled"}`, max_tokens 1000, no `fallbacks`.
 - **Evidence packet per side** (pseudonymized; area code kept as a geo hint):
   - names and aliases with descriptors
   - identity kinds (e.g. "US phone, area 512", "IG username jakemiller92"); IG usernames are sent because they are needed and are public handles
@@ -387,11 +389,13 @@ export const Extraction = z.object({
 ### 4.7 stop_reason handling
 - `end_turn`: normal.
 - `max_tokens`: re-queue once with max_tokens ×2. If it happens again, split the window at its largest internal gap.
-- `refusal`: record `stop_details.category`, then re-run that window synchronously with `fallbacks:"default"` (beta `server-side-fallback-2026-07-01`). Detect who served it via the `fallback_message` entry in `usage.iterations`. If it still refuses, mark the window `refused`, advance the watermark (deterministic signals still apply), and count it. Target refusal rate <0.5%.
+- `refusal`: record `stop_details.category`, mark the window `refused`, advance the watermark (deterministic signals still apply), and count it — Haiku 5.5 has no server-side fallback, so nothing is re-sent. (Only on a route overridden to Sonnet 5.5, and only for a `cyber` or `frontier_llm` decline — the categories server-side fallback retries — is the window re-run once synchronously with `fallbacks:"default"`; who served it is in `usage.iterations`.) Target refusal rate <0.5%.
 - Always check `stop_reason` before parsing content.
 
-### 4.8 Cost (Opus 5.5 batch: $2/M input, $10/M output, $0.10/M cache read, $4/M 1h cache write)
-Formula: `$ ≈ 2·uncachedIn_M + 0.10·cachedIn_M + 10·out_M`. Output, including low-effort thinking of about 300–500 tokens, dominates. Assumptions: 28 tokens per compact message, 75% kept after triage, about 600 tokens of overhead per window, about 800 output tokens per window.
+### 4.8 Cost (Haiku 5.5 batch: $0.05/M input, $0.25/M output, $0.005/M cache read, $0.10/M 1h cache write; prompts ≤100K tokens)
+Formula: `$ ≈ 0.05·uncachedIn_M + 0.005·cachedIn_M + 0.25·out_M` (thinking is off, so output is the JSON alone). With the same volumes as the Opus-era table below, the one-time backfill is ≈ $1.5 (range $1–5) and steady state ≈ $0.05/day (~$1.5/month); budgets are $20 backfill, $1/day, $10/month. The table below is the original Opus 5.5 estimate (≈20–40× higher), kept for reference.
+
+Original assumptions: 28 tokens per compact message, 75% kept after triage, about 600 tokens of overhead per window, about 800 output tokens per window.
 
 | Workload | Windows | Uncached in | Cached in | Out | Cost |
 |---|---|---|---|---|---|
@@ -476,8 +480,8 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 - `snooze N 2w` → `snoozed_until`
 - 3 dismissals of `fading` for one person → mute for 90 days
 
-### Digest composer (one synchronous Opus call, 07:30)
-- **Call:** `effort:"medium"`, fallbacks default, structured output `{items:[{n, headline, body, openers: string[], cites: string[]}]}`. Limits enforced in code: headline ≤90 chars, body ≤240 chars, openers ≤2 each ≤160 chars.
+### Digest composer (one synchronous call, 07:30)
+- **Call:** route `digest_compose` (Haiku 5.5, `effort:"low"`, thinking off, no fallbacks), structured output `{items:[{n, headline, body, openers: string[], cites: string[]}]}`. Limits enforced in code: headline ≤90 chars, body ≤240 chars, openers ≤2 each ≤160 chars.
 - **Input per item:** first name, tie stats as text, ≤5 facts (with ids), ≤3 quotes (with msg ids), open commitments and debts.
 - **Grounding validator:**
   - `cites` ⊆ packet ids, and every opener cites ≥1 id.
@@ -569,7 +573,7 @@ pause  := pause dur? | resume | status | help | more
 - An inline reply (`thread_originator_guid`) binds to that specific digest.
 - A 👍 tapback (2001) on a digest applies `done` only if the digest has exactly 1 open item; otherwise the bot replies asking for numbers.
 
-**Intent parser** for `log:` and unparsed text. Sync Opus call, effort low, fallbacks default. Candidate people come from local fuzzy search (top 8 by name × recency, passed as tokens). Output:
+**Intent parser** for `log:` and unparsed text. Sync call on route `intent` (Haiku 5.5, effort low, thinking off). Candidate people come from local fuzzy search (top 8 by name × recency, passed as tokens). Output:
 ```ts
 { intent: "log_interaction"|"add_fact"|"question"|"command"|"note"|"unknown",
   command: {verb, nums: number[], dur: string|null} | null,
@@ -595,7 +599,7 @@ pause  := pause dur? | resume | status | help | more
 - Ranking: BM25, then × (0.5 + T/200) for people.
 - Later: ollama embeddings (e.g. nomic-embed-text) in sqlite-vec over facts and session summaries, combined with BM25 via reciprocal-rank fusion.
 
-**Tools** (all read-only, `strict:true`, `tool_choice:auto`; forced tool choice returns a 400 on Opus 5.5):
+**Tools** (all read-only, `strict:true`, `tool_choice:auto`, so the model can think before a call):
 - `search_people({query?, city?, near_km?, circle?, interest?, employer?, min_strength?, limit≤20})` → `[{ref, name, strength, last_contact, city, top_facts[3]{id,value}, circles}]`
 - `search_messages({query, person_ref?, conv_id?, after?, before?, limit≤20})` → `[{id:"m:…", ts, conv, sender_ref, snippet≤240}]`
 - `search_facts({query, cat?, limit≤30})` → `[{id:"F…", person_ref, cat, value, valid_from, valid_to}]`
@@ -604,10 +608,10 @@ pause  := pause dur? | resume | status | help | more
 - `list_events({after?, before?, person_ref?, query?})` → `[{id:"E…", title, start, city, attendee_refs}]`
 
 **Loop:**
-- Opus 5.5, adaptive thinking.
-- Effort `medium` on the web, `low` for iMessage.
+- Haiku 5.5, adaptive thinking (routes `ask_web` / `ask_imessage`).
+- Effort `low` on both channels (same cached prefix).
 - ≤8 tool calls, ≤60k input tokens; parallel calls encouraged.
-- Append-only history: echo `response.content` unchanged, because Opus 5.5 enforces preserved thinking.
+- Append-only history: echo `response.content` unchanged (preserved thinking; edits would also break the cache).
 - Stable system prompt with a 5-minute cache.
 - Tool results are wrapped and labelled untrusted. There are no write tools, so a successful injection can only affect the answer text.
 

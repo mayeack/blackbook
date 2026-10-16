@@ -36,7 +36,7 @@ Michael wants an agentic rebuild that does the work for him:
 | Partiful | **Unofficial API**: daily, read-only, with a stored refresh token. Plus **Partiful texts parsed from chat.db**. |
 | Google Calendar | **Google Calendar API** (OAuth, read-only, incremental sync). Infers attendees and cross-references with messages. |
 | Digest sender | **His own Apple ID → himself** (silent note-to-self thread, accepted), plus a **Web Push ping** from the installed PWA. |
-| LLM | **Claude Opus 5.5** (`claude-opus-5-5`). Nightly Message Batches at effort `low`. Identifiers are pseudonymized before anything leaves the Mac. |
+| LLM | **Claude Haiku 5.5** on every route (owner, 2026-10-16: cheapest model first, maximize caching). Effort `low`, nightly work in Message Batches (50% off), byte-stable prompts cached. A route moves to Sonnet 5.5 only if the eval says Haiku isn't good enough; Opus is not selectable. Identifiers are pseudonymized before anything leaves the Mac. |
 | UI | **Agent-first core**: Today, People/Person, Ask, Network, Circles/Tags/Locations, Events, Sources, Settings. |
 | Features | Core (contacts, dedup, accounts, interactions, interests, relationships, cadence-aware fading); **reply debt & commitments**; **two-way texting**; **event & travel intel**; **ask your network**; **auto circles + intros**; **conversation starters**; **push ping**; **self-learning + wildcards**. Not built: life-event and birthday detection. |
 | Old server | **Close `sync.libersecretorum.com` on Day 0.** Native apps stop syncing; the data stays intact. |
@@ -285,7 +285,25 @@ Spec: intelligence §3; this replaces `RelationshipScoreEngine`.
 
 **Until WhatsApp and Instagram ingest are live**, fading is suppressed for anyone with a known WA or IG identity.
 
-### LLM extraction (nightly Opus 5.5 batch)
+### Models, cost and caching (all LLM calls)
+**Route table** (`packages/server/src/llm/models.ts`, the only file that names a model id; a test fails on any other). Every call names a route; the client takes model, effort, thinking, max_tokens and cache TTL from it:
+
+| Route | Mode | Thinking | max_tokens | Cache TTL |
+|---|---|---|---|---|
+| `extract_steady` / `extract_historical` / `extract_consolidate` | batch | off | 4k / 8k / 4k | 1 h |
+| `adjudicate` (calendar attendees) | batch | off | 2k | 1 h |
+| `tiebreak`, `circle_name`, `draft_openers` | sync | off | 0.6k–1k | 5 min |
+| `intent`, `digest_compose` (sporadic / once a day) | sync | off | 1k / 3k | none (no marker) |
+| `ask_web`, `ask_imessage` (tool loop) | sync | adaptive | 4k / 2.5k | 5 min |
+| `eval_shadow` | sync | off | 8k | 5 min |
+
+- All default to `claude-haiku-5-5` at effort `low`. `llm.route_overrides` (Settings) may move one route to Sonnet 5.5 or another effort; anything else (Opus included) is rejected.
+- Haiku 5.5 rules: thinking `{type:"disabled"}` on structured-output routes (the Ask loop keeps adaptive thinking: with it off the model can skip a needed tool call); no `temperature`/`top_p`/`top_k`, no assistant prefill; **no `fallbacks`** (Haiku has no server-side fallback) — a refusal is recorded and skipped, never escalated.
+- **Prices** (per MTok): Haiku $0.10 in / $0.50 out while the prompt is ≤100K tokens, $0.50 / $2.50 above → every prompt is kept ≤100K (client guard; windows that would exceed are split). Size estimates count ASCII at 3 chars/token and every other code point as at least one token (CJK/emoji can't slip through on a character count); the Ask loop also sizes each next request from the previous request's actual usage and replaces tool results that would cross 100K with the budget note; a response whose real prompt still exceeded 100K logs `llm_prompt_over_limit`. Cache reads 0.1×, 5-min writes 1.25×, 1-h writes 2×; Batches 50% off. Cost per request is computed from usage incl. cache reads/writes. Batch pre-flight estimates assume 25% of items miss the cached prefix (in-batch cache hits are best-effort), so budget gates don't under-commit.
+- **Caching**: tools → system (byte-stable, no dates/ids, sorted tool list) carry the breakpoint; volatile content goes in the user turn. Batch routes use the 1 h TTL (items of a batch run minutes to hours apart); a sync call on a batch route (on-demand consolidation, a refusal re-run) writes at 5 min; sync routes use 5 min (their calls are back-to-back); `digest_compose` and `intent` send no marker (never re-read within a TTL, so a write would be pure premium). Thinking/effort are constant per route. Ask: tools + system cached plus the moving breakpoint on the last user message, append-only history. Batches are grouped by route so items share the prefix; the shadow replay warms the cache with one request before going parallel. Prefixes under 512 tokens (tie-break, circle naming, drafts) silently don't cache — padding them would cost more than it saves at their volume.
+- `cache_read_input_tokens` / `cache_creation_input_tokens` are stored per request; Sources shows spend and the 7-day cache hit rate.
+
+### LLM extraction (nightly Haiku 5.5 batch)
 Spec: intelligence §4.
 
 **One egress choke point** (`llm/egress.ts`). Every Claude call goes through it: batch, tie-break, composer, Ask tools, intent parser, circle naming, calendar adjudication.
@@ -295,7 +313,7 @@ Spec: intelligence §4.
 
 **Windows**
 - Line format `[m:id|ts|P17→ME] text`.
-- Each window: NEW messages, a 15-message CONTEXT, a rolling summary of ≤300 tokens, ≤8 people cards, ≤10 mentionables.
+- Each window: NEW messages (steady ≤4k tokens), a 10-message CONTEXT (~500 tokens), a rolling summary of ≤800 characters (~200 tokens), ≤8 people cards, ≤6 mentionables; message lines cut at 700 characters; attachments and links as tokens only. At most 600 new steady windows a run.
 - Deterministic triage first drops windows that are all tapbacks, emoji, OTP codes or under 3 words.
 - Historical backfill uses conversation-month windows, ADD-only, with one per-person consolidation pass.
 
@@ -304,7 +322,7 @@ Spec: intelligence §4.
 - No timestamps in the prefix.
 - The prompt states that message text is untrusted data.
 
-**Output**: `output_config:{effort:"low", format: zodOutputFormat(Extraction)}`, max_tokens 6k (12k historical), no tools. The schema covers:
+**Output**: `output_config:{effort:"low", format: zodOutputFormat(Extraction)}`, `thinking:{type:"disabled"}`, max_tokens 4k (8k historical), no tools. The schema covers:
 - interests and facts with ops ADD/UPDATE/INVALIDATE/NOOP, evidence ids and a verbatim quote;
 - commitments, `needs_reply`, person mentions, relation edges, self-identification;
 - the conversation summary.
@@ -312,9 +330,9 @@ Spec: intelligence §4.
 
 **Batch rules**
 - **No `fallbacks` in batches** (the Batches API rejects them).
-- Results with `refusal` are re-run synchronously with `betas:["server-side-fallback-2026-07-01"], fallbacks:"default"`.
-- `max_tokens` cut-offs are re-queued in a batch, then split.
-- Always check `stop_reason`, then read the `text` block **by type** (Opus 5.5 can emit empty thinking blocks first).
+- A `refusal` is final on Haiku 5.5: the window is marked refused (watermark advances) — no re-run, no escalation. Only a route overridden to Sonnet 5.5 (when the item was sent there and the route is still there) re-runs it once synchronously with `fallbacks:"default"`, and only for the categories server-side fallback retries (`cyber`, `frontier_llm`); `bio`, `general_harms`, `reasoning_extraction` and uncategorized declines stay final.
+- `max_tokens` cut-offs are re-queued in a batch at ×2, then split.
+- Always check `stop_reason`, then read the `text` block **by type** (thinking blocks can come first).
 
 **Validation**
 - zod `safeParse`, then the verbatim quote check, then blocks.
@@ -322,7 +340,7 @@ Spec: intelligence §4.
 - **Sensitive facts** are never shown in iMessage or push.
 
 **Budget**
-- Steady state $5/day and $60/month (Console limit). One-time backfill allowance of about $150.
+- Steady state $1/day and $10/month (Haiku makes that ample: ~$0.05/day expected). One-time backfill allowance $20 (expected ~$1–5); `yb backfill-extract --estimate` prints counts and $ without sending anything, and the backfill only submits what the allowance covers.
 - When the cap is hit, LLM stages are skipped and the digest falls back to templates.
 - `llm_requests.output` is purged after 30 days.
 
@@ -350,7 +368,7 @@ Logistics and work are excluded from relationship inference and digests. Medical
 
 Ticket count ("4 tickets") caps how many unnamed companions are assumed.
 
-**4. Deterministic scoring, then a nightly Opus batch adjudication** for occasions with ≥1 candidate.
+**4. Deterministic scoring, then a nightly Haiku batch adjudication** (route `adjudicate`) for occasions with ≥1 candidate.
 - Pseudonymized packet in: title, venue, time, notes, and candidates with their evidence ids.
 - Out: `attendees[{ref, role: companion|host|guest|ticket_holder|mentioned_only, confidence, evidence_ids}]` plus `is_social` and `kind`.
 - **≥0.75**: attendee (counted in ties and edges). **0.5–0.75**: "possible" (shown, not counted).
@@ -417,7 +435,7 @@ Each item's "Why this?" includes the learned factors.
 **Scope limit**: learning tunes **only the ranker**. Merge thresholds and fact gates change only through `npm run eval` plus a manual change; the fully automatic agent must not drift silently.
 
 ### Digest (iMessage to self + push)
-**Composer**: one synchronous Opus call at 07:30 (effort `medium`, fallbacks on), writing copy and ≤2 conversation-starter drafts per item.
+**Composer**: one synchronous Haiku call at 07:30 (route `digest_compose`: effort `low`, thinking off; a refusal keeps the templates), writing copy and ≤2 conversation-starter drafts per item.
 - **Grounding validator**: citations must be a subset of the packet. Every capitalized token, number and date must appear in the packet or a whitelist.
 - Any item that fails validation falls back to a template.
 - Openers are drafts only; there is no code path that sends them.
@@ -457,7 +475,7 @@ Each item's "Why this?" includes the learned factors.
 - `pause`, `resume`, `more`, `help`
 
 **Parsing and replies**:
-- Deterministic parser first. Then an Opus intent parser (structured output, effort `low`, through the egress point) for `log:` and free text.
+- Deterministic parser first. Then an LLM intent parser (route `intent`: Haiku, structured output, effort `low`, through the egress point) for `log:` and free text.
 - Ambiguous names get a "1/2?" clarification that stays open for 1 h.
 - Every effect is acknowledged as `🅨 ✓ …`.
 - Limits: ≤30 commands/h, a circuit breaker at >20 outbound messages/h, idempotent on GUID.
@@ -465,7 +483,7 @@ Each item's "Why this?" includes the learned factors.
 ### Ask your network (web + iMessage `?`)
 **Retrieval**: FTS5 over messages, facts and people (trigram for names), plus the gazetteer for city queries.
 
-**Loop**: Opus 5.5 tool-use (effort `medium` on the web, `low` over iMessage), `tool_choice:auto`, ≤8 tool calls, append-only history.
+**Loop**: Haiku 5.5 tool-use (routes `ask_web` / `ask_imessage`: effort `low`, adaptive thinking), `tool_choice:auto`, ≤8 tool calls, ≤60k input tokens, append-only history; tools + system cached 5 min plus the moving breakpoint on the last user message.
 - **Read-only tools, all strict**: `search_people`, `search_messages`, `search_facts`, `get_person`, `graph_neighbors`, `list_events`.
 - **Tool results go through the egress pseudonymizer** and are labeled untrusted.
 
@@ -587,7 +605,7 @@ Run in this order and record the results in `docs/RUNBOOK.md`.
 
 **(f) Partiful**: token refresh plus one call each to the read functions.
 
-**(h) Anthropic batch smoke test**: no fallbacks in the batch, and cache hits on requests 2–3. Also check Zod 4 + `zodOutputFormat`, and run a 50-window effort low-vs-medium calibration.
+**(h) Anthropic batch smoke test**: Haiku 5.5, no fallbacks in the batch, and cache hits on requests 2–3. Also check Zod 4 + `zodOutputFormat`. Before moving any route off Haiku, compare it with Sonnet 5.5 on the eval (`yb eval shadow`).
 
 **(i) Google Calendar OAuth** (production mode) plus one incremental sync.
 

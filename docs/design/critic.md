@@ -2,6 +2,8 @@
 
 # Adversarial review: Yeackbot architecture, intelligence and delivery designs
 
+> **Model update (2026-10-16, owner):** every LLM call now runs on **Claude Haiku 5.5** (`low` effort, thinking off except the Ask tool loop) through the route table in `packages/server/src/llm/models.ts`; see PLAN.md "Models, cost and caching". Haiku has no server-side refusal fallback, so refusals are recorded and skipped (only a route overridden to Sonnet 5.5 sends `fallbacks` and re-runs a refused batch item). Mentions of Opus 5.5, its prices, effort `medium` or `fallbacks` on every synchronous call below are superseded.
+
 All three designs have several blocking problems:
 - **The legacy sync server has to be locked down first.** The architecture keeps it running unchanged for weeks during the build, and the delivery plan closes it only in week 6.
 - **The three schemas are incompatible.** The architecture's constraint lists would reject values the intelligence pipeline writes. The two docs also describe two different merge models.

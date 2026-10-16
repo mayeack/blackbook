@@ -37,6 +37,28 @@ describe('migrations', () => {
     expect(cols).toContain('source');
   });
 
+  it('reserves one slot per agent-loop workstream (011–020), applied in order on top of v10', () => {
+    expect(MIGRATIONS.slice(10, 20).map((m) => [m.version, m.name])).toEqual([
+      [11, 'agent_loop'],
+      [12, 'obligations'],
+      [13, 'suggestions'],
+      [14, 'delivery'],
+      [15, 'commands'],
+      [16, 'llm'],
+      [17, 'extraction'],
+      [18, 'ask'],
+      [19, 'events_travel'],
+      [20, 'eval'],
+    ]);
+    expect(LATEST_VERSION).toBeGreaterThanOrEqual(20);
+    // A v10 database (production today) upgrades through every slot.
+    const db = openDatabase(':memory:');
+    migrate(db, 10);
+    expect(currentVersion(db)).toBe(10);
+    expect(migrate(db).slice(0, 10)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(currentVersion(db)).toBe(LATEST_VERSION);
+  });
+
   it('004 keeps parked iMessage reactions (source defaults to imessage)', () => {
     const db = openDatabase(':memory:');
     migrate(db, 3);

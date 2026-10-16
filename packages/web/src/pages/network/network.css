@@ -1,0 +1,203 @@
+/* Network map: filters, search, the sigma canvas, legend and the node bottom sheet. */
+
+.net-view {
+  margin-bottom: 0;
+}
+.net-search {
+  position: relative;
+  margin-bottom: 10px;
+}
+.net-search-results {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-pop);
+}
+.net-search-results button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.net-search-results button:hover,
+.net-search-results button:focus-visible {
+  background: var(--surface-hover);
+}
+.net-search-results button span:first-child {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.net-filters {
+  margin-bottom: 10px;
+}
+.net-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.net-filter-bar .segmented {
+  margin-bottom: 0;
+}
+@media (max-width: 480px) {
+  .net-filter-bar .segmented {
+    width: auto;
+    flex: 1 1 auto;
+  }
+}
+.net-filter-panel {
+  margin-top: 10px;
+}
+.net-filter-panel input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.net-filter-panel .filter-chips {
+  margin-bottom: 0;
+}
+.net-filter-panel > .btn {
+  margin-top: 10px;
+}
+.edge-swatch {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.net-stage {
+  position: relative;
+}
+.net-stage.loading .net-canvas {
+  opacity: 0.6;
+}
+.net-canvas-wrap {
+  position: relative;
+  border-radius: var(--radius-l);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+}
+.net-canvas {
+  width: 100%;
+  height: min(72vh, 760px);
+  min-height: 340px;
+  touch-action: none;
+}
+@media (max-width: 899px) {
+  .net-canvas {
+    height: calc(100dvh - 300px - var(--tabbar-h) - env(safe-area-inset-bottom));
+  }
+}
+.net-settling {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  pointer-events: none;
+}
+.net-zoom {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.net-zoom .btn {
+  width: 32px;
+  padding: 0;
+  font-size: 16px;
+}
+.net-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.net-legend .chip {
+  cursor: pointer;
+}
+.net-legend .chip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* Bottom sheet over the map (non-modal: the map stays live behind it). */
+.net-sheet {
+  position: fixed;
+  z-index: 55;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 16px;
+  width: min(560px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: var(--radius-l);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-pop);
+}
+@media (max-width: 899px) {
+  .net-sheet {
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px);
+  }
+}
+.net-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.net-sheet-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.net-sheet-person .er-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.net-sheet-person .er-title {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.net-sheet-person .er-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.net-sheet-row {
+  margin-top: 8px;
+}
+.net-sheet-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.net-sheet-actions .btn {
+  flex: 1 1 0;
+}
+.net-canvas-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

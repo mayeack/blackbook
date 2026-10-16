@@ -1,7 +1,8 @@
 /**
  * THE job registration list. Add new jobs here (one entry per job; cadences per PLAN.md "Schedule").
  * Source jobs are registered only when their configuration is present (sourceJobDeps), so callers that pass only
- * backup/log paths (tests) get none of them.
+ * backup/log paths (tests) get none of them. Agent-loop jobs come after the source jobs, gated by agentJobDeps;
+ * each builder fills its own module's `…Jobs()` (times in ../timetable.ts).
  */
 import path from 'node:path';
 import { COLLECTOR_DEFAULT_URL } from '@yb/shared/collector/v1';
@@ -14,16 +15,42 @@ import { partifulJobs, type PartifulJobDeps } from '../../adapters/partiful/jobs
 import { whatsappJobs, type WhatsappJobDeps } from '../../adapters/whatsapp/jobs';
 import type { AppConfig } from '../../config';
 import { dailyBackup } from '../../db/backup';
+import { commandsJobs } from '../../commands/jobs';
+import { deliveryJobs } from '../../delivery/jobs';
+import { extractionJobs } from '../../extraction/jobs';
 import { matcherJobs, type MatcherJobDeps } from '../../identity/matcherJobs';
-import { pruneLogs } from '../../ops/logger';
+import { tiebreakJobs } from '../../identity/tiebreakJobs';
+import { intelJobs } from '../../intel/jobs';
+import { llmJobs } from '../../llm/jobs';
+import { pruneLogs, type Logger } from '../../ops/logger';
+import { circlesJobs } from '../../pipeline/circles/jobs';
+import { graphJobs } from '../../pipeline/graph/jobs';
+import { obligationsJobs } from '../../pipeline/obligations/jobs';
 import { occasionJobs, type OccasionJobDeps } from '../../pipeline/occasions/jobs';
+import { suggestionsJobs } from '../../pipeline/suggestions/jobs';
+import { tiesJobs } from '../../pipeline/ties/jobs';
+import type { ServicesProvider } from '../../services';
 import { daily, type JobDef } from '../scheduler';
+import type { AgentJobDeps } from '../timetable';
 
-type SourceConfigKeys = 'dataDir' | 'collectorUrl' | 'collectorTokenFile' | 'beeper' | 'browserCdpUrl' | 'google' | 'importsDir' | 'secretsKey';
+type SourceConfigKeys =
+  | 'dataDir'
+  | 'collectorUrl'
+  | 'collectorTokenFile'
+  | 'beeper'
+  | 'browserCdpUrl'
+  | 'google'
+  | 'importsDir'
+  | 'secretsKey'
+  | 'anthropicApiKey'
+  | 'vapid';
 
 export interface JobDeps {
   config: Pick<AppConfig, 'backupDir' | 'logDir'> & Partial<Pick<AppConfig, SourceConfigKeys>>;
   timeZone?: string;
+  /** Injected LLM/egress/outbound/push (tests); else jobs build the memoized defaults from config. */
+  services?: ServicesProvider;
+  log?: Logger;
 }
 
 /** Per-source job dependencies; null = that source isn't configured here, so its jobs aren't registered. */
@@ -38,6 +65,36 @@ export interface SourceJobDeps {
   /** Database-only pipeline jobs (identity matcher, occasions): any server with a data dir. */
   matcher: MatcherJobDeps | null;
   occasions: OccasionJobDeps | null;
+}
+
+/**
+ * Agent-loop job dependencies; null = not configured here.
+ *   pipeline: any server with a data dir (ties, graph, circles, obligations, intel, suggestions, delivery);
+ *   llm:      also needs ANTHROPIC_API_KEY (llm collect/purge, extraction submit, identity tie-break);
+ *   commands: also needs the collector (self-thread rows arrive through the iMessage tail).
+ */
+export interface AgentJobDepsSet {
+  pipeline: AgentJobDeps | null;
+  llm: AgentJobDeps | null;
+  commands: AgentJobDeps | null;
+}
+
+export function agentJobDeps(deps: JobDeps): AgentJobDepsSet {
+  const c = deps.config;
+  if (!c.dataDir) return { pipeline: null, llm: null, commands: null };
+  const tokenFile = c.collectorTokenFile ?? path.join(c.dataDir, 'collector.token');
+  const base: AgentJobDeps = {
+    timeZone: deps.timeZone,
+    services: deps.services,
+    log: deps.log,
+    config: {
+      anthropicApiKey: c.anthropicApiKey ?? null,
+      vapid: c.vapid ?? null,
+      collectorUrl: c.collectorUrl ?? COLLECTOR_DEFAULT_URL,
+      collectorTokenFile: tokenFile,
+    },
+  };
+  return { pipeline: base, llm: c.anthropicApiKey ? base : null, commands: sourceJobDeps(deps).imessage ? base : null };
 }
 
 export function sourceJobDeps(deps: JobDeps): SourceJobDeps {
@@ -63,6 +120,7 @@ export function sourceJobDeps(deps: JobDeps): SourceJobDeps {
 
 export function buildJobs(deps: JobDeps): JobDef[] {
   const s = sourceJobDeps(deps);
+  const a = agentJobDeps(deps);
   return [
     {
       name: 'backup',
@@ -90,5 +148,17 @@ export function buildJobs(deps: JobDeps): JobDef[] {
     ...(s.calendar ? calendarJobs(s.calendar) : []),
     ...(s.matcher ? matcherJobs(s.matcher) : []),
     ...(s.occasions ? occasionJobs(s.occasions) : []),
+    // agent loop (scheduler/timetable.ts AGENT_TIMES)
+    ...(a.llm ? tiebreakJobs(a.llm) : []),
+    ...(a.llm ? extractionJobs(a.llm) : []),
+    ...(a.llm ? llmJobs(a.llm) : []),
+    ...(a.pipeline ? graphJobs(a.pipeline) : []),
+    ...(a.pipeline ? circlesJobs(a.pipeline) : []),
+    ...(a.pipeline ? tiesJobs(a.pipeline) : []),
+    ...(a.pipeline ? obligationsJobs(a.pipeline) : []),
+    ...(a.pipeline ? intelJobs(a.pipeline) : []),
+    ...(a.pipeline ? suggestionsJobs(a.pipeline) : []),
+    ...(a.pipeline ? deliveryJobs(a.pipeline) : []),
+    ...(a.commands ? commandsJobs(a.commands) : []),
   ];
 }
