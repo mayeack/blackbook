@@ -238,21 +238,22 @@ final class BackupServer: @unchecked Sendable {
                 }
             }
         }
-        return latestByDevice.values.map { obj in
-            [
-                "email": obj["email"] as? String ?? "",
-                "device": obj["device"] as? String ?? "",
-                "platform": obj["platform"] as? String ?? "",
-                "appVersion": obj["appVersion"] as? String ?? "",
-                "status": obj["status"] as? String ?? "",
-                "pushPending": obj["pushPending"] as? Int ?? 0,
-                "lastSyncDate": obj["lastSyncDate"] as? String ?? "",
-                "sentAt": obj["sentAt"] as? String ?? "",
-                "receivedAt": obj["receivedAt"] as? String ?? "",
-                "durationMs": obj["durationMs"] as? Int ?? 0,
-                "error": obj["error"] as? String ?? ""
-            ]
-        }.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+        // Built field by field: one big heterogeneous literal exceeds the type checker's time limit on Xcode 26.
+        func summary(_ obj: [String: Any]) -> [String: Any] {
+            func text(_ key: String) -> String { obj[key] as? String ?? "" }
+            func number(_ key: String) -> Int { obj[key] as? Int ?? 0 }
+            var out: [String: Any] = [:]
+            for key in ["email", "device", "platform", "appVersion", "status", "lastSyncDate", "sentAt", "receivedAt", "error"] {
+                out[key] = text(key)
+            }
+            out["pushPending"] = number("pushPending")
+            out["durationMs"] = number("durationMs")
+            return out
+        }
+        let rows: [[String: Any]] = latestByDevice.values.map(summary)
+        return rows.sorted { (a: [String: Any], b: [String: Any]) -> Bool in
+            (a["receivedAt"] as? String ?? "") > (b["receivedAt"] as? String ?? "")
+        }
     }
 
     private func consoleBackups() -> [String: Any] {
