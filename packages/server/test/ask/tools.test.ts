@@ -20,15 +20,25 @@ async function session() {
 }
 
 describe('Ask tool definitions', () => {
-  it('are strict-ready: every property required, additionalProperties false, no numeric bounds', () => {
+  it('are strict-ready: optional filters, required refs and caps, additionalProperties false, no numeric bounds', () => {
     expect(ASK_TOOL_DEFS.map((t) => t.name)).toEqual(['search_people', 'search_messages', 'search_facts', 'get_person', 'graph_neighbors', 'list_events']);
     for (const t of ASK_TOOL_DEFS) {
       const schema = t.inputSchema as { type: string; properties: Record<string, unknown>; required: string[]; additionalProperties: boolean };
       expect(schema.type).toBe('object');
       expect(schema.additionalProperties).toBe(false);
-      expect([...schema.required].sort()).toEqual(Object.keys(schema.properties).sort());
+      expect(schema.required.every((k) => k in schema.properties)).toBe(true);
+      expect(schema.required.filter((k) => k !== 'ref' && k !== 'limit')).toEqual([]);
       expect(JSON.stringify(schema)).not.toMatch(/"(minimum|maximum|minLength|maxLength|minItems|maxItems)"/);
     }
+  });
+
+  it('accept omitted filters (the model leaves them out instead of sending null)', async () => {
+    const { w, egress, call } = await session();
+    const people = await call('search_people', { city: 'Austin', limit: null });
+    expect(people.isError).toBeFalsy();
+    expect(people.content).toContain(`"ref":"${egress.tokenFor(w.sam)}"`);
+    expect((await call('list_events', {})).isError).toBeFalsy();
+    expect((await call('search_facts', { cat: 'location_current', limit: 5 })).isError).toBeFalsy();
   });
 });
 

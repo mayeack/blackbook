@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AskEvent } from '@yb/shared';
 import { askNetwork, getConversation, NEEDS_KEY_MESSAGE } from '../../src/ask';
+import { asksForPeople } from '../../src/ask/degraded';
 import { ASK_PROMPT_VERSION, ASK_SYSTEM_PROMPT } from '../../src/ask/prompt';
 import { eventRef, factRef, messageRef } from '../../src/ask/refs';
 import { docNumber } from '../../src/ask/fts';
@@ -136,6 +137,37 @@ describe('askNetwork (web)', () => {
     expect(out.people.map((p) => p.id)).toContain(t.w.sam);
     expect(llm.calls).toEqual([]);
     expect(getConversation(t.w.db, out.conversationId!)!.turns[0]!.status).toBe('degraded');
+  });
+
+  it('a "who do I know in …" plain search lists only people, never events or messages that mention the place', async () => {
+    const ask = async (question: string, channel: 'web' | 'imessage') => {
+      const t = setup();
+      const llm = new FakeLlmClient().on('ask', { unavailable: 'api_error' });
+      return askNetwork({ db: t.w.db, question, channel, services: () => services(llm), now: NOW });
+    };
+    const who = await ask('who do I know in Austin', 'web');
+    expect(who).toMatchObject({ degraded: true, degradedReason: 'api_error' });
+    expect(who.answer).toContain('Here’s who a plain search found:');
+    expect(who.answer).toContain('Sam Rivera — Austin');
+    expect(who.answer).toContain('Jess Kim — East Austin');
+    expect(who.answer).not.toContain('Friendsgiving'); // an event at a venue in Austin
+    expect(who.answer).not.toContain('ropes'); // a message mentioning Austin
+    expect(who.citations.every((c) => c.kind === 'fact')).toBe(true);
+    // Over iMessage a fact that only repeats the city isn't footnoted ("Austin · Austin¹").
+    const text = await ask('who do I know in Austin', 'imessage');
+    expect(text.answer).toMatch(/^- Sam R\. — Austin · bouldering \[F\w+\]$/m);
+    expect(text.answer).not.toMatch(/Austin · Austin/);
+    // Other questions still get events and messages.
+    const what = await ask('Austin potluck', 'web');
+    expect(what.answer).toContain('Here’s what a plain search found:');
+    expect(what.answer).toContain('Friendsgiving potluck');
+  });
+
+  it('asksForPeople recognizes "who" questions', () => {
+    for (const q of ['who do I know in London', 'Who’s into climbing?', 'whom should I invite', 'Anyone at Acme?', 'do I know anyone in Lisbon', 'which friends live in Austin', 'show me people in Paris']) {
+      expect(asksForPeople(q), q).toBe(true);
+    }
+    for (const q of ['What did we do in Austin?', 'when is the potluck', 'Austin potluck', 'how is Sam']) expect(asksForPeople(q), q).toBe(false);
   });
 
   it('without a key, the suggested "who’s fading / what did I promise" questions are answered from stats and loops', async () => {
