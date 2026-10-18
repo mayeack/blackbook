@@ -388,7 +388,7 @@ class CommandRun {
    * The intent parser, unless the text is off limits for the model: the self thread is an excluded conversation,
    * or the text names someone on the Privacy → LLM exclusion list (then the deterministic path answers).
    */
-  private async intentFor(text: string, msg: MessageInfo): Promise<IntentResult | null> {
+  private async intentFor(text: string, msg: MessageInfo, addressed: boolean): Promise<IntentResult | null> {
     const people = this.loadPeopleOnce();
     const excludedPeople = new Set(this.settings['llm.excluded_person_ids']);
     if (this.settings['llm.excluded_conversation_ids'].includes(msg.conversationId)) return null;
@@ -396,7 +396,7 @@ class CommandRun {
     const candidates = intentCandidates(text, people.filter((p) => !excludedPeople.has(p.id)));
     const r = await parseIntent(
       { llm: this.services.llm, egress: this.services.egress, timeZone: this.tz, log: this.log, signal: this.o.signal },
-      { commandId: this.cmd.id, text, sentAt: msg.sentAt, candidates },
+      { commandId: this.cmd.id, text, sentAt: msg.sentAt, candidates, addressed },
     );
     if (r) this.usedLlm = true;
     return r;
@@ -466,7 +466,7 @@ class CommandRun {
   private async freeText(parsed: Parsed, ctx: CommandContext, digest: DigestRef | null, msg: MessageInfo): Promise<Exec> {
     const ex = this.blank(digest?.id ?? null);
     const addressed = parsed.yb || ctx.inline.toBot;
-    const intent = await this.intentFor(parsed.body, msg);
+    const intent = await this.intentFor(parsed.body, msg, addressed);
     if (intent) {
       this.parsedMeta.verbs = [intent.intent];
       switch (intent.intent) {
@@ -483,8 +483,12 @@ class CommandRun {
           break;
         }
         case 'note':
-          ex.status = 'ignored';
-          return ex;
+          // His notes to self stay silent, but text he addressed to the bot always gets a reply.
+          if (!addressed) {
+            ex.status = 'ignored';
+            return ex;
+          }
+          break;
         case 'unknown':
           break;
       }
@@ -658,7 +662,7 @@ class CommandRun {
 
   private async logText(text: string, msg: MessageInfo, ex: Exec, pre: IntentResult | null): Promise<void> {
     const people = this.loadPeopleOnce();
-    const intent = pre ?? (await this.intentFor(text, msg));
+    const intent = pre ?? (await this.intentFor(text, msg, true));
     const visible = new Set(people.map((p) => p.id));
     const resolved: string[] = [];
     const ambiguous: { surface: string; options: PersonLite[] }[] = [];

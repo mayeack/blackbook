@@ -703,3 +703,29 @@ The Ask footer shows sub-cent costs with four decimals.
 100K tokens (status `tool_limit` or an answer built from the kept results); a Sonnet-override `general_harms` batch
 refusal is recorded `refused` with no synchronous re-run.
 **Platforms**: server + web. Real-API behavior (fallback blocks, cache usage) needs the owner's key.
+
+## Two-way texting — addressed texts are never silently dropped (2026-10-18)
+
+**What changed**: a self-thread text addressed to the bot ("yb …", or an inline reply to a yeackbot text) that the
+intent parser classified as `note` used to be ignored with no reply. The parser now gets an `ADDRESSED: yes|no`
+section supplied by the app (kept separate from the untrusted note) and is told never to pick `note` when it's yes;
+if it still does, the executor replies "Didn't get that · try help" instead of staying silent. Plain notes to self
+(not addressed, outside the window rules) stay silent as before.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/commands/executor.test.ts`: "text addressed to the bot is never dropped as a note" (yb + inline reply, both
+   get a reply, packet carries `### ADDRESSED\nyes`); the existing window test asserts `### ADDRESSED\nno` and silence.
+
+### Scenario B — Live text (owner)
+1. In the note-to-self thread, text `yb prioritize inviting this person to parties, is a great DJ` (no screenshot needed).
+2. **Expected**: within ~20 s a 🅨 reply arrives, either "Didn't get that · try help" or, if the parser reads it as
+   a fact, "Couldn't find this person · …". Never silence. The `inbound_commands` row is `handled` with a non-null
+   `response_outbound_id`.
+3. Text `pick up dry cleaning` with no yb and no bot text in the last 12 h.
+4. **Expected**: no reply (status `ignored`, reason `not_addressed`).
+
+**Edge cases**: an inline reply to an old bot text (>12 h) that reads like a note still gets a reply; `log:` texts
+are always sent with ADDRESSED yes.
+**Platforms**: server. Real classification needs the owner's AI key; actually acting on screenshots and party
+preferences is separate work (its own session).
