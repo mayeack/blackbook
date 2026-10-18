@@ -1,6 +1,6 @@
 /**
- * The six read-only Ask tools (intelligence §7 "Tools"): strict JSON schemas (every property required, nullable
- * instead of optional, additionalProperties false; bounds are enforced here because the API doesn't), input
+ * The six read-only Ask tools (intelligence §7 "Tools"): strict JSON schemas (filters optional, result caps
+ * required + nullable, additionalProperties false; bounds are enforced here because the API doesn't), input
  * validation, and rendering of retrieval rows for the model.
  *
  * What the model sees: people as pseudonym tokens (egress.tokenFor) with first name + last initial, ids as
@@ -35,10 +35,13 @@ import {
 
 // ---------------------------------------------------------------------------------------------- schemas
 
-const str = (description: string) => ({ anyOf: [{ type: 'string' }, { type: 'null' }], description });
-const num = (description: string) => ({ anyOf: [{ type: 'number' }, { type: 'null' }], description });
-const int = (description: string) => ({ anyOf: [{ type: 'integer' }, { type: 'null' }], description });
-const obj = (properties: Record<string, unknown>) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+// Filters are optional properties (left out = no filter) rather than nullable: strict schemas allow at most 16
+// union-typed parameters and 24 optional ones across all tools (llm/client.ts strictSchemaIssues), and a request over
+// either limit is a 400. Only the result caps stay required + nullable (null = the tool's default).
+const str = (description: string) => ({ type: 'string', description });
+const num = (description: string) => ({ type: 'number', description });
+const cap = (description: string) => ({ anyOf: [{ type: 'integer' }, { type: 'null' }], description });
+const obj = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object', properties, required, additionalProperties: false });
 
 const CATS = Object.keys(FACT_CATEGORIES);
 
@@ -46,70 +49,86 @@ export const ASK_TOOL_DEFS: readonly LlmTool[] = [
   {
     name: 'search_people',
     description:
-      'Find people in the owner\'s network. Every non-null filter must match. query matches names, nicknames and also facts, employers and places; city matches where people live now (near_km widens it to the metro area); interest/employer/circle filter by those facts; min_strength is the tie strength with the owner (0–100). With no filters it returns the strongest ties. Returns ref, name, strength, last_contact, city, circles and top facts.',
-    inputSchema: obj({
-      query: str('Name or any words; null for none.'),
-      city: str('City or neighborhood, e.g. "Austin"; null for any.'),
-      near_km: num('Include the surrounding metro area when > 0; null for the city only.'),
-      circle: str('Circle (friend group) name; null for any.'),
-      interest: str('Interest or activity, e.g. "climbing"; null for any.'),
-      employer: str('Company, school or role; null for any.'),
-      min_strength: num('Minimum tie strength 0–100; null for any.'),
-      limit: int('1–20 (default 10).'),
-    }),
+      'Find people in the owner\'s network. Every filter given must match. query matches names, nicknames and also facts, employers and places; city matches where people live now (near_km widens it to the metro area); interest/employer/circle filter by those facts; min_strength is the tie strength with the owner (0–100). With no filters it returns the strongest ties. Returns ref, name, strength, last_contact, city, circles and top facts.',
+    inputSchema: obj(
+      {
+        query: str('Name or any words; omit for none.'),
+        city: str('City or neighborhood, e.g. "Austin"; omit for any.'),
+        near_km: num('Include the surrounding metro area when > 0; omit for the city only.'),
+        circle: str('Circle (friend group) name; omit for any.'),
+        interest: str('Interest or activity, e.g. "climbing"; omit for any.'),
+        employer: str('Company, school or role; omit for any.'),
+        min_strength: num('Minimum tie strength 0–100; omit for any.'),
+        limit: cap('1–20; null for the default (10).'),
+      },
+      ['limit'],
+    ),
   },
   {
     name: 'search_messages',
     description:
-      'Full-text search over message snippets from iMessage, WhatsApp and Instagram (prefix matching on every word). Filter by a person ref (their DMs and what they posted in groups), a conversation ref from an earlier result, and local dates. With query null it returns the newest messages in that scope. Returns id (cite as [m:…]), ts, conv, conv_title, sender (a ref or ME) and a ≤240-character snippet.',
-    inputSchema: obj({
-      query: str('Words to find; null for the newest messages (needs person_ref or conv_id).'),
-      person_ref: str('A person ref like P1a; null for anyone.'),
-      conv_id: str('A conv value like C1 from an earlier search_messages result; null for any.'),
-      after: str('YYYY-MM-DD (inclusive); null for no lower bound.'),
-      before: str('YYYY-MM-DD (exclusive); null for no upper bound.'),
-      limit: int('1–20 (default 10).'),
-    }),
+      'Full-text search over message snippets from iMessage, WhatsApp and Instagram (prefix matching on every word). Filter by a person ref (their DMs and what they posted in groups), a conversation ref from an earlier result, and local dates. Without a query it returns the newest messages in that scope. Returns id (cite as [m:…]), ts, conv, conv_title, sender (a ref or ME) and a ≤240-character snippet.',
+    inputSchema: obj(
+      {
+        query: str('Words to find; omit for the newest messages (needs person_ref or conv_id).'),
+        person_ref: str('A person ref like P1a; omit for anyone.'),
+        conv_id: str('A conv value like C1 from an earlier search_messages result; omit for any.'),
+        after: str('YYYY-MM-DD (inclusive); omit for no lower bound.'),
+        before: str('YYYY-MM-DD (exclusive); omit for no upper bound.'),
+        limit: cap('1–20; null for the default (10).'),
+      },
+      ['limit'],
+    ),
   },
   {
     name: 'search_facts',
-    description: `Search what the agent has learned about people (interests, where they live, employers, schools, pets, travel plans…). cat is one of: ${CATS.join(', ')}. With query null and a cat it lists that category across the strongest ties. Returns id (cite as [F…]), person ref and name, cat, value and validity dates.`,
-    inputSchema: obj({
-      query: str('Words to find in fact values; null to list a category.'),
-      cat: { anyOf: [{ type: 'string', enum: CATS }, { type: 'null' }], description: 'Category filter; null for all.' },
-      limit: int('1–30 (default 15).'),
-    }),
+    description: `Search what the agent has learned about people (interests, where they live, employers, schools, pets, travel plans…). cat is one of: ${CATS.join(', ')}. Without a query and with a cat it lists that category across the strongest ties. Returns id (cite as [F…]), person ref and name, cat, value and validity dates.`,
+    inputSchema: obj(
+      {
+        query: str('Words to find in fact values; omit to list a category.'),
+        cat: { type: 'string', enum: CATS, description: 'Category filter; omit for all.' },
+        limit: cap('1–30; null for the default (15).'),
+      },
+      ['limit'],
+    ),
   },
   {
     name: 'get_person',
     description:
       'Everything about one person: account kinds (never phone numbers or emails), facts with ids and validity, relations to other people, tie stats (strength 0–100, state, last contact, usual gap), open commitments, whether the owner owes a reply, circles/tags/locations and the 10 most recent message snippets with ids.',
-    inputSchema: obj({ ref: { type: 'string', description: 'A person ref like P1a.' } }),
+    inputSchema: obj({ ref: { type: 'string', description: 'A person ref like P1a.' } }, ['ref']),
   },
   {
     name: 'graph_neighbors',
     description:
       'Who a person knows, from shared group chats, events, invitations and relations. Returns neighbors with pair strength (0–1; ≥0.75 close, ≥0.40 know each other, ≥0.15 acquainted), relation labels and evidence summaries (group titles, event ids, message ids).',
-    inputSchema: obj({
-      ref: { type: 'string', description: 'A person ref like P1a.' },
-      min_strength: num('Minimum pair strength 0–1 (default 0.15).'),
-      types: {
-        anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }],
-        description: 'Evidence types to require (co_group, co_attend, invited_by, plus_one, co_host, group_reply, mentioned_together, met_via, label); null for any.',
+    inputSchema: obj(
+      {
+        ref: { type: 'string', description: 'A person ref like P1a.' },
+        min_strength: num('Minimum pair strength 0–1; omit for the default (0.15).'),
+        types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Evidence types to require (co_group, co_attend, invited_by, plus_one, co_host, group_reply, mentioned_together, met_via, label); omit for any.',
+        },
+        limit: cap('1–20; null for the default (10).'),
       },
-      limit: int('1–20 (default 10).'),
-    }),
+      ['ref', 'limit'],
+    ),
   },
   {
     name: 'list_events',
     description:
       'Get-togethers and trips from the calendar and Partiful (never medical or work appointments): title text search, attendee, local date range. Returns id (cite as [E…]), title, start, place and counted attendees. Without dates it returns the most recent first; with only after, the earliest first.',
-    inputSchema: obj({
-      after: str('YYYY-MM-DD (inclusive); null for no lower bound.'),
-      before: str('YYYY-MM-DD (exclusive); null for no upper bound.'),
-      person_ref: str('Only events this person attended; null for any.'),
-      query: str('Words in the title or venue; null for any.'),
-    }),
+    inputSchema: obj(
+      {
+        after: str('YYYY-MM-DD (inclusive); omit for no lower bound.'),
+        before: str('YYYY-MM-DD (exclusive); omit for no upper bound.'),
+        person_ref: str('Only events this person attended; omit for any.'),
+        query: str('Words in the title or venue; omit for any.'),
+      },
+      [],
+    ),
   },
 ];
 

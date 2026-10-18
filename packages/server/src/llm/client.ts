@@ -324,9 +324,42 @@ export function requestParams(p: RouteParams, i: RequestShapeInput): Record<stri
 
 const SAMPLING_KEYS = ['temperature', 'top_p', 'top_k'] as const;
 
+/** Strict tool schemas, summed over all tools in a request (above either the API answers 400). */
+export const STRICT_MAX_UNION_PARAMS = 16;
+export const STRICT_MAX_OPTIONAL_PARAMS = 24;
+
+/** Parameters with a union type (anyOf / a type array) and optional ones (not in `required`), at any depth. */
+export function strictParamCounts(schemas: readonly unknown[]): { union: number; optional: number } {
+  const n = { union: 0, optional: 0 };
+  const walk = (s: unknown): void => {
+    if (!s || typeof s !== 'object') return;
+    const o = s as { properties?: Record<string, unknown>; required?: string[]; items?: unknown; anyOf?: unknown[] };
+    for (const [k, p] of Object.entries(o.properties ?? {})) {
+      const q = p as { anyOf?: unknown; type?: unknown };
+      if (q.anyOf || Array.isArray(q.type)) n.union++;
+      if (!(o.required ?? []).includes(k)) n.optional++;
+      walk(p);
+    }
+    walk(o.items);
+    for (const a of o.anyOf ?? []) walk(a);
+  };
+  schemas.forEach(walk);
+  return n;
+}
+
+/** Why a set of strict tools would be refused by the API's schema compiler; [] = fine. */
+export function strictSchemaIssues(tools: readonly { input_schema?: unknown; strict?: boolean }[]): string[] {
+  const n = strictParamCounts(tools.filter((t) => t.strict).map((t) => t.input_schema));
+  const issues: string[] = [];
+  if (n.union > STRICT_MAX_UNION_PARAMS) issues.push(`${n.union} union-typed tool parameters (max ${STRICT_MAX_UNION_PARAMS})`);
+  if (n.optional > STRICT_MAX_OPTIONAL_PARAMS) issues.push(`${n.optional} optional tool parameters (max ${STRICT_MAX_OPTIONAL_PARAMS})`);
+  return issues;
+}
+
 /** Why a body must not be sent (each would be a 400 or a policy breach on Haiku 5.5); [] = fine. */
 export function requestIssues(body: Record<string, unknown>): string[] {
   const issues: string[] = [];
+  if (Array.isArray(body.tools)) issues.push(...strictSchemaIssues(body.tools as { input_schema?: unknown; strict?: boolean }[]));
   for (const k of SAMPLING_KEYS) if (k in body) issues.push(`sampling parameter ${k}`);
   if (!isAllowedModel(body.model)) issues.push('model not in the allowlist');
   const messages = (body.messages ?? []) as { role?: string }[];

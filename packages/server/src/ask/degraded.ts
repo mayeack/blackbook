@@ -48,6 +48,14 @@ export function interestInQuestion(q: string): string | null {
   return m ? m[1]!.trim() : null;
 }
 
+/**
+ * "Who do I know in London?", "who's into climbing", "anyone at Acme?": the answer is a list of people, so the plain
+ * search lists only people (never the events, reservations or messages that merely mention the words).
+ */
+export function asksForPeople(q: string): boolean {
+  return /^\s*(?:who(?:m|se)?\b|(?:do|does) (?:i|we) know (?:any|some)(?:one|body)\b|(?:any|some)(?:one|body)\b|(?:which|what) (?:people|friends|contacts)\b|(?:list|show)(?: me)? (?:all )?(?:the )?(?:people|friends|contacts|everyone)\b)/i.test(q);
+}
+
 /** Questions a plain read of the stats and loops can answer without Claude (the suggested prompts among them). */
 export type DegradedIntent = 'fading' | 'closest' | 'promises' | null;
 
@@ -132,6 +140,7 @@ export function degradedAnswer(
   const kws = keywords(question);
   const place = placeInQuestion(question);
   const interest = interestInQuestion(question);
+  const peopleOnly = asksForPeople(question);
   // Each line carries the citation ids it uses, so ids of lines cut by the cap aren't cited.
   let ids: string[] = [];
   const cite = (id: string) => {
@@ -152,16 +161,26 @@ export function degradedAnswer(
     if (!people.length && kws.length) people = searchPeople(scope, { query: kws.join(' '), city: null, nearKm: null, circle: null, interest: null, employer: null, minStrength: null, limit: 6 });
   }
   const facts = kws.length ? searchFacts(scope, { query: kws.join(' '), cat: null, limit: 4 }) : [];
-  const messages = kws.length && o.channel === 'web' ? searchMessages(scope, { query: kws.join(' '), personId: null, convId: null, after: null, before: null, limit: 3 }) : [];
-  const events = kws.length ? listEvents(scope, { query: kws.join(' '), personId: null, after: null, before: null, limit: 3 }) : [];
+  const messages = kws.length && o.channel === 'web' && !peopleOnly ? searchMessages(scope, { query: kws.join(' '), personId: null, convId: null, after: null, before: null, limit: 3 }) : [];
+  const events = kws.length && !peopleOnly ? listEvents(scope, { query: kws.join(' '), personId: null, after: null, before: null, limit: 3 }) : [];
 
   for (const p of people) {
-    const bits = [p.city, p.facts[0] ? `${p.facts[0].value} ${cite(factRef(p.facts[0].seq))}` : null].filter(Boolean);
+    const top = p.facts[0];
+    // "London · London¹": a top fact that only repeats the city is shown once, cited on the web only (over iMessage
+    // its footnote would just say the same thing again).
+    const dup = !!top && !!p.city && sameText(top.value, p.city);
+    const city = p.city && dup && o.channel === 'web' ? `${p.city} ${cite(factRef(top.seq))}` : p.city;
+    const fact = top && !dup ? `${top.value} ${cite(factRef(top.seq))}` : null;
+    const bits = [city, fact].filter(Boolean);
     line(`- ${o.displayName(p.person)}${bits.length ? ` — ${bits.join(' · ')}` : ''}`);
   }
+  // A people answer lists each person once.
+  const listed = new Set(people.map((x) => x.person.id));
   for (const f of facts) {
     const p = visiblePerson(scope, f.personId);
     if (!p || people.some((x) => x.facts[0]?.seq === f.seq)) continue;
+    if (peopleOnly && listed.has(p.id)) continue;
+    listed.add(p.id);
     line(`- ${factLabel(scope, f, p).replace(/^[^—]+—/, `${o.displayName(p)} —`)} ${cite(factRef(f.seq))}`);
   }
   for (const m of messages) {
@@ -180,7 +199,20 @@ export function degradedAnswer(
     ...messages.map((m) => (m.fromMe ? null : m.sender)).filter((p): p is PersonRow => !!p),
   ].filter((p, i, xs) => xs.findIndex((x) => x.id === p.id) === i);
   const answer = kept.length
-    ? `${lead} Here’s what a plain search found:\n${kept.map((l) => l.text).join('\n')}`
-    : `${lead} A plain search found nothing for that.`;
+    ? `${lead} Here’s ${peopleOnly ? 'who' : 'what'} a plain search found:\n${kept.map((l) => l.text).join('\n')}`
+    : `${lead} A plain search found ${peopleOnly ? 'nobody' : 'nothing'} for that.`;
   return { answer, cited, people: found };
+}
+
+/** Case, accents, punctuation and a trailing ", UK"-style qualifier aside, the same place or phrase. */
+function sameText(a: string, b: string): boolean {
+  const head = (s: string) =>
+    s
+      .split(',')[0]!
+      .normalize('NFKD')
+      .replace(/\p{M}/gu, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  return !!head(a) && head(a) === head(b);
 }

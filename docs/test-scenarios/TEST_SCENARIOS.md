@@ -703,3 +703,37 @@ The Ask footer shows sub-cent costs with four decimals.
 100K tokens (status `tool_limit` or an answer built from the kept results); a Sonnet-override `general_harms` batch
 refusal is recorded `refused` with no synchronous re-run.
 **Platforms**: server + web. Real-API behavior (fallback blocks, cache usage) needs the owner's key.
+
+---
+
+## Ask works again + "who do I know in …" answers with people only (2026-10-18)
+
+**What changed**: every Ask request (web and iMessage `yb …?`) failed with HTTP 400 because the six strict tool schemas
+had 24 nullable (anyOf) parameters and the API allows at most 16 (it also caps optional parameters at 24). Filters are
+now optional properties and only the result caps stay required + nullable (4 union, 20 optional). The LLM client
+refuses an over-limit tool set locally (`bad_request_shape`). The Ask system prompt now says "who" questions are
+answered with people, never events, reservations, flights or venues. The plain-search fallback (no Claude) lists only
+people for "who …" questions and no longer repeats a city that equals the person's top fact ("London · London¹").
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/llm/models.test.ts`: the old 24-union shape is flagged; the Ask tools fit both limits.
+3. `test/ask/tools.test.ts`: omitted filters are accepted. `test/ask/engine.test.ts`: the "who" fallback lists no events or
+   message quotes, no "Austin · Austin" over iMessage; non-"who" questions still show events.
+4. Claude ran the real engine against a copy of the production DB with the live API: "who do I know in London" →
+   2 tool calls, $0.0007, an answer naming only the two people who live in London.
+
+### Scenario B — iMessage (owner, after deploy)
+1. Text yourself `yb who do I know in London`.
+2. **Expected**: within ~30 s a reply that names people (no "Claude isn't reachable" lead), with at most 3 footnotes and a
+   yeackbot.com/ask link. No flights, restaurant reservations or event titles.
+
+### Scenario C — Web Ask (owner, after deploy)
+1. On yeackbot.com → Ask, ask "Who do I know in Austin?" (or any city you have friends in).
+2. **Expected**: a streamed answer listing people with citations; the footer shows lookups and a cost under a cent.
+3. Ask "What did we do in London?". **Expected**: events can appear here (only "who" questions are people-only).
+
+**Edge cases**: with Claude off or the budget spent, "who do I know in X" shows "Here’s who a plain search found:" and
+only people; nobody found → "A plain search found nobody for that." A future tool parameter that pushes the schemas
+over 16 union / 24 optional parameters fails `test/llm/models.test.ts` instead of 400-ing in production.
+**Platforms**: server (iMessage + web). Not yet deployed: production still runs the old code until merge + restart.
