@@ -1151,3 +1151,43 @@ change today; it is a safety net for later schema failures.
 backfill is `done` (as now), a historical dead letter is not picked up by any job. Every later prompt-version change
 gives old dead letters one more try (one window's cost each). Consolidation dead letters are never revived.
 **Platforms**: server only. Not deployed.
+
+## 2026-10-18 — Unambiguous names in Ask answers over iMessage and in log/note/screenshot acks
+
+**What changed**: two more places switch "First L." to first name + full last name when the short form reads the same
+as the owner's own (their Contacts card identity, card fields or merged records; the "Me" placeholder never counts)
+or as another person's in the same reply. Ask answers over iMessage (model answers, people lists one line per
+person, and the plain-search fallback): the longer form is applied locally when the answer is de-tokenized; the
+model still only ever sees tokens and "First L.". Command acks ("✓ Logged coffee with …", "✓ Noted for …",
+including a person from a profile screenshot), their journal titles and the "Undone: …" summary: the same rule
+against the owner and among the people the command names. Web Ask answers already show full names; everything else
+keeps "First L.".
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii`.
+2. `test/ask/names.test.ts`: `answerNames` default / owner collision / same-short pair; iMessage answers for each
+   case, the model's user turn carrying "Jess K." and never the full last name, a people list naming a same-short
+   pair in full on every line (details too), the web unchanged, and the plain-search fallback over iMessage naming
+   the owner-colliding person in full.
+3. `test/commands/names.test.ts`: `commandLabels` default / owner collision / same-short pair / display-name-only
+   person; a `log:` with an owner-colliding friend (ack, journal title, undo summary), a `log:` naming two "Sam R."s,
+   and either one alone back to "Sam R.".
+4. `test/commands/screenshot.test.ts`: a new person from a profile screenshot whose "First L." is the owner's own →
+   `✓ Noted for <full name> (new, from your screenshot).`, and the note / Party invites journal titles likewise.
+
+### Scenario B — Production after deploy (owner)
+1. Merge, `git pull` in `~/Blackbook`, `bash scripts/service.sh restart`.
+2. In your note-to-self thread, `log: coffee with <first name>` for a friend whose first name and last initial match
+   yours. **Expected**: `🅨 ✓ Logged coffee with <First> <full last name> today.`
+3. `log: dinner with <Friend A> and <Friend B>` for two friends with the same first name and last initial.
+   **Expected**: both named in full. `undo` → `✓ Undone: log for <both full names> (…)`.
+4. `? where does <that friend> work` over iMessage. **Expected**: the answer names them in full; ask about any other
+   friend and the answer reads "<First> <initial>.".
+5. `? who do I know in <a city where both same-initial friends live>`. **Expected**: one line per person, those two
+   in full.
+
+**Edge cases**: two friends with identical full names keep the full name; a friend with no last name stays the
+first name; clarification options ("Which Sam did you mean?") keep their own rule (full last name only when two
+options collide); the plain-search fallback may use the full name when a colliding person was found but cut from the
+text by the length cap.
+**Platforms**: server only. Not checked against live Haiku output or the production DB.

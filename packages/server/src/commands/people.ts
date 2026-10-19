@@ -7,7 +7,8 @@
  */
 import { canonicalFirstNames, normalizeNamePart } from '@yb/shared';
 import type { DB } from '../db/connection';
-import { shortName } from './text';
+import { collisionAware, type OwnerName } from '../identity/ownerNames';
+import { longName, shortName, type NameParts } from './text';
 
 export interface PersonLite {
   id: string;
@@ -58,7 +59,19 @@ export function loadPeople(db: DB): PersonLite[] {
   }));
 }
 
-export const labelOf = (p: PersonLite): string => shortName({ first_name: p.first, last_name: p.last, display_name: p.display });
+const partsOf = (p: PersonLite): NameParts => ({ first_name: p.first, last_name: p.last, display_name: p.display });
+
+export const labelOf = (p: PersonLite): string => shortName(partsOf(p));
+
+/**
+ * Labels for the people one command names together (a log's ack and journal title): labelOf, unless "Sam R." reads
+ * the same as the owner's own short name or another person's in the command; then the full last name ("Sam Rivera").
+ */
+export function commandLabels(people: readonly PersonLite[], owner: readonly OwnerName[]): (p: PersonLite) => string {
+  const ownerShorts = owner.map((o) => (o.firstName ? shortName({ first_name: o.firstName, last_name: o.lastName, display_name: o.displayName }) : null));
+  const named = collisionAware(people, ownerShorts, { short: labelOf, long: (p) => longName(partsOf(p)) });
+  return (p) => named.of(p) ?? labelOf(p);
+}
 
 /** Distinct labels for clarification options: "Sam R." unless two collide, then the full last name, then company. */
 export function distinctLabels(options: PersonLite[]): string[] {

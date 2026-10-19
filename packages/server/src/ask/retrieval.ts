@@ -16,6 +16,7 @@
 import { DAY_MS } from '@yb/shared';
 import { dateToUtc } from '../adapters/calendar/time';
 import type { DB } from '../db/connection';
+import { collisionAware, ownerNames } from '../identity/ownerNames';
 import { occasionChain } from '../pipeline/occasions/build';
 import { COUNTED, POSSIBLE } from '../pipeline/occasions/signals';
 import { hiddenNameRedactor } from '../routes/people';
@@ -132,6 +133,31 @@ export function shortName(p: Pick<PersonRow, 'first_name' | 'last_name' | 'displ
   const words = p.display_name.trim().split(/\s+/).filter(Boolean);
   if (words.length >= 2) return `${words[0]} ${[...words[1]!][0]!.toUpperCase()}.`;
   return words[0] ?? 'someone';
+}
+
+/** "Sam Rivera" — first name + full last name, else the whole display name: for a short name that would be ambiguous. */
+export function longName(p: Pick<PersonRow, 'first_name' | 'last_name' | 'display_name'>): string {
+  const first = p.first_name?.trim();
+  const last = p.last_name?.trim().replace(/\s+/g, ' ');
+  if (first) return last ? `${first} ${last}` : first;
+  return p.display_name.trim().replace(/\s+/g, ' ') || 'someone';
+}
+
+export interface AnswerNames {
+  of: (p: PersonRow) => string;
+  /** Ids of the people whose short name collides (named by longName). */
+  colliding: ReadonlySet<string>;
+}
+
+/**
+ * Names for the people one answer names together, as the owner reads them over iMessage: shortName, unless it reads
+ * the same as the owner's own short name or another person's in the answer; then longName (identity/ownerNames.ts).
+ * Local only: what the model sees keeps shortName and tokens (the egress cuts last names to an initial anyway).
+ */
+export function answerNames(db: DB, people: readonly PersonRow[]): AnswerNames {
+  const owner = ownerNames(db).map((o) => (o.firstName ? shortName({ first_name: o.firstName, last_name: o.lastName, display_name: o.displayName }) : null));
+  const named = collisionAware(people, owner, { short: shortName, long: longName });
+  return { of: (p) => named.of(p) ?? shortName(p), colliding: named.colliding };
 }
 
 export const firstNameOf = (p: Pick<PersonRow, 'first_name' | 'display_name'>): string =>
