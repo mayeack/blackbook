@@ -1,8 +1,9 @@
 /**
  * The nightly suggestions stage (job 'suggestions', after ties/obligations/intel, before compose):
  *
- *   1. every registered generator emits candidates → validated (canonical, visible people; finite base) and
- *      upserted into `suggestions` by dedupe key; candidates no longer emitted are superseded, expired ones expire;
+ *   1. every registered generator emits candidates → validated (canonical, visible people, never a record of mine
+ *      (identity/self.ts); finite base) and upserted into `suggestions` by dedupe key; candidates no longer emitted
+ *      are superseded, expired ones expire;
  *   2. 🎲 wildcard sources propose candidates (stored only if picked);
  *   3. eligibility: kind mutes (setting learner.muted_kinds), person mutes, the person ignore-cooldown
  *      (7 d × 2^n, cap 90), per-(person, kind) / per-subject cooldowns, max showings, intro rate limits
@@ -19,6 +20,7 @@
 import { addDays, localDate, uuidv7, type SuggestionKind, type WildcardGenerator } from '@yb/shared';
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
+import { selfPeople } from '../../identity/self';
 import { finishRun, startRun } from '../../journal/runs';
 import { nullLogger, errorFields, type Logger } from '../../ops/logger';
 import { settingsSnapshot, type SettingsSnapshot } from '../../settings/registry';
@@ -153,6 +155,8 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
   };
 
   try {
+    // Records of the owner (me, merged into me, holding my handles) never become anyone's suggestion.
+    const self = selfPeople(db);
     // 1. generators → stored candidates
     const okKinds = new Set<SuggestionKind>();
     for (const g of o.generators ?? allGenerators()) {
@@ -168,7 +172,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
       }
       tx(db, () => {
         for (const c of raw) {
-          const n = normalizeCandidate(db, c, now);
+          const n = normalizeCandidate(db, c, now, self);
           if (!n) {
             bump('dropped');
             continue;
@@ -234,7 +238,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
       try {
         const seen = new Set<string>();
         for (const raw of await s.generate(ctx, wildRng)) {
-          const n = normalizeCandidate(db, raw, now);
+          const n = normalizeCandidate(db, raw, now, self);
           if (!n) continue;
           const key = suggestionDedupeKey(n);
           if (seen.has(key)) continue;

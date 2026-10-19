@@ -6,6 +6,7 @@
  */
 import { addDays, localDate } from '@yb/shared';
 import type { DB } from '../db/connection';
+import { selfPeople } from '../identity/self';
 import { occasionChain } from '../pipeline/occasions/build';
 import { COUNTED, POSSIBLE } from '../pipeline/occasions/signals';
 
@@ -160,7 +161,8 @@ interface RawAttendee {
 /**
  * Visible canonical attendees of an occasion (its merge chain plus the linked Partiful event's guest list) or of a
  * Partiful event: one row per person (the user's own rows win, then counted, then confidence), only going /
- * attended / host / maybe / possible rows (never declined, invited, withdrawn or rejected ones).
+ * attended / host / maybe / possible rows (never declined, invited, withdrawn or rejected ones), never a record of
+ * mine (identity/self.ts: me, merged into me, or holding one of my handles).
  */
 export function knownAttendees(db: DB, ref: { type: 'occasion' | 'event'; id: string; eventId?: string | null }): KnownAttendee[] {
   const occasionIds = ref.type === 'occasion' ? occasionChain(db, ref.id) : [];
@@ -174,10 +176,12 @@ export function knownAttendees(db: DB, ref: { type: 'occasion' | 'event'; id: st
        WHERE a.occasion_id IN (SELECT value FROM json_each(@occ)) OR (@event IS NOT NULL AND a.event_id = @event)`,
     )
     .all({ occ: JSON.stringify(occasionIds), event: eventId }) as RawAttendee[];
+  const self = selfPeople(db);
   const rejected = new Set(rows.filter((r) => r.status === 'rejected').map((r) => r.person_id));
   const best = new Map<string, RawAttendee>();
   const rank = (r: RawAttendee) => (r.source === 'user' ? 4 : 0) + (isCounted(r.status, r.confidence) ? 2 : 0) + (SHOWN_STATUSES.has(r.status.toLowerCase()) ? 1 : 0);
   for (const r of rows) {
+    if (self.has(r.person_id)) continue;
     const cur = best.get(r.person_id);
     if (!cur || rank(r) > rank(cur) || (rank(r) === rank(cur) && (r.confidence > cur.confidence || (r.confidence === cur.confidence && r.updated_at > cur.updated_at)))) {
       best.set(r.person_id, r);

@@ -70,15 +70,17 @@ const SCALAR = (v: unknown) => v === null || ['string', 'number', 'boolean'].inc
 /**
  * Cleans a generator's candidate: known kind, non-empty subject, finite base clamped to [0, 1], canonical and
  * visible people (the primary must be visible; an intro pair needs both), bounded evidence ids, JSON-safe payload,
- * not already expired. Returns null to drop it.
+ * not already expired. Returns null to drop it. `self` (identity/self.ts selfPeople) are records of the owner:
+ * never visible here, so an item about me is dropped and I am never listed as one of its people.
  */
-export function normalizeCandidate(db: DB, c: Candidate, now: number): Candidate | null {
+export function normalizeCandidate(db: DB, c: Candidate, now: number, self: ReadonlySet<string> = new Set()): Candidate | null {
   if (!(SUGGESTION_KINDS as readonly string[]).includes(c.kind)) return null;
   if (typeof c.subjectKey !== 'string' || !c.subjectKey || c.subjectKey.length > 200) return null;
   if (typeof c.base !== 'number' || Number.isNaN(c.base)) return null;
   if (c.expiresAt !== null && c.expiresAt !== undefined && c.expiresAt <= now) return null;
   const ids = canonAll(db, (c.personIds ?? []).filter((x) => typeof x === 'string' && x));
   const visible = visibleSet(db, ids);
+  for (const id of self) visible.delete(id);
   if (ids.length && !visible.has(ids[0]!)) return null;
   if (c.kind === 'intro' && ids.some((id) => !visible.has(id))) return null;
   const personIds = ids.filter((id) => visible.has(id));
@@ -89,6 +91,7 @@ export function normalizeCandidate(db: DB, c: Candidate, now: number): Candidate
   }
   const relatedRaw = c.links?.relatedPersonId ?? (c.kind === 'intro' ? personIds[1] : null) ?? null;
   const related = relatedRaw ? canonAll(db, [relatedRaw])[0]! : null;
+  if (related && self.has(related) && c.kind === 'intro') return null;
   return {
     ...c,
     personIds,

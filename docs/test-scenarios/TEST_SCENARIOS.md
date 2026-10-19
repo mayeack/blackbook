@@ -1046,10 +1046,49 @@ who is **roster-only** (e.g. added from a screenshot of someone you've never tex
 become an active contact; shown once per event.
 **Platforms**: server + web label ("Invite"). Not deployed; not checked against the live database.
 
+---
+
+## Owner's own records never become suggestions; owner-confirmed merge into me (2026-10-18)
+
+**What changed**: a user merge (`method: 'user'`) may fold a person record into the `me` person (agents still can't;
+`me` never merges into anyone). `identity/self.ts` defines "my records": `me`, everyone merged into it, and any
+person still holding one of my handles (`settings.self_handles` plus the phones/emails on me; Gmail aliases by
+dots/`+tag` count). Tie stats, the suggestion chokepoint (`normalizeCandidate`), memories, circle activity and
+detection, intel attendees, intro candidates and trip/location matching all skip them. The nightly matcher first
+runs a self-link pass (`identity/selfLink.ts`): an agent-made duplicate of me moves to me whole and is retired; on an
+established record only my handle moves. An unseen handle of mine from any source attaches to me, and a Contacts
+card counts Gmail aliases toward "two of my handles".
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii`.
+2. `test/identity/self.test.ts` (self set incl. aliases, shared and unlinked handles; self-link absorb vs. handle-only
+   move; undo blocks the handle from me; new keys of mine; Contacts card), `test/pipeline/selfExclusion.test.ts`
+   (ties, suggestions stage, memories, circle activity, intel), `test/merge.test.ts` (user-only merge into me, undo),
+   `test/pipeline/circles/circles.test.ts` (no circle membership or suggested additions for a record of mine).
+
+### Scenario B — Undo an owner merge into me
+**Setup**: a person record that was merged into you (Activity shows "Merged … into you").
+1. Activity → that batch → Undo.
+2. **Expected**: the record is back as its own person in People, and a do-not-merge pair is written so it isn't
+   folded in again automatically.
+
+### Scenario C — A stray handle of mine (after deploy, owner)
+1. Have a contact record carry a Gmail `+tag` alias of your own address (any established record).
+2. Wait for the nightly `identity-match` run (or `npm run yb -- run-job identity-match`).
+3. **Expected**: Activity shows "Linked o•••@… to you"; the alias is on you, the rest of the record stays put, and the
+   record gets no tie stats or digest items while it still holds a handle of yours. Undoing that batch moves the
+   alias back and it stays there on later nights.
+
+**Edge cases**: a handle marked shared, or one you unlinked from yourself (undo), is never treated as yours; `+tag`
+aliases outside Gmail are not assumed to be yours; an agent (deterministic/probabilistic/LLM) merge into me is
+refused with `me_mismatch`.
+**Platforms**: server only. Verified against a read-only snapshot of the live DB: 3 records of mine, 0 stray
+handles, self detection ~10 ms. The production merge was done with the journaled path; the code itself is not deployed yet.
+
 ## 2026-10-18 — Extraction enums: enforced by the grammar, and an out-of-set value costs one item, not the window
-Three backfill windows were dead-lettered (`schema_invalid`) because one commitment had owner `"P66"` / `"P22"` or
+Three backfill windows failed validation (`schema_invalid`) because one commitment had owner `"P66"` / `"P22"` or
 kind `"text"`: the SDK's `zodOutputFormat` moved every `enum` into a description, and one bad value failed the whole
-window. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar, and `parseExtraction`
+window. Each was re-sent whole (a paid retry) and applied on attempt 1; a second miss would have dead-lettered it. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar, and `parseExtraction`
 (extraction/schema.ts) drops only the item holding an out-of-set string (`dropped_<item>_bad_enum`).
 
 ### Scenario A — Automated (Claude verified)
@@ -1074,7 +1113,8 @@ window. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar
 
 **Edge cases**: a missing key or a wrong type (number / null in an enum field) still fails the window (retry, then
 dead letter); a bad `needs_reply` enum drops only the verdict (no verdict, not `n_a`); two bad fields in one
-commitment count as one dropped item. The 3 windows already dead-lettered on 2026-10-18 are NOT revived by this change.
+commitment count as one dropped item. The 3 windows hit on 2026-10-18 were retried and applied (live DB, attempt 1):
+nothing to recover.
 **Platforms**: server only. Not deployed.
 
 ## 2026-10-18 — Extraction revive: schema_invalid dead letters under an older prompt get one more try

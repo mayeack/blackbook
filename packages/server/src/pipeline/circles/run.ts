@@ -19,6 +19,7 @@ import { uuidv7 } from '@yb/shared';
 import { sourceRun } from '../../adapters/common/context';
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
+import { selfPeople } from '../../identity/self';
 import { withBatch, type JournalTx } from '../../journal/batch';
 import { encodeKey } from '../../journal/tables';
 import type { Egress, LlmClient } from '../../llm/types';
@@ -236,7 +237,9 @@ export async function runCircles(db: DB, o: CirclesRunOptions = {}): Promise<Cir
   const agg = await runSteps(aggregateEdges(db, now), { signal: o.signal });
   if (!agg.complete) return { stats, complete: false, runId: null };
 
-  const visible = new Set(db.prepare('SELECT id FROM person_visible').pluck().all() as string[]);
+  // Records of mine (identity/self.ts) are never circle members: the owner is the center of every circle.
+  const self = selfPeople(db);
+  const visible = new Set((db.prepare('SELECT id FROM person_visible').pluck().all() as string[]).filter((id) => !self.has(id)));
   const det = detectCommunities(buildCircleGraph(agg.value.values(), visible), o.seed ?? DETECT_SEED);
   stats.nodes = det.nodes;
   stats.edges = det.edges;
