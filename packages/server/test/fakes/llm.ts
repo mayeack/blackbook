@@ -13,6 +13,14 @@
  * the items; batchResults answers each from the same script (keyed by the item's kind/subjectRef) with
  * `batch: true` usage and NO fallbacks (a refusal comes back as stopReason 'refusal').
  *
+ * Extraction windows send two requests (knowledge, then obligations: a custom_id ending in "_o-<n>", or the
+ * ExtractionObligations schema on a sync call). The obligations request gets `obligations:${subjectRef}` when
+ * scripted, else the reply its knowledge request just got, so one scripted reply still means one attempt (the
+ * window merges each part's own keys from it).
+ *
+ * Every structured-output schema passes the real client's grammar check (llm/client.ts grammarIssues), so a schema
+ * the API would refuse fails the test that uses it.
+ *
  * Every call is recorded with its route's resolved parameters (llm/models.ts + `overrides`): model, effort,
  * thinking, max_tokens and whether the real client would send `fallbacks` (only sync calls on a model that has
  * server-side fallback — never Haiku 5.5, never batches). Usage is priced on that model.
@@ -45,6 +53,17 @@ import {
   type TokenTarget,
 } from '../../src/llm/types';
 import { findRawIdentifiers } from '../../src/llm/egress';
+import { outputFormat } from '../../src/llm/caching';
+import { grammarIssues } from '../../src/llm/client';
+import { ExtractionObligations } from '../../src/extraction/schema';
+
+const OBLIGATIONS_ID = /_o-\d{1,2}$/;
+
+/** The API's schema compiler, as the real client checks it before sending. */
+function assertCompiles(schema: z.ZodType): void {
+  const issues = grammarIssues({ output_config: { format: outputFormat(schema) } });
+  if (issues.length) throw new Error(`FakeLlmClient: the API would refuse this output schema: ${issues.join('; ')}`);
+}
 
 export type FakeReply =
   /** A structured answer (JSON-serialized as the text block). */
@@ -114,6 +133,8 @@ export class FakeLlmClient implements LlmClient {
   readonly configured: boolean;
   readonly calls: FakeCall[] = [];
   private readonly scripts = new Map<string, FakeReply[]>();
+  /** The last reply per subjectRef (an extraction window's obligations request reuses it). */
+  private readonly lastReply = new Map<string, FakeReply>();
   private readonly batches = new Map<string, LlmBatchItem[]>();
   private batchSeq = 0;
   private reqSeq = 0;
@@ -140,12 +161,15 @@ export class FakeLlmClient implements LlmClient {
     return this;
   }
 
-  private reply(call: FakeCall): FakeReply {
-    for (const key of [`${call.kind}:${call.subjectRef}`, call.kind]) {
+  private reply(call: FakeCall, obligations = false): FakeReply {
+    const take = (key: string) => {
       const queue = this.scripts.get(key);
-      if (queue?.length) return queue.length > 1 ? queue.shift()! : queue[0]!;
-    }
-    return this.o.responder?.(call) ?? { json: {} };
+      return queue?.length ? (queue.length > 1 ? queue.shift()! : queue[0]!) : undefined;
+    };
+    if (obligations) return take(`obligations:${call.subjectRef}`) ?? this.lastReply.get(call.subjectRef) ?? this.reply(call);
+    const r = take(`${call.kind}:${call.subjectRef}`) ?? take(call.kind) ?? this.o.responder?.(call) ?? { json: {} };
+    this.lastReply.set(call.subjectRef, r);
+    return r;
   }
 
   private usage(batch: boolean, extra?: Partial<LlmUsage>, p?: RouteParams): LlmUsage {
@@ -196,13 +220,14 @@ export class FakeLlmClient implements LlmClient {
   }
 
   async parse<T>(req: LlmParseRequest<T>): Promise<LlmOutcome<T>> {
+    assertCompiles(req.schema);
     const call = this.record('parse', req as LlmParseRequest<unknown>);
     const blocked = this.gate(req, call.userText);
     if (blocked) return blocked;
     // Like the real client: only a route with an image allowance may carry images.
     if (call.images > this.params(req.route).maxImages) return { status: 'unavailable', reason: 'egress_blocked' };
     const requestId = `fake_req_${++this.reqSeq}`;
-    const r = this.reply(call);
+    const r = this.reply(call, req.schema === (ExtractionObligations as unknown));
     return this.settle(r, req.schema, req.validate, requestId, req.pool ?? 'steady', this.params(req.route));
   }
 
@@ -271,6 +296,7 @@ export class FakeLlmClient implements LlmClient {
     const spend = this.canSpend(pool);
     if (!spend.ok) return { status: 'unavailable', reason: spend.reason };
     for (const it of items) {
+      assertCompiles(it.schema);
       if ((this.o.scanEgress ?? true) && findRawIdentifiers(textOf(it.messages)).length) return { status: 'unavailable', reason: 'egress_blocked' };
     }
     const batchId = `msgbatch_fake_${++this.batchSeq}`;
@@ -285,10 +311,10 @@ export class FakeLlmClient implements LlmClient {
   }
 
   async *batchResults(batchId: string): AsyncIterable<LlmBatchResult> {
-    const items = [...(this.batches.get(batchId) ?? [])].reverse(); // any order: callers must key by customId
-    for (const it of items) {
-      const call = this.calls.find((c) => c.customId === it.customId)!;
-      const r = this.reply(call);
+    // Replies are picked in submission order (a window's obligations request follows its knowledge request), then
+    // returned in reverse: any order, callers must key by customId.
+    const answered = (this.batches.get(batchId) ?? []).map((it) => ({ it, r: this.reply(this.calls.find((c) => c.customId === it.customId)!, OBLIGATIONS_ID.test(it.customId)) }));
+    for (const { it, r } of answered.reverse()) {
       if ('batchError' in r) yield { customId: it.customId, type: 'errored', errorType: r.batchError, message: 'fake error' };
       else if ('expired' in r) yield { customId: it.customId, type: 'expired' };
       else if ('canceled' in r) yield { customId: it.customId, type: 'canceled' };

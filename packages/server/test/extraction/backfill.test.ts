@@ -33,7 +33,7 @@ function history(w: XWorld) {
 }
 
 describe('historical backfill', () => {
-  it('builds conversation-month windows before the steady start, ADD-only; old commitments are dropped', async () => {
+  it('builds conversation-month windows before the steady start, ADD-only; old windows send no obligations request', async () => {
     const w = buildXWorld();
     const m = history(w);
     const f = fakes();
@@ -42,7 +42,9 @@ describe('historical backfill', () => {
     const hist = windowsOf(w.db, w.dm).filter((x) => x.mode === 'historical');
     expect(hist).toHaveLength(2); // July and August
     const batch = f.llm.calls.filter((c) => c.method === 'batch');
+    // Both months are older than 30 days: knowledge requests only (their obligations would be dropped anyway).
     expect(batch).toHaveLength(2);
+    expect(batch.every((c) => !/_o-\d+$/.test(c.customId!))).toBe(true);
     expect(batch.every((c) => c.kind === 'historical' && c.route === 'extract_historical' && c.maxTokens === HISTORICAL_MAX_TOKENS && !c.fallbacks)).toBe(true);
     expect(batch[0]!.userText).toMatch(/^mode=historical /);
     expect(batch[0]!.userText).not.toContain('SUMMARY:');
@@ -79,7 +81,8 @@ describe('historical backfill', () => {
       json: extraction({ facts: [fact(P2, 'location_current', 'Denver', [{ msg: lineOf(w.db, aug!.id, m.c), quote: 'I live in Denver now' }], 0.95)] }),
     });
     const c1 = await collect(deps(w, f, NOW + 10 * MIN));
-    expect(c1.counts).toMatchObject({ applied: 2, dropped_fact_historical_op: 1, dropped_commitment_too_old: 1 });
+    // The scripted answer carries a commitment and a reply verdict, but no obligations request was sent: none applies.
+    expect(c1.counts).toMatchObject({ applied: 2, dropped_fact_historical_op: 1 });
     expect(count(w, 'SELECT count(*) FROM commitments')).toBe(0);
     expect(count(w, 'SELECT count(*) FROM reply_verdicts')).toBe(0);
     // Chronology: Denver (Aug) closes Austin (Jul), whatever order the windows were applied in.

@@ -36,7 +36,8 @@ export const EVAL_USAGE = `usage: yb eval <command> [options]        (also: npm 
   shadow [--days 7] [--limit 600] [--max-usd 1] [--effort low|medium|high] [--system-file <path>]
          [--spot-check 20] [--no-golden] [--plan] [--json]
                                          prompt_version comparison: replay recent + golden windows through Claude
-                                         into shadow rows (nothing applied). --plan: estimate only, sends nothing
+                                         into shadow rows (nothing applied). --plan: estimate only, sends nothing.
+                                         --system-file replaces the knowledge prompt (the obligations prompt stays)
   shadow-report [<runId>] [--json]       the diff and promotion gate of a shadow run (latest by default)
   reset --set <set> --yes                delete a golden set and its labels
   intent [--json]                        the intent parser's eval cases (synthetic notes + a synthetic profile

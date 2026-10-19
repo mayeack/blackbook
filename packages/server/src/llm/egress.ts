@@ -519,17 +519,33 @@ class SqliteEgress implements Egress {
     }
     text = text.replace(new RegExp(RAW_IDENTIFIER_PATTERNS.phone.source, 'g'), () => (bump('phone'), '<phone>'));
 
-    text = text.replace(HANDLE, (_m, handle: string) => {
-      bump('handle');
-      const key = igKey(handle);
-      const token = key ? this.tokenForIdentity(this.identityByKey('instagram_username', key), unresolved, map) : null;
-      return token ? `<ig:${token}>` : '<handle>';
-    });
+    text = this.replaceHandles(text, unresolved, map, bump);
     text = text.replace(STREET, () => (bump('addr'), '<addr>'));
     text = text.replace(DIGIT_RUN, () => (bump('num'), '<num>'));
     for (const n of fullNames) text = text.replace(n.re, (_m, first: string) => (bump('last_name'), `${first} ${n.initial}`));
 
-    return text.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => kept[Number(i)] ?? '');
+    text = text.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => kept[Number(i)] ?? '');
+    // Once more at the end: a later step can expose a handle the scanner would block ("1234567@x" → "<num>@x",
+    // an "@" right before a kept UUID).
+    return this.replaceHandles(text, unresolved, map, bump);
+  }
+
+  /**
+   * @handles → <ig:P…|H…|ME> when known, else <handle>, repeated until none is left: in "@a@b" the lookbehind sees
+   * the letter before "@b", so it only becomes a match once "@a" is replaced. Every pass that changes the text
+   * removes an "@" (the replacements contain none), so the loop ends.
+   */
+  private replaceHandles(text: string, unresolved: Set<string>, map: TokenMap, bump: (k: string, n?: number) => void): string {
+    for (let prev = ''; prev !== text; ) {
+      prev = text;
+      text = text.replace(HANDLE, (_m, handle: string) => {
+        bump('handle');
+        const key = igKey(handle);
+        const token = key ? this.tokenForIdentity(this.identityByKey('instagram_username', key), unresolved, map) : null;
+        return token ? `<ig:${token}>` : '<handle>';
+      });
+    }
+    return text;
   }
 
   scan(text: string): void {
