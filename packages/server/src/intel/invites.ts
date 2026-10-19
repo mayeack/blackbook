@@ -19,6 +19,7 @@
  * Pure reader; payload is numbers and short codes only (the composer reads the title at render time).
  */
 import type { DB } from '../db/connection';
+import { selfPeople } from '../identity/self';
 import { preferredPeople } from '../pipeline/circles/preferences';
 import { occasionChain } from '../pipeline/occasions/build';
 import { personState } from '../pipeline/suggestions/learner';
@@ -143,9 +144,13 @@ export function guestList(db: DB, e: Pick<SocialEvent, 'type' | 'id' | 'eventId'
   return new Set(ids);
 }
 
-/** Visible canonical people among `ids` (never the owner, hidden, merged, roster-only or service people). */
+/**
+ * Visible canonical people among `ids` (never the owner, hidden, merged, roster-only or service people, nor a record
+ * of mine still holding one of my handles: identity/self.ts).
+ */
 function visibleOf(db: DB, ids: Iterable<string>): Set<string> {
-  const list = [...ids];
+  const self = selfPeople(db);
+  const list = [...ids].filter((id) => !self.has(id));
   if (!list.length) return new Set();
   return new Set(db.prepare(`SELECT id FROM person_visible WHERE id IN (SELECT value FROM json_each(?))`).pluck().all(JSON.stringify(list)) as string[]);
 }

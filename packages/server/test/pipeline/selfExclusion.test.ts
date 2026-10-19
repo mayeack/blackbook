@@ -8,6 +8,7 @@ import type { DB } from '../../src/db/connection';
 import { mergePeople } from '../../src/identity/merge';
 import { knownAttendees } from '../../src/intel/common';
 import { introPeople } from '../../src/intel/intros';
+import { invitePicks } from '../../src/intel/invites';
 import { locationFacts } from '../../src/intel/trips';
 import { circleActivity } from '../../src/pipeline/circles/generators';
 import { memoryCandidates } from '../../src/pipeline/suggestions/gen/memory';
@@ -129,5 +130,15 @@ describe('intel', () => {
     w.fact(ava, 'home_location', 'Austin, TX', { source: 'legacy' });
     w.fact(stray, 'home_location', 'Austin, TX', { source: 'legacy' });
     expect(locationFacts(w.db).map((f) => f.personId)).toEqual([ava]);
+  });
+
+  it('party invites never pick a record of mine, even one in the Party invites circle', () => {
+    const w = intelWorld();
+    const ava = w.person('Ava', 'Quill', { tie: 80, historical: 80 });
+    const stray = w.person('Owner', 'Example', { tie: 95, historical: 95 });
+    strayOfMine(w.db, w.me, stray);
+    const party = intelOccasion(w.db, { title: 'Game night', start: at(5) });
+    const picks = invitePicks(w.db, { type: 'occasion', id: party, eventId: null }, { preferred: new Set([stray, ava]), records: new Map(), now: INTEL_NOW });
+    expect(picks.map((p) => p.personId)).toEqual([ava]);
   });
 });
