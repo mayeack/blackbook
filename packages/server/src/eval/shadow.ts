@@ -17,8 +17,23 @@
  */
 import { uuidv7 } from '@yb/shared';
 import type { DB } from '../db/connection';
-import { Extraction, GATES, loadPacket, validateExtraction, type Packet } from '../extraction';
-import { EXTRACTION_PROMPT_VERSION, EXTRACTION_SCHEMA_JSON, EXTRACTION_SYSTEM, HISTORICAL_MAX_TOKENS, STEADY_MAX_TOKENS } from '../extraction/prompt';
+import { GATES, loadPacket, validateExtraction, type Packet } from '../extraction';
+import { mergedText, obligationsCustomId, parseWindowSync } from '../extraction/parts';
+import { Extraction } from '../extraction/schema';
+import {
+  EXTRACTION_PROMPT_VERSION,
+  extractionParts,
+  extractionPromptText,
+  HISTORICAL_MAX_TOKENS,
+  KNOWLEDGE_SCHEMA_JSON,
+  KNOWLEDGE_SYSTEM,
+  OBLIGATIONS_SCHEMA_JSON,
+  OBLIGATIONS_SYSTEM,
+  STEADY_MAX_TOKENS,
+  type ExtractionPart,
+  type ExtractionPartName,
+} from '../extraction/prompt';
+import { needsObligations } from '../extraction/validate';
 import { estimatePromptTokens, estimateRouteUsd, llmExclusions, promptVersion, resolveRoute, routeOverrides, type LlmClient, type LlmEffort, type RouteParams } from '../llm';
 import { nullLogger, type Logger } from '../ops/logger';
 import { settingTimeZone } from '../settings/registry';
@@ -40,7 +55,7 @@ export interface ShadowOptions {
   limit?: number;
   maxUsd?: number;
   effort?: LlmEffort;
-  /** The candidate system prompt (default: this build's extraction prompt). */
+  /** The candidate knowledge prompt (default: this build's); a window's obligations request keeps this build's prompt. */
   system?: { text: string; source: 'code' | 'file' };
   /** Replay labeled/unlabeled G1 windows too (default true). */
   includeGolden?: boolean;
@@ -76,17 +91,31 @@ interface Target {
   skip: 'excluded' | 'no_input' | null;
 }
 
-const estimateUsd = (userText: string, system: string, p: RouteParams = resolveRoute('eval_shadow')) =>
-  estimateRouteUsd(p, { userTokens: estimatePromptTokens(userText), systemTokens: estimatePromptTokens(system.length + EXTRACTION_SCHEMA_JSON.length), mode: 'sync' });
+type Systems = Record<ExtractionPartName, string>;
+const SCHEMA_JSON: Systems = { knowledge: KNOWLEDGE_SCHEMA_JSON, obligations: OBLIGATIONS_SCHEMA_JSON };
+
+/** One of a window's requests on the eval_shadow route (sync), with the candidate's system prompt. */
+const estimatePartUsd = (userText: string, part: ExtractionPart, systems: Systems, p: RouteParams = resolveRoute('eval_shadow')) =>
+  estimateRouteUsd(p, {
+    userTokens: estimatePromptTokens(userText),
+    systemTokens: estimatePromptTokens(systems[part.name].length + SCHEMA_JSON[part.name].length),
+    mode: 'sync',
+    ...(part.estOutputTokens !== null ? { outputTokens: part.estOutputTokens } : {}),
+  });
+
+/** A window's one or two requests. */
+const estimateUsd = (t: Target, systems: Systems, p?: RouteParams) =>
+  extractionParts(needsObligations(t.packet!)).reduce((n, part) => n + estimatePartUsd(t.userText!, part, systems, p), 0);
 
 /**
- * The candidate: a prompt on the eval_shadow route as it will run (its model and effort, --effort replacing the
- * effort). With this build's prompt and the default route the version equals production extraction's.
+ * The candidate: the prompts on the eval_shadow route as they will run (its model and effort, --effort replacing
+ * the effort). With this build's prompts and the default route the version equals production extraction's.
  */
-function candidate(o: Omit<ShadowOptions, 'llm'>): { system: string; source: 'code' | 'file'; effort: LlmEffort; version: string; params: RouteParams } {
-  const system = o.system?.text ?? EXTRACTION_SYSTEM;
+function candidate(o: Omit<ShadowOptions, 'llm'>): { systems: Systems; source: 'code' | 'file'; effort: LlmEffort; version: string; params: RouteParams } {
+  const systems: Systems = { knowledge: o.system?.text ?? KNOWLEDGE_SYSTEM, obligations: OBLIGATIONS_SYSTEM };
   const params = shadowParams(o.db, o.effort);
-  return { system, source: o.system?.source ?? 'code', effort: params.effort, version: promptVersion(system, EXTRACTION_SCHEMA_JSON, params.effort, params.model), params };
+  const text = extractionPromptText(systems.knowledge, systems.obligations);
+  return { systems, source: o.system?.source ?? 'code', effort: params.effort, version: promptVersion(text.system, text.schemaJson, params.effort, params.model), params };
 }
 
 /** Which windows a run would replay (read-only). */
@@ -161,7 +190,7 @@ function planOf(c: ReturnType<typeof candidate>, ts: readonly Target[]): ShadowP
     recent: runnable.filter((t) => !t.goldenItemId).length,
     excluded: ts.filter((t) => t.skip === 'excluded').length,
     noInput: ts.filter((t) => t.skip === 'no_input').length,
-    estimateUsd: Math.round(runnable.reduce((s, t) => s + estimateUsd(t.userText!, c.system, c.params), 0) * 10_000) / 10_000,
+    estimateUsd: Math.round(runnable.reduce((s, t) => s + estimateUsd(t, c.systems, c.params), 0) * 10_000) / 10_000,
   };
 }
 
@@ -181,17 +210,22 @@ function factNormOf(packet: Packet): (factId: string) => string | null {
 
 function baselineOf(db: DB, t: Target, now: number, canon: (id: string) => string, goldenPreds: StoredPrediction[] | null, ctx: Parameters<typeof appliedPredictions>[0]): Pick<ShadowItem, 'baseline' | 'baselineSource' | 'baselineVersion'> {
   const packet = t.packet!;
+  // The window's knowledge answer (or a whole one-request answer from before the split), then its obligations
+  // answer by custom_id; a one-request answer carries both parts itself.
   const row = db
     .prepare(
-      `SELECT output, prompt_version FROM llm_requests
+      `SELECT custom_id, output, prompt_version FROM llm_requests
        WHERE subject_ref = ? AND kind IN ('extract','historical') AND status IN ('succeeded','applied') AND output IS NOT NULL
+         AND json_valid(output) AND json_type(output, '$.facts') IS NOT NULL
          AND (run_id IS NULL OR run_id NOT IN (SELECT id FROM eval_shadow_runs))
        ORDER BY created_at DESC LIMIT 1`,
     )
-    .get(t.windowId) as { output: string; prompt_version: string } | undefined;
+    .get(t.windowId) as { custom_id: string; output: string; prompt_version: string } | undefined;
   if (row) {
     try {
-      const parsed = Extraction.safeParse(JSON.parse(row.output));
+      const obligations = db.prepare('SELECT output FROM llm_requests WHERE custom_id = ? AND output IS NOT NULL').pluck().get(obligationsCustomId(row.custom_id)) as string | undefined;
+      const merged = mergedText(row.output, needsObligations(packet) ? (obligations ?? row.output) : undefined);
+      const parsed = Extraction.safeParse(merged === null ? null : JSON.parse(merged));
       if (parsed.success) {
         const v = validateExtraction(parsed.data, packet, { now });
         return { baseline: gatedClaims(keyedFromValidated(v, canon, factNormOf(packet))), baselineSource: 'output', baselineVersion: row.prompt_version };
@@ -236,22 +270,25 @@ export async function runShadow(o: ShadowOptions): Promise<ShadowOutcome> {
     const packet = t.packet!;
     const base = baselineOf(db, t, now, canon, t.goldenItemId ? (golden.get(t.goldenItemId)?.predictions ?? null) : null, ctx);
     state.sent++;
-    const out = await o.llm.parse({
-      kind: packet.mode === 'historical' ? 'historical' : 'extract',
-      route: 'eval_shadow',
-      subjectRef: t.windowId,
-      promptVersion: cand.version,
-      system: cand.system,
-      messages: [{ role: 'user', content: t.userText! }],
-      // The eval-only effort override: constant for the whole run, so the run's requests share one cache entry.
-      ...(o.effort ? { effortOverride: o.effort } : {}),
-      maxTokens: Math.min(params.maxTokens, packet.mode === 'historical' ? HISTORICAL_MAX_TOKENS : STEADY_MAX_TOKENS),
-      pool: 'steady',
-      estimateUsd: estimateUsd(t.userText!, cand.system, params),
-      schema: Extraction,
-      runId,
-      ...(o.signal ? { signal: o.signal } : {}),
-    });
+    const out = await parseWindowSync(
+      o.llm,
+      {
+        kind: packet.mode === 'historical' ? 'historical' : 'extract',
+        route: 'eval_shadow',
+        subjectRef: t.windowId,
+        promptVersion: cand.version,
+        systems: cand.systems,
+        messages: [{ role: 'user', content: t.userText! }],
+        // The eval-only effort override: constant for the whole run, so the run's requests share one cache entry each.
+        ...(o.effort ? { effortOverride: o.effort } : {}),
+        maxTokens: Math.min(params.maxTokens, packet.mode === 'historical' ? HISTORICAL_MAX_TOKENS : STEADY_MAX_TOKENS),
+        pool: 'steady',
+        estimateUsd: (part) => estimatePartUsd(t.userText!, part, cand.systems, params),
+        runId,
+        ...(o.signal ? { signal: o.signal } : {}),
+      },
+      needsObligations(packet),
+    );
     let status: ShadowItemStatus;
     let shadow: KeyedPrediction[] = [];
     let cost: number | null = null;

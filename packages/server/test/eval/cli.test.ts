@@ -83,8 +83,10 @@ describe('yb eval', () => {
     fs.writeFileSync(file, 'You extract nothing. Return the JSON schema with empty arrays.');
     r = await run(['shadow', '--system-file', file, '--effort', 'medium', '--spot-check', '5'], llm);
     expect(r.code).toBe(0);
-    expect(llm.calls).toHaveLength(3);
-    expect(llm.calls.every((c) => c.effort === 'medium' && c.system.startsWith('You extract nothing'))).toBe(true);
+    expect(llm.calls).toHaveLength(6); // 3 windows × (knowledge + obligations)
+    expect(llm.calls.every((c) => c.effort === 'medium')).toBe(true);
+    // The prompt file replaces the knowledge prompt; the obligations requests keep this build's.
+    expect(llm.calls.filter((c) => c.system.startsWith('You extract nothing'))).toHaveLength(3);
     expect(r.out).toMatch(/shadow run [0-9a-f-]{36}: prompt [0-9a-f]{8} \(effort medium\) · done · 3 windows/);
     expect(r.out).toMatch(/claims: agree 0 · added 0 · removed \d+/);
     noPii(r.out);

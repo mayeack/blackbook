@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { undoBatch } from '../../src/journal/undo';
-import { STEADY_MAX_TOKENS } from '../../src/extraction/prompt';
+import { KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM, STEADY_MAX_TOKENS } from '../../src/extraction/prompt';
+import type { FakeCall } from '../fakes/llm';
 import { buildEnv } from '../../src/extraction/env';
 import { collect, renderWindowSpecs, submitSteady, WINDOW_PROMPT_BUDGET } from '../../src/extraction/run';
 import { PROMPT_TOKEN_LIMIT } from '../../src/llm/models';
@@ -49,11 +50,19 @@ describe('steady extraction: submit', () => {
     const rep = await submitSteady(deps(w, f));
     expect(rep.status).toBe('ok');
     expect(rep.counts).toMatchObject({ windows: 1, submitted: 1, batches: 1 });
+    // One window, two requests in the same batch: knowledge, then obligations (same user turn, same route).
     const calls = f.llm.calls.filter((c) => c.method === 'batch');
-    expect(calls).toHaveLength(1);
-    const call = calls[0]!;
-    expect(call).toMatchObject({ kind: 'extract', route: 'extract_steady', model: DEFAULT_MODEL, effort: 'low', thinking: 'disabled', maxTokens: STEADY_MAX_TOKENS, fallbacks: false });
+    expect(calls).toHaveLength(2);
+    const [call, obligations] = calls as [FakeCall, FakeCall];
+    for (const c of calls) {
+      expect(c).toMatchObject({ kind: 'extract', route: 'extract_steady', model: DEFAULT_MODEL, effort: 'low', thinking: 'disabled', maxTokens: STEADY_MAX_TOKENS, fallbacks: false });
+    }
     expect(call.customId).toMatch(/^x[0-9a-f]{8}-[0-9a-f]{32}-0$/);
+    expect(obligations.customId).toBe(call.customId!.replace(/-0$/, '_o-0'));
+    expect(call.system).toBe(KNOWLEDGE_SYSTEM);
+    expect(obligations.system).toBe(OBLIGATIONS_SYSTEM);
+    expect(obligations.userText).toBe(call.userText);
+    expect(count(w.db, 'SELECT count(*) FROM extraction_items')).toBe(1); // the window keeps one item
     // The user turn: header, cards, line format; the phone number never leaves.
     expect(call.userText).toMatch(/^mode=steady as_of=2026-10-16 tz=America\/Chicago chat=dm members=2/);
     expect(call.userText).toMatch(/\nPEOPLE:\nP1 Sam\n/);
@@ -274,7 +283,7 @@ describe('steady extraction: collect → validate → apply', () => {
     expect(rep.counts).toMatchObject({ batch_refusals: 1, refused: 1 });
     expect(rep.counts.refusal_rerun_ok).toBeUndefined();
     expect(f.llm.calls.filter((c) => c.method === 'parse')).toHaveLength(0);
-    expect(f.llm.calls.filter((c) => c.method === 'batch')).toHaveLength(1);
+    expect(f.llm.calls.filter((c) => c.method === 'batch')).toHaveLength(2); // the window's two requests, once
     expect(windowsOf(w.db, w.dm)[0]!.status).toBe('refused');
     expect(count(w.db, 'SELECT count(*) FROM extraction_coverage WHERE window_id = ?', win)).toBe(4);
   });
@@ -288,9 +297,10 @@ describe('steady extraction: collect → validate → apply', () => {
     f.llm.on(`extract:${win}`, { refusal: 'cyber' }, { json: extraction() });
     const rep = await collect(deps(s1.w, f, NOW + 10 * MIN));
     expect(rep.counts).toMatchObject({ batch_refusals: 1, refusal_rerun_ok: 1 });
+    // Both of the window's requests, one after the other.
     const sync = f.llm.calls.filter((c) => c.method === 'parse');
-    expect(sync).toHaveLength(1);
-    expect(sync[0]).toMatchObject({ route: 'extract_steady', model: SONNET_5_5, fallbacks: true, effort: 'low', subjectRef: win });
+    expect(sync.map((c) => c.system)).toEqual([KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM]);
+    for (const c of sync) expect(c).toMatchObject({ route: 'extract_steady', model: SONNET_5_5, fallbacks: true, effort: 'low', subjectRef: win });
     expect(windowsOf(s1.w.db, s1.w.dm)[0]!.status).toBe('applied');
 
     const s2 = dmWorld();
@@ -321,9 +331,10 @@ describe('steady extraction: collect → validate → apply', () => {
     f.llm.on(`extract:${win}`, { maxTokens: true });
     const rep = await collect(deps(w, f, NOW + 10 * MIN));
     expect(rep.counts).toMatchObject({ requeued_max_tokens: 1, resubmitted: 1 });
-    const second = f.llm.calls.filter((c) => c.method === 'batch')[1]!;
-    expect(second.maxTokens).toBe(STEADY_MAX_TOKENS * 2);
-    expect(second.customId).toMatch(/-1$/);
+    // The re-queue sends both requests again at ×2.
+    const second = f.llm.calls.filter((c) => c.method === 'batch' && /-1$/.test(c.customId!));
+    expect(second.map((c) => c.customId!.replace(/^.*?(_o)?-1$/, '$1'))).toEqual(['', '_o']);
+    for (const c of second) expect(c.maxTokens).toBe(STEADY_MAX_TOKENS * 2);
     const rep2 = await collect(deps(w, f, NOW + 20 * MIN));
     expect(rep2.counts.split).toBe(1);
     const ws = windowsOf(w.db, w.dm);
