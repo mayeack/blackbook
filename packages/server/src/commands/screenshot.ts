@@ -15,24 +15,21 @@ import { withBatch } from '../journal/batch';
 import { attachExternalIdentity, personOfIdentity } from '../identity/external';
 import type { ResolveContext } from '../identity/resolver';
 import type { ImageProfile } from './intent';
-import { labelOf, type PersonLite } from './people';
-import { shortName } from './text';
+import type { PersonLite } from './people';
 
 export type ScreenshotPerson =
-  | { ok: true; personId: string; label: string; created: boolean }
+  | { ok: true; personId: string; created: boolean }
   | { ok: false; reason: 'unreadable' | 'ambiguous' | 'service' };
 
 interface PersonRow {
   id: string;
   display_name: string;
-  first_name: string | null;
-  last_name: string | null;
   kind: string;
   status: string;
 }
 
 const personRow = (ctx: ResolveContext, id: string) =>
-  ctx.db.prepare('SELECT id, display_name, first_name, last_name, kind, status FROM people WHERE id = ?').get(id) as PersonRow | undefined;
+  ctx.db.prepare('SELECT id, display_name, kind, status FROM people WHERE id = ?').get(id) as PersonRow | undefined;
 
 const nameKey = (s: string): string =>
   s
@@ -76,7 +73,7 @@ export function resolveScreenshotPerson(ctx: ResolveContext, profile: ImageProfi
           { now: ctx.now },
         );
       }
-      return { ok: true, personId: p.id, label: shortName(p), created: false };
+      return { ok: true, personId: p.id, created: false };
     }
     const identityId = attachExternalIdentity(ctx, {
       kind: 'instagram_username',
@@ -90,11 +87,11 @@ export function resolveScreenshotPerson(ctx: ResolveContext, profile: ImageProfi
     const p = personId ? personRow(ctx, canonicalId(ctx.db, personId)) : undefined;
     if (!p) return { ok: false, reason: 'unreadable' };
     if (p.status === 'service') return { ok: false, reason: 'service' };
-    return { ok: true, personId: p.id, label: shortName(p), created: true };
+    return { ok: true, personId: p.id, created: true };
   }
   const named = profile.name ? byName(profile.name, people) : null;
   if (!named?.length) return { ok: false, reason: 'unreadable' };
   if (named.length > 1) return { ok: false, reason: 'ambiguous' };
   const p = named[0]!;
-  return { ok: true, personId: p.id, label: labelOf(p), created: false };
+  return { ok: true, personId: p.id, created: false };
 }

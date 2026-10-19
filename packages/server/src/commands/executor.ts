@@ -60,7 +60,7 @@ import { safeWhy, sendFeedback, undoLastCommandEffect } from './feedback';
 import { isImplicitItemClause, ITEM_VERBS, parseCommand, selectionNums, type Clause, type Parsed } from './grammar';
 import { parseIntent, type IntentResult, type LogKind } from './intent';
 import { applyLog, deterministicKind, logKindTitle, type LogFact } from './log';
-import { distinctLabels, findMentions, intentCandidates, labelOf, loadPeople, resolveSurface, type PersonLite } from './people';
+import { commandLabels, distinctLabels, findMentions, intentCandidates, loadPeople, resolveSurface, type PersonLite } from './people';
 import { resolveScreenshotPerson } from './screenshot';
 import { recordSeenReactions } from './seen';
 import {
@@ -90,7 +90,7 @@ import {
   type PendingCommand,
   type SuggestionSnapshot,
 } from './state';
-import { finalizeReply, formatDay, HELP_TEXT, listJoin, relativeDay, scrub, shortName, stableRef, truncate } from './text';
+import { finalizeReply, formatDay, HELP_TEXT, listJoin, relativeDay, scrub, stableRef, truncate } from './text';
 import { logTimeFromDate, resolveLogTime, resolveUntil } from './time';
 
 const MAX_PER_PASS = 10;
@@ -299,8 +299,6 @@ class CommandRun {
   private images: LlmImage[] | null = null;
   /** Screenshots the command had that didn't reach the parser (setting off, collector down, file not synced yet). */
   private imagesMissed: 'off' | 'unavailable' | null = null;
-  /** Labels of people this command touched who aren't in the visible list (a roster-only screenshot person). */
-  private readonly extraLabels = new Map<string, string>();
   /** The digest item this command is an inline reply to (its own text), if any. */
   private inlineOrdinal: number | null = null;
   /** An inline reply to a bot text that carries no item (an answer, an ack, the "Heads up" text). */
@@ -494,16 +492,33 @@ class CommandRun {
     return { db: this.db, runId: () => this.ensureRun(), now: this.now, source: 'screenshot', actor: 'user' };
   }
 
-  /** "Sam R." for anyone, visible or not (a roster-only screenshot person; a person picked in a clarification). */
-  private labelFor(personId: string): string | null {
+  /** Anyone, visible or not (a roster-only screenshot person; a person picked in a clarification). */
+  private personFor(personId: string): PersonLite | null {
     const known = this.loadPeopleOnce().find((p) => p.id === personId);
-    if (known) return labelOf(known);
-    const extra = this.extraLabels.get(personId);
-    if (extra) return extra;
+    if (known) return known;
     const row = this.db.prepare('SELECT display_name, first_name, last_name FROM people WHERE id = ?').get(personId) as
       | { display_name: string; first_name: string | null; last_name: string | null }
       | undefined;
-    return row ? shortName(row) : null;
+    return row
+      ? { id: personId, first: row.first_name, last: row.last_name, nickname: null, display: row.display_name, company: null, priority: false, lastAt: null }
+      : null;
+  }
+
+  /**
+   * "Sam R." for each of the people one command names, or "Sam Rivera" where that reads as the owner's own short
+   * name or as another person's in the command (commandLabels).
+   */
+  private labelsFor(personIds: readonly string[]): (personId: string) => string | null {
+    const people = new Map<string, PersonLite>();
+    for (const id of personIds) {
+      const p = people.has(id) ? null : this.personFor(id);
+      if (p) people.set(id, p);
+    }
+    const label = commandLabels([...people.values()], ownerNames(this.db));
+    return (personId) => {
+      const p = people.get(personId);
+      return p ? label(p) : null;
+    };
   }
 
   private loadPeopleOnce(): PersonLite[] {
@@ -803,7 +818,6 @@ class CommandRun {
       shot = r.personId;
       visible.add(shot);
       resolved.push(shot); // named somewhere in the parse (people, facts or preferences)
-      this.extraLabels.set(shot, r.label);
       if (r.created) created.push(shot);
     }
     const llmLog = intent?.log ?? null;
@@ -902,7 +916,8 @@ class CommandRun {
   }
 
   private applyLogPlan(payload: ClarifyPayload, msg: MessageInfo, ex: Exec): void {
-    const names = payload.resolved.map((id) => this.labelFor(id)).filter((n): n is string => !!n);
+    const labelFor = this.labelsFor(payload.resolved);
+    const names = payload.resolved.map(labelFor).filter((n): n is string => !!n);
     const kind = payload.kind as LogKind;
     const plan = {
       text: payload.text,
@@ -917,7 +932,7 @@ class CommandRun {
     const title = payload.interaction ? `Logged ${logKindTitle(kind).toLowerCase()} with ${listJoin(names)} (text)` : `Noted about ${listJoin(names)} (text)`;
     const applied = applyLog(this.db, plan, { runId: this.ensureRun(), now: this.now, messageId: msg.id, title });
     if (applied.batchId) ex.batchIds.push(applied.batchId);
-    const prefAcks = this.applyPrefs(payload, ex);
+    const prefAcks = this.applyPrefs(payload, ex, labelFor);
     ex.effect = ex.effect === 'none' || ex.effect === 'log' ? 'log' : 'mixed';
     const day = relativeDay(payload.date, localParts(this.now, this.tz).date, payload.at, this.tz);
     const what = kind === 'other' ? 'note' : logKindTitle(kind).toLowerCase();
@@ -927,7 +942,7 @@ class CommandRun {
       .map((f) => `“${truncate(f.value, 40)}”`);
     const missing = payload.unresolved.length ? [endSentence(`I couldn't find ${listJoin(payload.unresolved.map((u) => truncate(u, 30)), 'or')}`)] : [];
     const created = new Set(payload.created ?? []);
-    const who = listJoin(payload.resolved.map((id) => `${this.labelFor(id) ?? 'someone'}${created.has(id) ? ' (new, from your screenshot)' : ''}`));
+    const who = listJoin(payload.resolved.map((id) => `${labelFor(id) ?? 'someone'}${created.has(id) ? ' (new, from your screenshot)' : ''}`));
     const when = day === 'today' || day === 'yesterday' ? day : `on ${day}`;
     const head = payload.interaction ? `✓ Logged ${LOG_PHRASE[kind]} ${who} ${when}.` : endSentence(`✓ Noted for ${who}`);
     const prefLines = prefAcks.map((a) => endSentence(a[0]!.toUpperCase() + a.slice(1)));
@@ -937,7 +952,7 @@ class CommandRun {
   }
 
   /** Standing preferences: each kind's circle gets its people, one journaled batch per kind. Returns the acks. */
-  private applyPrefs(payload: ClarifyPayload, ex: Exec): string[] {
+  private applyPrefs(payload: ClarifyPayload, ex: Exec, labelFor: (personId: string) => string | null): string[] {
     const byKind = new Map<PreferenceKind, string[]>();
     for (const p of payload.prefs ?? []) {
       if (!p.personId || !payload.resolved.includes(p.personId)) continue;
@@ -945,7 +960,7 @@ class CommandRun {
     }
     const acks: string[] = [];
     for (const [kind, ids] of byKind) {
-      const names = listJoin(ids.map((id) => this.labelFor(id) ?? 'someone'));
+      const names = listJoin(ids.map((id) => labelFor(id) ?? 'someone'));
       const { batchId, changes } = withBatch(
         this.db,
         { runId: this.ensureRun(), kind: 'circle', title: `${names}: ${PREFERENCES[kind].ack} (text)`, subjectPersonId: ids[0], actor: 'user' },

@@ -13,7 +13,7 @@ import { withBatch } from '../../src/journal/batch';
 import { addToPreference, preferredPeople } from '../../src/pipeline/circles/preferences';
 import type { LlmImage } from '../../src/llm/types';
 import { FakeLlmClient, type FakeCall } from '../fakes/llm';
-import { memDb, seedPerson, T0 } from '../helpers';
+import { memDb, seedIdentity, seedPerson, T0 } from '../helpers';
 import { BRIEF_AT, commandsWorld, MIN, setSetting } from './world';
 
 const at = (mins: number) => BRIEF_AT + mins * MIN;
@@ -171,6 +171,20 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Rowan T. (new, from your screenshot).\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
   });
 
+  it('a screenshot person whose "First L." is the owner’s own is acked by full name', async () => {
+    const w = commandsWorld({ llm: new FakeLlmClient({ responder: (call) => partyAnswer(call) }), attachments: fakeAttachments() });
+    // The owner as the resolver leaves them: a "Me" row, named by their Contacts card identity ("Rowan T." too).
+    const me = w.person('Me', null, { kind: 'me', first_name: null, display_name: 'Me' });
+    seedIdentity(w.db, me, 'addressbook_id', 'AB-OWNER-1', { display_name: 'Rowan Teller' });
+    w.say(TEXT, at(0), { attachments: [SCREENSHOT] });
+    await w.run({ now: at(1) });
+    expect(w.lastReply()).toBe(
+      `${BOT_MARKER} ✓ Noted for Rowan Testperson (new, from your screenshot).\nNoted: “great DJ”\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`,
+    );
+    const titles = w.db.prepare('SELECT title FROM change_batches ORDER BY rowid').pluck().all();
+    expect(titles).toEqual(expect.arrayContaining(['Noted about Rowan Testperson (text)', 'Rowan Testperson: prioritized for party invites (text)']));
+  });
+
   it('screenshots off in Settings → nothing is fetched or sent, and the reply says why', async () => {
     const attachments = fakeAttachments();
     const llm = new FakeLlmClient({ responder: (call) => partyAnswer(call) });
@@ -215,7 +229,7 @@ describe('resolveScreenshotPerson', () => {
        VALUES ('i1', ?, 'beeper_user', 'opaque-1', '@Yb.Eval.Rowan', 'beeper', 'deterministic', 1, 'active', ?, ?)`,
     ).run(p, T0, T0);
     const r = resolveScreenshotPerson(ctx(db), { handle: 'yb.eval.rowan', name: null }, []);
-    expect(r).toEqual({ ok: true, personId: p, label: 'Rowan T.', created: false });
+    expect(r).toEqual({ ok: true, personId: p, created: false });
     expect(db.prepare('SELECT status FROM people WHERE id = ?').pluck().get(p)).toBe('roster_only');
 
     const svc = seedPerson(db, { display_name: 'Club Promo', status: 'service', kind: 'business' });
@@ -229,7 +243,7 @@ describe('resolveScreenshotPerson', () => {
   it('no username: a unique full-name match only (a first name alone, or two matches, is not enough)', () => {
     const db = memDb();
     const people = [lite('p1', 'Rowan', 'Testperson'), lite('p2', 'Avery', 'Example'), lite('p3', 'Avery', 'Example')];
-    expect(resolveScreenshotPerson(ctx(db), { handle: null, name: 'Rowan Testperson 🎧' }, people)).toEqual({ ok: true, personId: 'p1', label: 'Rowan T.', created: false });
+    expect(resolveScreenshotPerson(ctx(db), { handle: null, name: 'Rowan Testperson 🎧' }, people)).toEqual({ ok: true, personId: 'p1', created: false });
     expect(resolveScreenshotPerson(ctx(db), { handle: null, name: 'Rowan' }, people)).toEqual({ ok: false, reason: 'unreadable' });
     expect(resolveScreenshotPerson(ctx(db), { handle: null, name: 'Avery Example' }, people)).toEqual({ ok: false, reason: 'ambiguous' });
   });

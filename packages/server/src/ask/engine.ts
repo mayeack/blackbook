@@ -26,8 +26,8 @@ import { degradedAnswer, intentOf, type DegradedReason } from './degraded';
 import { ensureAskIndexes } from './fts';
 import { ASK_PROMPT_VERSION, ASK_ROUTE, ASK_SYSTEM_PROMPT, askEstimateUsd, userTurnSections, type AskChannel } from './prompt';
 import { asksForPeople, buildPeopleList, peopleLinesOf } from './people-list';
-import { detokenize, processAnswer, tidy } from './refs';
-import { createScope, firstNameOf, mentionedPeople, shortName, summarize, type AskScope, type PersonRow, type PersonSummary } from './retrieval';
+import { detokenize, personTokensIn, processAnswer, tidy } from './refs';
+import { answerNames, createScope, firstNameOf, mentionedPeople, shortName, summarize, type AskScope, type PersonRow, type PersonSummary } from './retrieval';
 import { closeStaleTurns, finishTurn, priorContext, startTurn, type TurnResult } from './store';
 import { DeltaFilter } from './stream';
 import { ASK_TOOL_DEFS, AskSession, executeTool, isAskTool, runningSummary } from './tools';
@@ -146,7 +146,13 @@ function citationContext(scope: AskScope, channel: AskChannel, personOfToken: (t
 function degrade(t: TurnInput, reason: DegradedReason, found: PersonSummary[] = []): { result: TurnResult } {
   const { req, question, now } = t;
   const scope = createScope(req.db, { now, forModel: false });
-  const d = degradedAnswer(scope, question, reason, { channel: req.channel, displayName: displayNameFor(req.channel), found });
+  const o = { channel: req.channel, displayName: displayNameFor(req.channel), found };
+  let d = degradedAnswer(scope, question, reason, o);
+  if (req.channel !== 'web') {
+    // Its people are named together, like a model answer's (answerNames); a second pass only when a short name collides.
+    const named = answerNames(req.db, d.people);
+    if (named.colliding.size) d = degradedAnswer(scope, question, reason, { ...o, displayName: named.of });
+  }
   const citations = resolveCitations(citationContext(scope, req.channel, () => null), d.cited);
   return {
     result: {
@@ -280,25 +286,40 @@ async function answerTurn(t: TurnInput): Promise<{ result: TurnResult }> {
   }
   for (const id of outcome.citableIds) session.citable.add(id);
 
+  // Over iMessage the people one answer names are named together (answerNames): "Sam R.", or "Sam Rivera" where that
+  // reads as the owner's own short name or another person's in the answer. Local only: the model saw "Sam R." and tokens.
+  const answerDisplay =
+    channel === 'web'
+      ? display
+      : answerNames(
+          db,
+          personTokensIn(raw, (tok) => !!personOfToken(tok))
+            .map(personOfToken)
+            .filter((p): p is PersonRow => !!p),
+        ).of;
+  const answerName = (tok: string) => {
+    const p = personOfToken(tok);
+    return p ? answerDisplay(p) : null;
+  };
   const processed = processAnswer(raw, {
     citable: session.citable,
-    personName,
+    personName: answerName,
     personFirst: (tok) => {
       const p = personOfToken(tok);
       return p ? firstNameOf(p) : null;
     },
     me: 'you',
   });
-  const citations = resolveCitations(cctx, processed.cited);
+  const citations = resolveCitations({ ...cctx, displayName: answerDisplay }, processed.cited);
   for (const c of citations) if (!announced.has(c.ref)) req.onEvent?.({ type: 'citation', citation: c });
   const mentionedPeopleRows = processed.personTokens.map(personOfToken).filter((p): p is PersonRow => !!p);
   // A list of people: one line per person with their details (and rows for the web's table).
   const listed = peopleLinesOf(processed.modelText, {
     person: personOfToken,
-    display: (s) => tidy(detokenize(s, personName, 'you')),
+    display: (s) => tidy(detokenize(s, answerName, 'you')),
     peopleQuestion: asksForPeople(question) || intentOf(question) !== null,
   });
-  const people = listed ? buildPeopleList(scope, listed, display) : null;
+  const people = listed ? buildPeopleList(scope, listed, answerDisplay) : null;
   return {
     result: {
       status: 'done',
