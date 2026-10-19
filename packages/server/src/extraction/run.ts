@@ -22,9 +22,10 @@
  *   two requests   a window is read by a knowledge request and, when obligations can still be kept, an obligations
  *                  request (prompt.ts extractionParts; parts.ts). Both go out in one batch and their results are
  *                  joined before anything else, so the window keeps one item, one apply and one undo.
- *   revive         a window dead-lettered as invalid_request under an older prompt version (the one-request schema
- *                  the API refused) goes back to pending once (reviveInvalidRequests), at the nightly submit and
- *                  the backfill step.
+ *   revive         a window dead-lettered under an older prompt version as invalid_request (the one-request schema
+ *                  the API refused) or schema_invalid (an out-of-enum value failed the whole window before enums
+ *                  were enforced) goes back to pending once per version (reviveDeadLetters), at the nightly submit
+ *                  and the backfill step (while a backfill is running).
  *   cost           routes extract_steady / extract_historical / extract_consolidate (llm/models.ts: Haiku 5.5,
  *                  effort low, thinking off, 1 h cache on each shared system prompt; batches 50% off). Every request
  *                  stays under PROMPT_TOKEN_LIMIT: a window whose prompt would not is split before it is sent. At most
@@ -547,22 +548,25 @@ async function pendingSpecs(env: Env, egress: Egress, names: NameIndex, mode: Wi
 }
 
 /**
- * Windows dead-lettered because the API refused their request as invalid under an OLDER prompt version (the
- * one-request extraction schema whose grammar was too large) go back to pending once, so the next submit sends
- * them under this version. Bounded: a window refused as invalid under the current version stays dead.
+ * Windows dead-lettered under an OLDER prompt version, because the API refused their request as invalid (the
+ * one-request extraction schema whose grammar was too large) or because their answer failed the schema twice (an
+ * out-of-enum value failed the whole window before enums were enforced), go back to pending once, so the next
+ * submit sends them under this version; counted as revived_<outcome>. Bounded: a window dead-lettered under the
+ * current version stays dead, and so does one at its last attempt (pendingSpecs would dead-letter it again).
+ * Consolidation items have no window, so they are never revived.
  */
-export function reviveInvalidRequests(db: DB, mode: WindowMode, now: number): number {
-  const ids = db
+export function reviveDeadLetters(db: DB, mode: WindowMode, now: number, counts: Counts): void {
+  const rows = db
     .prepare(
-      `SELECT w.id FROM windows w JOIN extraction_items i ON i.custom_id = w.last_custom_id
-       WHERE w.mode = ? AND w.status = 'dead_letter' AND i.outcome = 'invalid_request' AND i.prompt_version <> ?`,
+      `SELECT w.id, i.outcome FROM windows w JOIN extraction_items i ON i.custom_id = w.last_custom_id
+       WHERE w.mode = ? AND w.status = 'dead_letter' AND i.outcome IN ('invalid_request','schema_invalid')
+         AND i.prompt_version <> ? AND i.attempt < ?`,
     )
-    .pluck()
-    .all(mode, EXTRACTION_PROMPT_VERSION) as string[];
+    .all(mode, EXTRACTION_PROMPT_VERSION, MAX_ATTEMPTS) as { id: string; outcome: string }[];
   tx(db, () => {
-    for (const id of ids) setWindowStatus(db, id, 'pending', now);
+    for (const r of rows) setWindowStatus(db, r.id, 'pending', now);
   });
-  return ids.length;
+  for (const r of rows) bump(counts, `revived_${r.outcome}`);
 }
 
 // ---------------------------------------------------------------------------------------------- steady submit
@@ -589,8 +593,7 @@ export async function submitSteady(deps: ExtractionDeps, o: { wave?: number; con
   const out: BuildResult = { specs: [], created: [], counts };
   try {
     if (wave === 1) {
-      const revived = reviveInvalidRequests(deps.db, 'steady', now);
-      if (revived) bump(counts, 'revived_invalid_request', revived);
+      reviveDeadLetters(deps.db, 'steady', now, counts);
       out.specs.push(...(await pendingSpecs(env, deps.egress, names, 'steady', null, counts, deps.signal)));
     }
     const before = o.newBefore ?? now;
@@ -1130,8 +1133,7 @@ export async function advanceBackfill(deps: ExtractionDeps, o: { runId?: string 
         if (deps.signal?.aborted) return backfillReport(deps, row.status === 'budget_exhausted' ? 'budget_exhausted' : 'running', counts);
         bump(counts, 'build_resumed');
       }
-      const revived = reviveInvalidRequests(db, 'historical', now);
-      if (revived) bump(counts, 'revived_invalid_request', revived);
+      reviveDeadLetters(db, 'historical', now, counts);
       const pending = await pendingSpecs(env, deps.egress, new NameIndex(env), 'historical', row.id, counts, deps.signal);
       if (pending.length) {
         const res = await submitSpecs(deps, pending, { kind: 'historical', wave: 1, runId, tz: env.tz });

@@ -1116,3 +1116,38 @@ dead letter); a bad `needs_reply` enum drops only the verdict (no verdict, not `
 commitment count as one dropped item. The 3 windows hit on 2026-10-18 were retried and applied (live DB, attempt 1):
 nothing to recover.
 **Platforms**: server only. Not deployed.
+
+## 2026-10-18 — Extraction revive: schema_invalid dead letters under an older prompt get one more try
+`reviveDeadLetters` (extraction/run.ts, was `reviveInvalidRequests`) now also sends back to pending a window whose
+last item was dead-lettered as `schema_invalid` under an older extraction prompt version (as an out-of-enum value
+did before enums were enforced), once per version, at the nightly steady submit and at the backfill step while a
+backfill is running. Counts are per outcome: `revived_invalid_request`, `revived_schema_invalid`. A window at its last
+attempt (`MAX_ATTEMPTS`) is no longer revived (it was set straight back to dead_letter every night).
+
+**Live check (read-only, 2026-10-18 22:45 PDT):** the 3 historical windows that answered `schema_invalid` under
+`73a9fc73` were NOT dead-lettered: each was retried once (attempt 1) and applied. All 3,092 historical windows are
+`applied`, the backfill is `done`, and the only dead letters are the 111 steady `invalid_request` / `7e37e334`
+windows (all at attempt 0) that the existing revive picks up at the next 03:10 submit. So nothing is recovered by this
+change today; it is a safety net for later schema failures.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1,395 tests green. New tests in
+   `test/extraction/parts.test.ts` "windows whose answer failed the schema under an older prompt" (synthetic world):
+   a schema_invalid dead letter under `73a9fc73` is revived (`revived_schema_invalid: 1`), resent at attempt 2 under
+   the current version and applies; a revived window that fails again is dead at once (no second schema retry) and
+   is not revived the next night; one dead-lettered under the current version stays dead; one at its last attempt
+   stays dead; a consolidation item (person, no window) is never revived in either mode.
+2. Mutation check: narrowing the query back to `invalid_request` fails 2 of the new tests; dropping the attempt bound
+   fails 1.
+
+### Scenario B — After deploy (owner, with #69)
+1. After the first 03:10 extract-submit on the new version, the run summary shows `revived_invalid_request` for the
+   111 steady windows and no `revived_schema_invalid` (there are none today).
+2. `SELECT w.mode, i.outcome, i.prompt_version, count(*) FROM windows w JOIN extraction_items i ON i.custom_id =
+   w.last_custom_id WHERE w.status = 'dead_letter' GROUP BY 1, 2, 3` → only rows under the current version remain
+   after the next submit.
+
+**Edge cases**: historical windows are revived only while a backfill is `running` / `budget_exhausted`. After the
+backfill is `done` (as now), a historical dead letter is not picked up by any job. Every later prompt-version change
+gives old dead letters one more try (one window's cost each). Consolidation dead letters are never revived.
+**Platforms**: server only. Not deployed.
