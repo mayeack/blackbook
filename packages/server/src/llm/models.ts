@@ -17,11 +17,12 @@
  *   - Haiku 5.5: $0.10 / $0.50 per MTok in/out while the prompt is ≤100K tokens, $0.50 / $2.50 above → every prompt
  *     is kept ≤ PROMPT_TOKEN_LIMIT. No sampling params, no assistant prefill (both 400). Refusals have NO server-side
  *     fallback (`fallbacks` must not be sent): a refusal is recorded and skipped, never escalated automatically.
- *   - Sonnet 5.5: $2 / $10, cache reads $0.20. `{type:'disabled'}` thinking is a 400 → its thinking-off spelling is
- *     `{type:'between_tools'}` (effort ≤ high). Sync calls on the Claude API may send `fallbacks: "default"`.
- *   - Both: cache reads 0.1× input, 5-minute writes 1.25×, 1-hour writes 2×; Message Batches 50% off every token
- *     (cache reads/writes included); minimum cacheable prefix 512 tokens (shorter prefixes silently don't cache and
- *     aren't charged a write).
+ *   - Sonnet 5.5: $2 / $10, cache reads $0.10 (0.05× input; pricing page, fetched 2026-10-18). `{type:'disabled'}`
+ *     thinking is a 400 → its thinking-off spelling is `{type:'between_tools'}` (effort ≤ high). Sync calls on the
+ *     Claude API may send `fallbacks: "default"`.
+ *   - Cache reads are per model (ModelSpec.cacheRead: Haiku 0.1×, Sonnet 0.05×); both: 5-minute writes 1.25×, 1-hour
+ *     writes 2×; Message Batches 50% off every token (cache reads/writes included); minimum cacheable prefix 512
+ *     tokens (shorter prefixes silently don't cache and aren't charged a write).
  *
  * Cache TTL per route (prompt-caching "Choosing the TTL": pick by the start-to-start gap between requests that share
  * the prefix): Batch routes → 1 h (items of one batch, and its re-queues/overflow waves, run minutes to hours apart);
@@ -58,6 +59,8 @@ export interface ModelSpec {
   base: RateCard;
   /** A second rate card for longer prompts (Haiku 5.5: above 100K prompt tokens). */
   longContext: { above: number; card: RateCard } | null;
+  /** Cache reads as a multiple of the rate card's input price. */
+  cacheRead: number;
   /** How a route's thinking-off is spelled on this model. */
   thinkingOff: 'disabled' | 'between_tools';
   /** Server-side refusal fallbacks on synchronous Claude API calls (never in batches). */
@@ -71,6 +74,7 @@ export const MODEL_SPECS: Readonly<Record<LlmModel, ModelSpec>> = {
     label: 'Claude Haiku 5.5',
     base: { input: 0.1, output: 0.5 },
     longContext: { above: 100_000, card: { input: 0.5, output: 2.5 } },
+    cacheRead: 0.1,
     thinkingOff: 'disabled',
     syncFallbacks: false,
     minCacheTokens: 512,
@@ -79,6 +83,7 @@ export const MODEL_SPECS: Readonly<Record<LlmModel, ModelSpec>> = {
     label: 'Claude Sonnet 5.5',
     base: { input: 2, output: 10 },
     longContext: null,
+    cacheRead: 0.05,
     thinkingOff: 'between_tools',
     syncFallbacks: true,
     minCacheTokens: 512,
@@ -94,7 +99,8 @@ export const FALLBACK_BETA = 'server-side-fallback-2026-07-01' as const;
  */
 export const FALLBACK_RETRIED_CATEGORIES: ReadonlySet<string> = new Set(['cyber', 'frontier_llm']);
 
-export const CACHE_READ_MULTIPLIER = 0.1;
+/** The default model's cache-read multiplier (pricing goes through ModelSpec.cacheRead, which differs per model). */
+export const CACHE_READ_MULTIPLIER = MODEL_SPECS[DEFAULT_MODEL].cacheRead;
 export const CACHE_WRITE_MULTIPLIER: Readonly<Record<CacheTtl, number>> = { '5m': 1.25, '1h': 2 };
 /** Message Batches: 50% off every token, cache reads and writes included. */
 export const BATCH_MULTIPLIER = 0.5;
@@ -177,7 +183,7 @@ export function priceTokens(t: PricedTokens, o: { model: string; mode: 'sync' | 
   const k = o.mode === 'batch' ? BATCH_MULTIPLIER : 1;
   const inputUsd =
     t.input * card.input +
-    t.cacheRead * card.input * CACHE_READ_MULTIPLIER +
+    t.cacheRead * card.input * specFor(o.model).cacheRead +
     t.cacheWrite5m * card.input * CACHE_WRITE_MULTIPLIER['5m'] +
     t.cacheWrite1h * card.input * CACHE_WRITE_MULTIPLIER['1h'];
   return (k * (inputUsd + t.output * card.output)) / 1e6;

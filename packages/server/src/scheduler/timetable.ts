@@ -26,6 +26,8 @@ export const AGENT_TIMES = {
   extractSubmit: '03:10',
   llmCollectEveryMs: 5 * MIN,
   llmPurge: '04:30',
+  /** Mondays: the API-efficiency check over the past week's ledger (llm/efficiency.ts). */
+  llmEfficiency: { dow: 1, at: '04:40' },
   graph: '06:50',
   circles: { dow: 0, at: '04:00' },
   ties: '06:55',

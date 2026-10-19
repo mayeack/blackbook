@@ -249,19 +249,24 @@ describe('pricing', () => {
     expect(CACHE_WRITE_MULTIPLIER).toEqual({ '5m': 1.25, '1h': 2 });
   });
 
-  it('Sonnet 5.5: $2/$10, cache read $0.20; unknown (fallback) models are priced like the requested one', () => {
-    expect(costUsd({ inputTokens: 1e6, outputTokens: 1e6, cacheReadInputTokens: 1e6, cacheCreationInputTokens: 0 }, 'sync', '1h', SONNET_5_5)).toBeCloseTo(2 + 10 + 0.2, 9);
+  it('Sonnet 5.5: $2/$10, cache read $0.10 (0.05×, not Haiku’s 0.1×); unknown (fallback) models are priced like the requested one', () => {
+    expect(costUsd({ inputTokens: 1e6, outputTokens: 1e6, cacheReadInputTokens: 1e6, cacheCreationInputTokens: 0 }, 'sync', '1h', SONNET_5_5)).toBeCloseTo(2 + 10 + 0.1, 9);
+    expect(costUsd({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 1e6, cacheCreationInputTokens: 0 }, 'batch', '1h', SONNET_5_5)).toBeCloseTo(0.05, 9);
     expect(costUsd({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 1e6 }, 'batch', '5m', SONNET_5_5)).toBeCloseTo(2.5 / 2, 9);
     expect(priceTokens(t(1e6, 0), { model: 'claude-sonnet-5', mode: 'sync' })).toBeCloseTo(priceTokens(t(1e6, 0), { model: HAIKU_5_5, mode: 'sync' }), 12);
   });
 
-  it('route estimates follow the resolved model (an override to Sonnet costs 20×)', () => {
+  it('route estimates follow the resolved model (an override to Sonnet costs ~20×; its cache reads only 10×)', () => {
     const haiku = estimateRouteUsd(resolveRoute('extract_steady'), { userTokens: 4000, systemTokens: 6000, mode: 'batch' });
     const sonnet = estimateRouteUsd(resolveRoute('extract_steady', { extract_steady: { model: SONNET_5_5 } }), { userTokens: 4000, systemTokens: 6000, mode: 'batch' });
     // Batch: BATCH_CACHE_MISS_SHARE of the prefix is a 1-h write (2× at the 50% batch rate), the rest a read.
+    const out = ROUTES.extract_steady.estOutputTokens;
     const prefix = 6000 * (1 - BATCH_CACHE_MISS_SHARE) * 0.005 + 6000 * BATCH_CACHE_MISS_SHARE * 0.1;
-    expect(haiku).toBeCloseTo((4000 * 0.05 + prefix + ROUTES.extract_steady.estOutputTokens * 0.25) / 1e6, 12);
-    expect(sonnet / haiku).toBeCloseTo(20, 6);
+    expect(haiku).toBeCloseTo((4000 * 0.05 + prefix + out * 0.25) / 1e6, 12);
+    const sonnetPrefix = 6000 * (1 - BATCH_CACHE_MISS_SHARE) * 0.05 + 6000 * BATCH_CACHE_MISS_SHARE * 2;
+    expect(sonnet).toBeCloseTo((4000 * 1 + sonnetPrefix + out * 5) / 1e6, 12);
+    expect(sonnet / haiku).toBeGreaterThan(19);
+    expect(sonnet / haiku).toBeLessThan(20);
   });
 
   it('estimates: sync reads the prefix, cold calls write it, unmarked routes and sub-512 prefixes pay plain input', () => {

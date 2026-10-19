@@ -9,6 +9,7 @@
  *   yb setup-self        your own iMessage handles → settings + the collector's compiled send allowlist
  *   yb backfill-extract  the one-time historical LLM extraction backfill (its own budget; --estimate = dry run)
  *   yb eval              the evaluation harness (report / status / sample / shadow; also npm run eval)
+ *   yb llm-usage         the API-efficiency report over the LLM ledger (read-only; llm/efficiency.ts)
  *   yb llm-smoke         every LLM schema against the API's grammar limit (--live sends one empty request each)
  */
 import fs from 'node:fs';
@@ -21,6 +22,7 @@ import { currentVersion, LATEST_VERSION } from './db/migrate';
 import { evalCommand } from './eval/cli';
 import { llmSmokeCommand } from './llmSchemaSmoke';
 import { backfillExtractCommand } from './extraction/cli';
+import { llmUsageCommand } from './llm/usageCli';
 import { migrateLegacyCommand } from './migration/cli';
 import { buildJobs } from './scheduler/jobs/index';
 import { Scheduler, type JobStatus } from './scheduler/scheduler';
@@ -42,6 +44,8 @@ const USAGE = `usage: yb <command>
                     one-time historical LLM extraction (backfill allowance only; --estimate prints counts and $, sends nothing)
   eval [report|status|sample|shadow|shadow-report|reset]
                     the evaluation harness: golden-set metrics, shadow runs of a new prompt (counts and rates only)
+  llm-usage [--days 7] [--json]
+                    API efficiency: tokens, cost, cache-read share and findings per kind (read-only; nothing is sent)
   llm-smoke [--live] [--model <id>] [--only <name,…>]
                     every LLM output schema / strict tool set against the API's grammar limit; --live sends one
                     empty request per schema and prints only HTTP status and error text
@@ -159,6 +163,8 @@ async function main(argv: string[]): Promise<number> {
       return backfillExtractCommand(args, paths, { out, err });
     case 'eval':
       return evalCommand(args, paths, { out, err });
+    case 'llm-usage':
+      return llmUsageCommand(args, paths, { out, err });
     case 'setup-self':
       return setupSelf(paths, args);
     case 'llm-smoke':
