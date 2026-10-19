@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { outputFormat } from '../../src/llm/caching';
 import { GRAMMAR_MAX_NODES, grammarIssues, grammarNodes, requestIssues, requestParams, SMOKE_USER, smokeSchemas } from '../../src/llm/client';
 import { resolveRoute } from '../../src/llm/models';
-import { Extraction, ExtractionKnowledge, ExtractionObligations } from '../../src/extraction/schema';
+import { COMMITMENT_KINDS, Extraction, ExtractionKnowledge, ExtractionObligations } from '../../src/extraction/schema';
 import { LLM_SCHEMAS } from '../../src/llmSchemas';
 
 const SRC = path.resolve(import.meta.dirname, '../../src');
@@ -53,10 +53,51 @@ describe('grammar nodes', () => {
   it("a window's two requests are each well under it (pinned: growing either is a decision, re-check with yb llm-smoke --live)", () => {
     expect(formatNodes(ExtractionKnowledge)).toBe(58);
     expect(formatNodes(ExtractionObligations)).toBe(29);
-    // Live on 2026-10-18 the knowledge schema still compiled with 16 extra fields and failed with 18.
+    // Live on 2026-10-18 the knowledge schema still compiled with 16 extra fields and failed with 18 (with its enums
+    // in the grammar: 16 ok, 17 refused).
     expect(GRAMMAR_MAX_NODES - formatNodes(ExtractionKnowledge)).toBeGreaterThanOrEqual(6);
     // Together they hold exactly the one-request schema's fields: nothing extraction produced was dropped.
     expect([...Object.keys(ExtractionKnowledge.shape), ...Object.keys(ExtractionObligations.shape)].sort()).toEqual(Object.keys(Extraction.shape).sort());
+  });
+});
+
+describe('enums in the output format', () => {
+  /** Every `enum` in a JSON Schema, as sorted JSON (the SDK reorders keys, so traversal order may differ). */
+  const enumsOf = (s: unknown): string[] =>
+    !s || typeof s !== 'object'
+      ? []
+      : [...(!Array.isArray(s) && Array.isArray((s as { enum?: unknown }).enum) ? [JSON.stringify((s as { enum: unknown }).enum)] : []), ...Object.values(s).flatMap(enumsOf)].sort();
+
+  it('every enum of each zod schema reaches the grammar (the SDK 0.134 moved them all into descriptions)', () => {
+    let total = 0;
+    for (const e of LLM_SCHEMAS) {
+      if (!e.schema) continue;
+      const sent = outputFormat(e.schema).schema;
+      expect(enumsOf(sent), e.name).toEqual(enumsOf(z.toJSONSchema(e.schema, { reused: 'ref' })));
+      expect(JSON.stringify(sent), e.name).not.toContain('{enum:');
+      total += enumsOf(sent).length;
+    }
+    expect(total).toBeGreaterThanOrEqual(20);
+    // The values production broke out of on 2026-10-18 (owner "P66", kind "text") are now outside the grammar.
+    const o = outputFormat(ExtractionObligations).schema as { properties: Record<string, { items?: { properties: Record<string, unknown> }; properties?: Record<string, unknown> }> };
+    const commitment = o.properties.commitments!.items!.properties;
+    expect(commitment.owner).toEqual({ type: 'string', enum: ['ME', 'THEM', 'BOTH'] });
+    expect(commitment.kind).toEqual({ type: 'string', enum: [...COMMITMENT_KINDS] });
+    expect(o.properties.needs_reply!.properties!.reason).toEqual({ anyOf: [{ type: 'string', enum: ['question', 'request', 'invitation', 'plan_confirm', 'emotional', 'other'] }, { type: 'null' }] });
+    // Enums are not grammar nodes in the budget's unit (measured well under one each): the pinned sizes hold.
+    expect([formatNodes(ExtractionKnowledge), formatNodes(ExtractionObligations)]).toEqual([58, 29]);
+  });
+
+  it('inside shared $defs, oneOf and nullable fields too; a description and the other moved constraints stay', () => {
+    const Shared = z.object({ k: z.enum(['x', 'y']).describe('pick one'), n: z.enum(['p', 'q']).nullable() });
+    const S = z.object({ a: Shared, b: Shared, u: z.xor([z.object({ t: z.enum(['one']) }), z.object({ s: z.string().regex(/^z/) })]) });
+    const sent = outputFormat(S).schema as { $defs: Record<string, { properties: Record<string, unknown> }>; properties: { u: { anyOf: { properties: Record<string, unknown> }[] } } };
+    const def = Object.values(sent.$defs)[0]!.properties;
+    expect(def.k).toEqual({ type: 'string', description: 'pick one', enum: ['x', 'y'] });
+    expect(def.n).toEqual({ anyOf: [{ type: 'string', enum: ['p', 'q'] }, { type: 'null' }] });
+    expect(sent.properties.u.anyOf[0]!.properties.t).toEqual({ type: 'string', enum: ['one'] });
+    expect(sent.properties.u.anyOf[1]!.properties.s).toEqual({ type: 'string', description: '{pattern: "^z"}' });
+    expect(outputFormat(S)).toBe(outputFormat(S)); // memoized: byte-stable across requests (the cache prefix)
   });
 });
 
@@ -122,6 +163,7 @@ describe('yb llm-smoke (smokeSchemas)', () => {
       expect(p).toBe('/v1/messages');
       expect(body).toMatchObject({ model: resolveRoute('extract_steady').model, thinking: { type: 'disabled' }, output_config: { effort: 'low' }, messages: [{ role: 'user', content: SMOKE_USER }] });
       expect((body.system as { cache_control?: unknown }[])[0]!.cache_control).toBeDefined();
+      expect(JSON.stringify(body.output_config)).toContain('"enum":[');
       expect(body).not.toHaveProperty('temperature');
     }
   });

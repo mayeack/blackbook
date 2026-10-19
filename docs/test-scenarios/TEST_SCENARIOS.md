@@ -931,3 +931,34 @@ service account → refused; sending the same screenshot again adds nothing twic
 collector refuses non-self chats); a screenshot sent alone with no `yb` text is never read.
 **Platforms**: server + collector (Swift) + web (one toggle). Not deployed: needs the collector rebuild + signing and a
 server restart; until then the route 404s and commands stay text-only.
+
+## 2026-10-18 — Extraction enums: enforced by the grammar, and an out-of-set value costs one item, not the window
+Three backfill windows were dead-lettered (`schema_invalid`) because one commitment had owner `"P66"` / `"P22"` or
+kind `"text"`: the SDK's `zodOutputFormat` moved every `enum` into a description, and one bad value failed the whole
+window. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar, and `parseExtraction`
+(extraction/schema.ts) drops only the item holding an out-of-set string (`dropped_<item>_bad_enum`).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1356 tests green. New tests:
+   `test/llm/outputSchemas.test.ts` "enums in the output format" (every zod enum reaches the grammar, $defs / oneOf /
+   nullable, no "{enum:" description left, pinned sizes still 58 / 29); `test/extraction/validate.test.ts`
+   "enums (parseExtraction)"; `test/extraction/parts.test.ts` "an obligations answer with a value outside an enum"
+   (owner "P66" → facts + the other commitment applied, `dropped_commitment_bad_enum: 1`; a missing key next to it
+   still fails the window).
+2. `npm run yb -- llm-smoke --live` (key from ~/Blackbook/.env): 11/11 schemas 200 on Haiku 5.5.
+3. One-off live probe (not committed): asked for owner "P66" / kind "text" with the obligations schema. SDK-only
+   format → 3/3 answers `P66` / `text`; with enums → 3/3 `ME` / `other`. Knowledge schema margin with enums: +16
+   extra fields 200, +17 400 (before: +16 200, +18 400).
+
+### Scenario B — After deploy (owner)
+**Setup**: merge, `git pull` + `scripts/service.sh restart` in ~/Blackbook. Extraction prompt version becomes
+`aa4ba557` (was `73a9fc73`); consolidation `2bed667a`, adjudication `cf134f0a`.
+1. After the next nightly collect, `yb run-job extract-collect` summary / `llm_batch_results`: no new
+   `dead_letter_schema_invalid` for enum values; any `dropped_*_bad_enum` count should be 0 (the grammar enforces them).
+2. `SELECT outcome, count(*) FROM extraction_items WHERE prompt_version = 'aa4ba557' GROUP BY 1` → `ok` dominates,
+   no `schema_invalid`.
+
+**Edge cases**: a missing key or a wrong type (number / null in an enum field) still fails the window (retry, then
+dead letter); a bad `needs_reply` enum drops only the verdict (no verdict, not `n_a`); two bad fields in one
+commitment count as one dropped item. The 3 windows already dead-lettered on 2026-10-18 are NOT revived by this change.
+**Platforms**: server only. Not deployed.
