@@ -765,3 +765,38 @@ if it still does, the executor replies "Didn't get that · try help" instead of 
 are always sent with ADDRESSED yes.
 **Platforms**: server. Real classification needs the owner's AI key; actually acting on screenshots and party
 preferences is separate work (its own session).
+
+---
+
+## 2026-10-18 — extract-collect EgressBlocked: back-to-back @handles + per-request egress blocks + backfill resume
+
+**What changed**: the pseudonymizer replaces @handles until none is left (back-to-back handles like "@a@b" left the
+second one raw, and pseudonymize()'s own re-scan threw) and runs the handle pass again after the digit-run/address
+passes. Extraction now fails closed per request: a window whose packet egress refuses (at render, or its user turn right
+before submit) is dead-lettered with its messages still covered, recorded in `extraction_items` as `skipped` /
+`egress_blocked`, counted (`egress_blocked` in the job stats) and raises one `extraction:egress_blocked` alert. The
+rest of the batch/run goes on. The same applies to a consolidation request (that person is skipped). A backfill whose
+window build stopped part-way (no `stats.built_at`) finishes building on the next advance before anything else.
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii`.
+2. `test/llm/egress.test.ts`: back-to-back handles, a known IG handle next to an unknown one, chains, and a digit run
+   before an "@" all scrub cleanly and pass the scanner.
+3. `test/extraction/egressBlocked.test.ts`: the root cause with the real egress; a render-time block in the backfill;
+   the stuck 2026-10-16 state resuming on collect (real and strict egress); a pre-submit block leaving the rest of the
+   batch intact; a split follow-up that re-renders with an @handle; a blocked consolidation request. All seven fail on
+   the pre-fix code with `egress blocked: handle×1`.
+
+### Scenario B — Production after deploy (owner)
+1. Restart the service from `~/Blackbook` main once the fix is merged.
+2. Within ~5 min the next `extract-collect` should finish (`job.finished`, not `job.failed`) and
+   `job_state.consecutive_failures` for it goes back to 0.
+3. **Expected**: that first collect finishes building the backfill's windows (counts `build_resumed`), then submits
+   the pending historical windows from the backfill pool (`llm_requests` kind `historical` appear; the spend shows in
+   Settings → LLM). `windows` with mode `historical` move from `pending` to `submitted`.
+4. `sqlite3 -readonly <data dir>/yeackbot.db "select count(*) from extraction_items where outcome='egress_blocked'"`
+   is 0 with the scrubber fix; any non-zero row is a window that was skipped, not a failed job.
+
+**Edge cases**: a window blocked at render is never re-sent automatically (it stays `dead_letter`); a whole-batch
+`excluded` refusal by the client is not covered by the per-request check (only egress findings are).
+**Platforms**: server only. Production behavior (backfill submit, real Haiku results) is not verified by Claude.
