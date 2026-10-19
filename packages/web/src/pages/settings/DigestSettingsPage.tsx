@@ -1,6 +1,6 @@
 /**
  * Settings → Digest. The daily text ships OFF: turning it on asks first (it texts the owner's own iMessage). Time,
- * catch-up, item cap, quiet hours, pause, time zone; Preview shows the exact text (never sends); "Send test" texts
+ * catch-up, item cap, quiet hours, pause, time zone; Preview shows the exact texts, one per suggestion (never sends); "Send test" texts
  * only the owner's own handle and needs "Allow test sends" (the server refuses otherwise).
  */
 import { useEffect, useState } from 'react';
@@ -53,14 +53,16 @@ function Preview() {
   return (
     <div className="st-preview">
       <div className="st-preview-meta caption">
-        {p.composer === 'llm' ? 'Written by Claude' : 'Template copy'} · {plural(p.charCount, 'character')} · {plural(p.items.length, 'item')}
+        {p.composer === 'llm' ? 'Written by Claude' : 'Template copy'} · {plural(p.texts.length, 'text')} · {plural(p.items.length, 'item')}
         {' · '}
         {p.wouldSend ? 'would send' : `would not send (${skipReasonLabel(p.reasonNotSent)})`}
       </div>
-      <pre className="st-bubble" aria-label="Exact text">
-        {p.text}
-      </pre>
-      {!p.text.startsWith(MARKER) && <p className="st-error">This preview doesn’t start with the yeackbot marker; it would not be sent.</p>}
+      {p.texts.map((t, k) => (
+        <pre key={k} className="st-bubble" aria-label={`Text ${k + 1} of ${p.texts.length}`}>
+          {t}
+        </pre>
+      ))}
+      {p.texts.some((t) => !t.startsWith(MARKER)) && <p className="st-error">A text in this preview doesn’t start with the yeackbot marker; it would not be sent.</p>}
       <div className="caption">Push: “{p.pushBody}”</div>
       <button type="button" className="btn btn-sm btn-ghost" disabled={q.isFetching} onClick={() => void q.refetch()}>
         {q.isFetching ? 'Refreshing…' : 'Refresh'}
@@ -112,7 +114,7 @@ function SendTest({ form }: { form: SettingsForm }) {
           {ask === 'digest' ? 'Today’s brief, exactly as previewed,' : 'One short test line'} goes to <strong>your own iMessage</strong> only. yeackbot
           never texts anyone else.
         </p>
-        <p className="caption">At most 5 test sends an hour. It isn’t held for quiet hours.</p>
+        <p className="caption">One text per suggestion, up to 15 test texts an hour. It isn’t held for quiet hours.</p>
       </ConfirmDialog>
     </>
   );

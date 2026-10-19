@@ -5,7 +5,7 @@
  *   POST /digest/send-test                DigestSendTest (+ force) → DigestSendTestResult
  *        403 SEND_DISABLED unless settings delivery.allow_test_send or digest.enabled is on, or the owner passes
  *        {force: true}. The recipient is always the owner's own handle (sendToSelf has no `to`), the text starts
- *        with the 🅨 marker, and at most 5 test sends go out per hour.
+ *        with the 🅨 marker, and at most 15 test texts go out per hour (a test brief is one text per suggestion).
  *   GET  /digest/history?limit=            → DigestHistory
  */
 import { Router } from 'express';
@@ -22,8 +22,9 @@ import type { RouteDeps } from './index';
 const SendTestBody = DigestSendTest.extend({ force: z.boolean().optional() });
 const HistoryQuery = z.object({ limit: z.coerce.number().int().min(1).max(90).default(14) });
 
-export const MAX_TEST_SENDS_PER_HOUR = 5;
-export const HELLO_TEXT = `${BOT_MARKER} Test from yeackbot · this is how your brief will arrive.`;
+/** Test texts per hour (a test brief is one text per suggestion, so this is texts, not tests). */
+export const MAX_TEST_SENDS_PER_HOUR = 15;
+export const HELLO_TEXT = `${BOT_MARKER} Hi, it's yeackbot! This is how your brief will show up.`;
 
 export function digestRoutes(deps: RouteDeps): Router {
   const { db } = deps;
@@ -46,16 +47,23 @@ export function digestRoutes(deps: RouteDeps): Router {
     }
     const now = Date.now();
     const recent = db.prepare(`SELECT count(*) FROM outbound_messages WHERE purpose = 'test' AND created_at > ?`).pluck().get(now - 3_600_000) as number;
-    if (recent >= MAX_TEST_SENDS_PER_HOUR) throw new HttpError(429, 'TOO_MANY_TEST_SENDS', 'That’s enough test sends for this hour.');
-    const text = body.mode === 'digest' ? (await digestPreview(db, services, { now })).text : HELLO_TEXT;
+    const texts = body.mode === 'digest' ? (await digestPreview(db, services, { now })).texts : [HELLO_TEXT];
+    if (recent + texts.length > MAX_TEST_SENDS_PER_HOUR) throw new HttpError(429, 'TOO_MANY_TEST_SENDS', 'That’s enough test sends for this hour.');
     // The owner asked for it just now: like a reply to their own command, it isn't held for quiet hours.
-    const out = await services.outbound.sendToSelf(text, 'test', uuidv7(now), { bypassQuietHours: true });
-    if (out.status === 'disabled') {
-      throw new HttpError(409, 'DELIVERY_NOT_CONFIGURED', 'Sending isn’t set up yet: install the collector and run npm run setup:self.', { reason: out.reason ?? null });
+    // One text per suggestion, in order; stop at the first one that doesn't go.
+    let first: Awaited<ReturnType<typeof services.outbound.sendToSelf>> | null = null;
+    let out: Awaited<ReturnType<typeof services.outbound.sendToSelf>> | null = null;
+    for (const text of texts) {
+      out = await services.outbound.sendToSelf(text, 'test', uuidv7(Date.now()), { bypassQuietHours: true });
+      first ??= out;
+      if (!['delivered', 'sent', 'unverified', 'duplicate'].includes(out.status)) break;
     }
-    const status: DigestSendTestResult['status'] = out.status === 'duplicate' ? 'sent' : out.status;
-    deps.log.info('digest.send_test', { counts: { [status]: 1 } });
-    res.json({ outboundId: out.outboundId ?? '', status } satisfies DigestSendTestResult);
+    if (out!.status === 'disabled') {
+      throw new HttpError(409, 'DELIVERY_NOT_CONFIGURED', 'Sending isn’t set up yet: install the collector and run npm run setup:self.', { reason: out!.reason ?? null });
+    }
+    const status: DigestSendTestResult['status'] = out!.status === 'duplicate' ? 'sent' : out!.status;
+    deps.log.info('digest.send_test', { counts: { [status]: 1, texts: texts.length } });
+    res.json({ outboundId: first!.outboundId ?? '', status } satisfies DigestSendTestResult);
   });
 
   r.get('/digest/history', (req, res) => {

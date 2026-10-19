@@ -13,7 +13,8 @@
  *      outboundTextHash(text) (adapters/imessage/mapping.ts) and client_ref, so the iMessage ingest recognizes
  *      the bot's own rows (GUID, marker, or hash within 30 s) and never parses them as commands.
  *   4. Links are allowlisted to yeackbot.com; no phone numbers, emails or sensitive facts in any text.
- *   5. Circuit breaker: > MAX_OUTBOUND_PER_HOUR sends in the last hour → 'blocked' (circuit_open).
+ *   5. Circuit breaker: > MAX_OUTBOUND_PER_HOUR sends in the last hour → 'blocked' (circuit_open). A brief is up to
+ *      six texts (one per suggestion + one health text), so the cap leaves room for a brief, a test and replies.
  *   6. Digest delivery ships DISABLED (settings digest.enabled=false); quiet hours apply except to direct replies
  *      to the owner's own commands (bypassQuietHours).
  *   7. Conversation-starter drafts are never sent by any code path.
@@ -28,7 +29,7 @@ export { BOT_MARKER };
 /** outbound_messages.purpose */
 export type OutboundPurpose = 'digest' | 'reply' | 'alert' | 'brief' | 'answer' | 'heartbeat' | 'test';
 
-export const MAX_OUTBOUND_PER_HOUR = 20;
+export const MAX_OUTBOUND_PER_HOUR = 30;
 export const MAX_COMMANDS_PER_HOUR = 30;
 /** The collector's own cap on one message. */
 export const MAX_OUTBOUND_CHARS = 10_000;
@@ -62,6 +63,8 @@ export type OutboundBlockReason =
 
 export interface OutboundOptions {
   digestId?: string | null;
+  /** The digest item this text carries (one text per suggestion), so an inline reply can act on that item. */
+  digestOrdinal?: number | null;
   /** Direct replies to the owner's own command go out during quiet hours. */
   bypassQuietHours?: boolean;
 }

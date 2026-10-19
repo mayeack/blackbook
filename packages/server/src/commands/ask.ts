@@ -14,9 +14,9 @@ import type { Logger } from '../ops/logger';
 import type { ServicesConfig, ServicesProvider } from '../services';
 
 export const ASK_LINK = 'yeackbot.com/ask';
-export const ASK_NEEDS_KEY = `Ask needs the AI key · try ${ASK_LINK}`;
-const ASK_FAILED = `Ask hit a problem · try ${ASK_LINK}`;
-const ASK_PERSONAL = `That answer touches something personal · see it at ${ASK_LINK}`;
+export const ASK_NEEDS_KEY = `I need the AI key to answer questions. You can still search at ${ASK_LINK}`;
+const ASK_FAILED = `I hit a problem answering that. Try ${ASK_LINK}`;
+const ASK_PERSONAL = `That answer touches something personal, so it's only in the app: ${ASK_LINK}`;
 /** iMessage p95 target is 30 s; give up well before the scheduler lease. */
 const ASK_TIMEOUT_MS = 60_000;
 /** Reasons a degraded answer means "no AI" (as opposed to a refusal or a tool budget). */
