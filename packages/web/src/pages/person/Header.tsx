@@ -4,7 +4,7 @@ import { Avatar } from '../../components/Avatar';
 import { PersonLink } from '../../components/PersonLink';
 import { roleLine } from '../../lib/format';
 import { stateLabel } from '../../lib/labels';
-import { cadenceLine, initiativeLine, ringDash, ringLabel, sparklineCoords, stateColorVar, tiesFromPerson } from './logic';
+import { cadenceLine, closenessText, initiativeLine, ringDash, ringLabel, sparklineCoords, stateColorVar, tiesFromPerson } from './logic';
 
 /** Avatar inside a ring whose arc is tie strength T (0–100), colored by state. Links to the person. */
 export function TieRing({ id, name, ties, size = 64 }: { id: string; name: string; ties: TieStats | null; size?: number }) {
@@ -57,7 +57,7 @@ export function Sparkline({ points, width = 96, height = 24, label }: { points: 
 }
 
 /**
- * Header: tie ring + name (+ priority star, New), role, places, then "Strong · usually every ~9d · last 41d ago",
+ * Header: tie ring + name (+ priority star, New), role, places, then "Strong · 7/10 · usually every ~9d · last 41d ago",
  * a trend sparkline and who usually starts. Tie stats come from /ties when it's available, else the base person.
  */
 export function PersonHeader({ p, ties }: { p: PersonDetail; ties: TieStats | null }) {
@@ -69,6 +69,7 @@ export function PersonHeader({ p, ties }: { p: PersonDetail; ties: TieStats | nu
   const initiative = initiativeLine(t);
   const spark = t?.sparkline ?? [];
   const suppressed = t?.fadingSuppressed ?? false;
+  const closeness = t?.closeness ?? p.closeness;
 
   return (
     <div className="person-header">
@@ -87,18 +88,18 @@ export function PersonHeader({ p, ties }: { p: PersonDetail; ties: TieStats | nu
         {p.nickname && <div className="ph-line">“{p.nickname}”</div>}
         {role && <div className="ph-line">{role}</div>}
         {p.locations.length > 0 && <div className="ph-line">{p.locations.join(' · ')}</div>}
-        {(cadence || stateText) && (
-          <div className="ph-line ph-cadence">
-            {stateText && (
-              <span className={`state-pill state-${state ?? 'none'}`}>
-                <span className={`state-dot ${state ?? ''}`} aria-hidden />
-                {stateText}
-                {t?.tieStrength != null && <span className="muted"> · {Math.round(t.tieStrength)}</span>}
-              </span>
-            )}
-            {cadence && <span>{cadence}</span>}
-          </div>
-        )}
+        <div className="ph-line ph-cadence">
+          {stateText && (
+            <span className={`state-pill state-${state ?? 'none'}`}>
+              <span className={`state-dot ${state ?? ''}`} aria-hidden />
+              {stateText}
+            </span>
+          )}
+          <span className="closeness" title="Closeness: 1 = acquaintance, 10 = closest" aria-label={closenessText(closeness)}>
+            {closeness}/10
+          </span>
+          {cadence && <span>{cadence}</span>}
+        </div>
         {(spark.length > 1 || initiative) && (
           <div className="ph-line ph-trend">
             {spark.length > 1 && <Sparkline points={spark} label={`Tie strength over the last ${spark.length} weeks`} />}

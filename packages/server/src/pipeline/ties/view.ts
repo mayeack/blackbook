@@ -5,6 +5,7 @@
  */
 import type { TieStats } from '@yb/shared';
 import type { DB } from '../../db/connection';
+import { closenessScore } from './closeness';
 import { SPARK_WEEKS, stateLabel, type TieStateName } from './stats';
 
 interface Row {
@@ -39,6 +40,7 @@ export function readTieStats(db: DB, personId: string): TieStats {
     label: stateLabel(r?.state ?? null),
     tieStrength: r?.tie_strength ?? null,
     historicalStrength: r?.historical_strength ?? null,
+    closeness: closenessScore({ tie: r?.tie_strength, historical: r?.historical_strength, shown: true }),
     expectedGapD: r?.expected_gap_d ?? null,
     silenceD: r?.silence_d ?? null,
     fadingRatio: r?.fading_ratio ?? null,

@@ -175,6 +175,14 @@ describe('who to invite', () => {
     expect(partyInviteCandidates(w.db, NOW, TZ)[1]!.personIds).toEqual([dan, quinn, pia, bo]);
   });
 
+  it('regulars need closeness 7 of 10; a priority person is exempt (the owner asked for them)', () => {
+    // Cy (T 30, H 30 → closeness 6) comes to everything but isn't close enough …
+    expect(partyInviteCandidates(w.db, NOW, TZ)[0]!.personIds).not.toContain(cy);
+    // … until the owner marks Cy priority.
+    w.db.prepare('UPDATE people SET is_priority = 1 WHERE id = ?').run(cy);
+    expect(partyInviteCandidates(w.db, NOW, TZ)[0]!.personIds).toEqual([quinn, pia, ana, cy, fay]);
+  });
+
   it('a person resting after ignored suggestions is left off the list, not the whole list', () => {
     w.db.prepare(`INSERT INTO learner_person_state (person_id, consecutive_ignores, cooldown_until, updated_at) VALUES (?, 2, ?, ?)`).run(quinn, NOW + 10 * DAY, NOW);
     expect(partyInviteCandidates(w.db, NOW, TZ)[0]!.personIds).toEqual([pia, ana, fay, dee]);

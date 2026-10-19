@@ -406,6 +406,15 @@ a.chip:hover {
   border: 1px solid var(--border);
   white-space: nowrap;
 }
+/* People rows: closeness 1–10 (acquaintance → closest). */
+.closeness-score {
+  min-width: 1.5em;
+  text-align: right;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
 .state-dot {
   width: 8px;
   height: 8px;

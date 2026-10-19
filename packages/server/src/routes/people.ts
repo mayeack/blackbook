@@ -2,7 +2,7 @@
  * People read API. Every person comes through person_visible (canonical, active or provisional, not hidden, real
  * people) and every child row through person_canon, so hidden and merged-away people never leave this module.
  *
- *   GET /people?q=&sort=last|recent|added&status=all|new|known&cursor=&limit=
+ *   GET /people?q=&sort=last|recent|added|close&status=all|new|known&cursor=&limit=
  *                                                      status=new: provisional people only ("New people")
  *   GET /people/:id                                    header, stats, linked accounts (masked)
  *   GET /people/:id/identities/:identityId/reveal      one full phone/email value (the owner asked)
@@ -17,12 +17,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { maskPhone, normalizeNamePart, toE164 } from '@yb/shared';
 import type { DB } from '../db/connection';
+import { closenessScore } from '../pipeline/ties/closeness';
 import { badRequest, notFound } from '../http/errors';
 import type { RouteDeps } from './index';
 
 // ---------------------------------------------------------------------------------------------- DTOs
 
-export type PeopleSort = 'last' | 'recent' | 'added';
+export type PeopleSort = 'last' | 'recent' | 'added' | 'close';
 /** 'provisional' = a new handle not yet confirmed as a known person (intelligence §1.4, "New people"). */
 export type PersonStatus = 'active' | 'provisional';
 export type PeopleStatusFilter = 'all' | 'new' | 'known';
@@ -40,6 +41,8 @@ export interface PersonListItem {
   isPriority: boolean;
   lastAt: number | null;
   state: string | null;
+  /** 1–10, acquaintance → closest (pipeline/ties/closeness.ts). */
+  closeness: number;
   /** Distinct identity sources (addressbook, imessage, whatsapp, …). */
   sources: string[];
   createdAt: number;
@@ -94,6 +97,8 @@ export interface PersonDetail {
   updatedAt: number;
   locations: string[];
   tags: string[];
+  /** 1–10, acquaintance → closest (pipeline/ties/closeness.ts). */
+  closeness: number;
   stats: PersonStatsView | null;
   identities: IdentityView[];
   /** Other records merged into this person. */
@@ -300,6 +305,8 @@ interface ListRow {
   created_at: number;
   last_at: number | null;
   state: string | null;
+  tie_strength: number | null;
+  historical_strength: number | null;
 }
 
 interface SortItem {
@@ -309,6 +316,8 @@ interface SortItem {
   display: string;
   lastAt: number | null;
   createdAt: number;
+  /** Only the People list sets it (its 'close' sort); other users of compareByName leave it out. */
+  closeness?: number;
 }
 
 const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
@@ -330,22 +339,33 @@ const COMPARATORS: Record<PeopleSort, (a: SortItem, b: SortItem) => number> = {
   // Most recent contact first; never-contacted last.
   recent: (a, b) => (b.lastAt ?? -1) - (a.lastAt ?? -1) || compareByName(a, b),
   added: (a, b) => b.createdAt - a.createdAt || byId(b.id, a.id),
+  // Closest first; most recent contact breaks ties within a score.
+  close: (a, b) => (b.closeness ?? 1) - (a.closeness ?? 1) || (b.lastAt ?? -1) - (a.lastAt ?? -1) || compareByName(a, b),
 };
 
 const toSortItem = (r: ListRow): SortItem => {
   const last = r.last_name?.trim() ?? '';
   const first = r.first_name?.trim() ?? '';
-  return { id: r.id, last, first: first || (last ? '' : r.display_name.trim()), display: r.display_name.trim(), lastAt: r.last_at, createdAt: r.created_at };
+  return {
+    id: r.id,
+    last,
+    first: first || (last ? '' : r.display_name.trim()),
+    display: r.display_name.trim(),
+    lastAt: r.last_at,
+    createdAt: r.created_at,
+    closeness: closenessScore({ tie: r.tie_strength, historical: r.historical_strength, shown: true }),
+  };
 };
 
 const Cursor = z.object({
-  s: z.enum(['last', 'recent', 'added']),
+  s: z.enum(['last', 'recent', 'added', 'close']),
   id: z.string().max(64),
   last: z.string().max(400),
   first: z.string().max(400),
   display: z.string().max(400),
   lastAt: z.number().nullable(),
   createdAt: z.number(),
+  closeness: z.number().int().min(1).max(10).optional(),
 });
 
 const encodeCursor = (sort: PeopleSort, it: SortItem) => Buffer.from(JSON.stringify({ s: sort, ...it })).toString('base64url');
@@ -405,7 +425,7 @@ export function listPeople(
   const rows = db
     .prepare(
       `SELECT p.id, p.display_name, p.status, p.first_name, p.last_name, p.company, p.job_title, p.is_priority, p.created_at,
-              s.last_at, s.state
+              s.last_at, s.state, s.tie_strength, s.historical_strength
        FROM person_visible p LEFT JOIN person_stats s ON s.person_id = p.id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`,
     )
@@ -426,7 +446,7 @@ export function listPeople(
   );
 
   return {
-    items: page.map(({ r }) => ({
+    items: page.map(({ r, k }) => ({
       id: r.id,
       displayName: maskText(r.display_name),
       status: r.status,
@@ -438,6 +458,7 @@ export function listPeople(
       isPriority: r.is_priority === 1,
       lastAt: r.last_at,
       state: r.state,
+      closeness: k.closeness ?? 1,
       sources: extras.get(r.id)?.sources ?? [],
       createdAt: r.created_at,
     })),
@@ -558,9 +579,17 @@ export function personDetail(db: DB, id: string): PersonDetail {
   const cluster = clusterIds(db, p.id);
   const clusterJson = JSON.stringify(cluster);
   const stats = db
-    .prepare('SELECT last_at, state, expected_gap_d, silence_d, tie_strength, fading_suppressed FROM person_stats WHERE person_id = ?')
+    .prepare('SELECT last_at, state, expected_gap_d, silence_d, tie_strength, historical_strength, fading_suppressed FROM person_stats WHERE person_id = ?')
     .get(p.id) as
-    | { last_at: number | null; state: string | null; expected_gap_d: number | null; silence_d: number | null; tie_strength: number | null; fading_suppressed: number }
+    | {
+        last_at: number | null;
+        state: string | null;
+        expected_gap_d: number | null;
+        silence_d: number | null;
+        tie_strength: number | null;
+        historical_strength: number | null;
+        fading_suppressed: number;
+      }
     | undefined;
   const locations = db
     .prepare(
@@ -591,6 +620,7 @@ export function personDetail(db: DB, id: string): PersonDetail {
     updatedAt: p.updated_at,
     locations,
     tags,
+    closeness: closenessScore({ tie: stats?.tie_strength, historical: stats?.historical_strength, shown: true }),
     stats: stats
       ? {
           lastAt: stats.last_at,
@@ -894,7 +924,7 @@ function resolveSenders(db: DB, identityIds: string[]): Map<string, { personId: 
 const IdParam = z.object({ id: z.string().regex(/^[0-9a-f-]{36}$/i) });
 const ListQuery = z.object({
   q: z.string().trim().max(100).optional(),
-  sort: z.enum(['last', 'recent', 'added']).default('last'),
+  sort: z.enum(['last', 'recent', 'added', 'close']).default('last'),
   status: z.enum(['all', 'new', 'known']).default('all'),
   cursor: z.string().max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
