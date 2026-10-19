@@ -99,6 +99,9 @@ export function templateHeadline(t: TextInput): string {
     case 'event_followup':
       h = `Follow up · ${who}`;
       break;
+    case 'party_invite':
+      h = `Who to invite · ${who}`;
+      break;
     case 'travel_overlap':
       h = `Trip coming up · ${who} nearby`;
       break;
@@ -157,6 +160,14 @@ export function whySummary(t: TextInput): string {
     case 'event_followup':
       s = `Follow up with ${who} after your event together.`;
       break;
+    case 'party_invite': {
+      const d = pnum(p, 'daysOut');
+      const pi = pnum(p, 'partyInvites') ?? 0;
+      const many = t.names.length > 1;
+      const listed = pi <= 0 ? '' : !many ? " They're on your Party invites list." : pi >= t.names.length ? ' All of them are on your Party invites list.' : pi === 1 ? ' One of them is on your Party invites list.' : ` ${pi} of them are on your Party invites list.`;
+      s = `You're hosting ${d !== null ? `in ${d} day${d === 1 ? '' : 's'}` : 'soon'} and ${who} ${many ? "aren't" : "isn't"} on the guest list yet.${listed}`;
+      break;
+    }
     case 'travel_overlap':
       s = `You're traveling soon and ${who} ${t.names.length > 1 ? 'are' : 'is'} nearby.`;
       break;
@@ -190,6 +201,9 @@ export function whySignals(payload: Record<string, unknown>): WhySignal[] {
   add('Last together', n('sinceD') !== null ? `${n('sinceD')} days ago` : null);
   add('Members', n('memberCount') !== null ? String(n('memberCount')) : null);
   add('People there', n('attendeeCount') !== null ? String(n('attendeeCount')) : null);
+  add('Starts in', n('daysOut') !== null ? `${n('daysOut')} day${n('daysOut') === 1 ? '' : 's'}` : null);
+  add('Going so far', n('guestCount') !== null ? String(n('guestCount')) : null);
+  add('From Party invites', n('partyInvites') ? String(n('partyInvites')) : null);
   add('Messages that day', n('messages') !== null ? String(n('messages')) : null);
   add('When', n('yearsAgo') !== null ? `${n('yearsAgo')} year${n('yearsAgo') === 1 ? '' : 's'} ago today` : null);
   add('Priority person', payload.priority === true ? 'yes' : null);
@@ -222,6 +236,9 @@ export function templateOpeners(t: TextInput): string[] {
       break;
     case 'pre_event_brief':
       o = [`Looking forward to seeing you, ${f}!`, `See you soon, ${f}!`];
+      break;
+    case 'party_invite':
+      o = [`Hey ${f}! I'm hosting something soon and would love for you to come. Are you around?`, `${f}! Throwing a little something soon and you should come. Want the details?`];
       break;
     case 'travel_overlap':
       o = [`Hey ${f}, I'll be in town soon — free to meet up?`, `${f}! Heading your way soon, want to grab a coffee?`];

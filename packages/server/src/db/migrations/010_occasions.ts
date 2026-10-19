@@ -49,10 +49,10 @@ const WIDEN: Record<string, readonly string[]> = {
 };
 
 /** Adds `values` to the `CHECK (<column> IN (…))` list of a CREATE TABLE statement (no-op when present). */
-export function widenCheck(ddl: string, column: string, values: readonly string[]): string {
+export function widenCheck(ddl: string, column: string, values: readonly string[], table = 'event_attendees'): string {
   const re = new RegExp(String.raw`(CHECK\s*\(\s*${column}\s+IN\s*\()([^)]*)(\))`, 'i');
   const m = re.exec(ddl);
-  if (!m) throw new Error(`event_attendees: no CHECK list for ${column}`);
+  if (!m) throw new Error(`${table}: no CHECK list for ${column}`);
   const present = new Set(m[2]!.split(',').map((v) => v.trim().replace(/^'|'$/g, '')));
   const missing = values.filter((v) => !present.has(v));
   if (!missing.length) return ddl;

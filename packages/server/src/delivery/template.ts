@@ -8,8 +8,9 @@
  */
 import type { DB } from '../db/connection';
 import { ownerNames } from '../identity/ownerNames';
+import { preferredPeople } from '../pipeline/circles/preferences';
 import type { SelectedItem } from './selection';
-import { briefNames, endSentence, humanDuration, humanEvery, peopleList, plural, safeFragment, shortDay, truncate, whenPhrase, type BriefNames } from './text';
+import { briefNames, endSentence, firstNameOnly, humanDuration, humanEvery, peopleList, plural, safeFragment, shortDay, truncate, whenPhrase, type BriefNames } from './text';
 
 export interface TemplateContext {
   db: DB;
@@ -169,6 +170,25 @@ export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy
         headline = mid(title) ? `Follow up after ${mid(title)}` : 'Follow up after your event';
         body = added && added > 0 ? `You met ${plural(added, 'new person', 'new people')} there.` : null;
       }
+      break;
+    }
+    case 'party_invite': {
+      const occ = occasionOf(ctx.db, item);
+      const title = occ?.sensitive ? null : safeFragment(occ?.title ?? str(p.title), 40);
+      const start = occ?.startsAt ?? num(p.startsAt);
+      const day = start ? shortDay(start, ctx.timeZone, ctx.now) : null;
+      headline = mid(title) ? `Who to invite to ${mid(title)}` : `Who to invite${day ? ` on ${day}` : ''}`;
+      const hosting = `You're hosting ${day ? `on ${day}` : 'soon'}.`;
+      if (names.length) {
+        const circle = preferredPeople(ctx.db, 'party_invites');
+        // First names, unless one is ambiguous here (shared within the item, or flagged by briefNames).
+        const firsts = item.people.map((x) => firstNameOnly(x));
+        const plain = (f: string | null): f is string => !!f && !named.ambiguousFirstNames.has(f) && firsts.filter((g) => g === f).length === 1;
+        const listed = item.people.filter((x) => circle.has(x.id)).map((x) => (plain(firstNameOnly(x)) ? firstNameOnly(x)! : (named.of(x) ?? 'someone')));
+        const many = names.length > 1;
+        const why = !listed.length ? '' : !many ? " They're on your Party invites list." : listed.length === names.length ? ' All of them are on your Party invites list.' : ` ${peopleList(listed, 5)} ${listed.length > 1 ? 'are' : 'is'} on your Party invites list.`;
+        body = `${hosting} ${peopleList(names, 5)} ${many ? "aren't" : "isn't"} on the guest list yet.${why}`;
+      } else body = hosting;
       break;
     }
     case 'fading': {
