@@ -1,7 +1,15 @@
 /**
  * The extraction output contract (intelligence §4.4) and the consolidation pass's answer. Structured outputs
  * (output_config.format) compile these to JSON Schema: every field is required, `nullable` replaces optional, and
- * there are no numeric/length bounds (the API drops them) — validate.ts enforces bounds, ref sets and quotes.
+ * there are no numeric/length bounds (the API drops them) — validate.ts enforces bounds, ref sets and quotes. The
+ * SDK's zod helper also moves `enum` into the description, so enums are checked by zod after the fact.
+ *
+ * One window is read by TWO requests whose answers are merged into one `Extraction` before validation (so a window
+ * is still validated, applied and undone as one): ExtractionKnowledge (summary, facts, mentions, relations,
+ * self_id, topics) and ExtractionObligations (commitments, needs_reply; only sent when obligations can be kept, see
+ * validate.ts needsObligations). The single schema had 86 grammar nodes and the API refused every request with
+ * "The compiled grammar is too large" (llm/client.ts GRAMMAR_MAX_NODES); the split keeps each part far under it
+ * (test/llm/outputSchemas.test.ts). Mentions stay with facts and relations because both use their M… ids.
  *
  * Refs inside a window are local to it:
  *   "ME" (the owner) | "P…" (a participant or mentionable, from the packet) | "M<n>" (a mention placeholder the
@@ -122,19 +130,41 @@ export const SelfId = z.object({
 });
 export type SelfId = z.infer<typeof SelfId>;
 
-export const Extraction = z.object({
+/** Part 1 of a window: what is durably true about people (always sent). */
+export const ExtractionKnowledge = z.object({
   /** Rolling conversation summary, ≤800 chars (truncated at a sentence in code). */
   summary: z.string(),
   facts: z.array(ExtractedFact),
-  commitments: z.array(ExtractedCommitment),
-  needs_reply: NeedsReply,
   mentions: z.array(Mention),
   relations: z.array(Relation),
   self_id: z.array(SelfId),
   /** 0–5 short search tags. */
   topics: z.array(z.string()),
 });
+export type ExtractionKnowledge = z.infer<typeof ExtractionKnowledge>;
+
+/** Part 2 of a window: plans, promises and whether ME owes a reply (only when they can still be kept). */
+export const ExtractionObligations = z.object({
+  commitments: z.array(ExtractedCommitment),
+  needs_reply: NeedsReply,
+});
+export type ExtractionObligations = z.infer<typeof ExtractionObligations>;
+
+/** One window's merged answer (never an output format itself: too big for one grammar). */
+export const Extraction = z.object({
+  summary: ExtractionKnowledge.shape.summary,
+  facts: ExtractionKnowledge.shape.facts,
+  commitments: ExtractionObligations.shape.commitments,
+  needs_reply: ExtractionObligations.shape.needs_reply,
+  mentions: ExtractionKnowledge.shape.mentions,
+  relations: ExtractionKnowledge.shape.relations,
+  self_id: ExtractionKnowledge.shape.self_id,
+  topics: ExtractionKnowledge.shape.topics,
+});
 export type Extraction = z.infer<typeof Extraction>;
+
+export const KNOWLEDGE_KEYS = Object.keys(ExtractionKnowledge.shape) as (keyof ExtractionKnowledge)[];
+export const OBLIGATION_KEYS = Object.keys(ExtractionObligations.shape) as (keyof ExtractionObligations)[];
 
 /** The per-person consolidation pass (backfill, or on demand): dedupe + normalize + a 2-sentence summary. */
 export const Consolidation = z.object({
@@ -164,13 +194,29 @@ export function schemaJson(schema: z.ZodType): string {
   return JSON.stringify(z.toJSONSchema(schema));
 }
 
+export const EMPTY_OBLIGATIONS: ExtractionObligations = {
+  commitments: [],
+  needs_reply: { state: 'n_a', msg: null, reason: null, urgency: 'normal', conf: 0 },
+};
+
 export const EMPTY_EXTRACTION: Extraction = {
   summary: '',
   facts: [],
-  commitments: [],
-  needs_reply: { state: 'n_a', msg: null, reason: null, urgency: 'normal', conf: 0 },
+  ...EMPTY_OBLIGATIONS,
   mentions: [],
   relations: [],
   self_id: [],
   topics: [],
 };
+
+/**
+ * The two parts' parsed JSON → one window answer: each part contributes only its own keys; a window that sent no
+ * obligations request gets EMPTY_OBLIGATIONS. Not validated here (Extraction.safeParse does that).
+ */
+export function mergeExtractionParts(knowledge: unknown, obligations: unknown | null): Record<string, unknown> | null {
+  const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (!isObj(knowledge) || (obligations !== null && !isObj(obligations))) return null;
+  const k = Object.fromEntries(KNOWLEDGE_KEYS.map((key) => [key, knowledge[key]]));
+  const o = obligations ? Object.fromEntries(OBLIGATION_KEYS.map((key) => [key, obligations[key]])) : EMPTY_OBLIGATIONS;
+  return { ...k, ...o };
+}

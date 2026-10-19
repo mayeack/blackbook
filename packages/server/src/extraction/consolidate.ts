@@ -10,7 +10,7 @@ import { tx } from '../db/tx';
 import { withBatch } from '../journal/batch';
 import { startRun, finishRun } from '../journal/runs';
 import { estimatePromptTokens, estimateRouteUsd, resolveRoute, type RouteParams } from '../llm/models';
-import type { BudgetPool, Egress, LlmClient } from '../llm/types';
+import { EgressBlocked, type BudgetPool, type Egress, type LlmClient } from '../llm/types';
 import { buildEnv, cardFirstName, localStamp, type Env } from './env';
 import { CONSOLIDATION_PROMPT_VERSION, CONSOLIDATION_SYSTEM, CONSOLIDATION_SYSTEM_TOKENS, estimateTokens } from './prompt';
 import { Consolidation } from './schema';
@@ -204,7 +204,14 @@ export async function consolidatePerson(
   if (!spend.ok) return { status: 'unavailable', reason: spend.reason };
   const env = buildEnv(deps.db, now);
   if (!env.usable(env.canonical(personId))) return { status: 'skipped', reason: 'not_usable' };
-  const req = buildConsolidation(env, deps.egress, personId, { min: o.min ?? 3 });
+  let req: ConsolidationRequest | null;
+  try {
+    req = buildConsolidation(env, deps.egress, personId, { min: o.min ?? 3 });
+  } catch (e) {
+    // Fails closed: nothing is sent, nothing changes.
+    if (e instanceof EgressBlocked) return { status: 'unavailable', reason: 'egress_blocked' };
+    throw e;
+  }
   if (!req) return { status: 'skipped', reason: 'too_few_facts' };
   const out = await deps.llm.parse({
     kind: 'consolidate',

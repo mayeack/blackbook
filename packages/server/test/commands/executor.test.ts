@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SuggestionFeedback, SuggestionFeedbackResult, WhyThis } from '@yb/shared';
 import { BOT_MARKER } from '@yb/shared/collector/v1';
+import { MAX_OUTBOUND_PER_HOUR } from '../../src/delivery/types';
 import { HttpError } from '../../src/http/errors';
 import { INTENT_SYSTEM } from '../../src/commands/intent';
 import { commandsJobs } from '../../src/commands/jobs';
@@ -107,7 +108,7 @@ describe('commands: item verbs bind to the latest brief', () => {
     expect(fb.apply.mock.calls[0]![1]).toBe(suggestionIds[1]);
     expect(fb.apply.mock.calls[0]![2]).toEqual({ action: 'done' });
     expect(fb.apply.mock.calls[0]![3]).toMatchObject({ channel: 'imessage', inboundCommandId: commandId });
-    expect(w.replies()).toEqual([`${BOT_MARKER} ✓ 2 done (Priya S.) · undo to revert`]);
+    expect(w.replies()).toEqual([`${BOT_MARKER} ✓ Nice, marked Priya S. done.\n\n(Text "undo" to take that back.)`]);
     expect(w.outbound.sent[0]).toMatchObject({ purpose: 'reply', options: { bypassQuietHours: true } });
     expect(w.command(commandId)).toMatchObject({ status: 'handled', target_digest_id: digestId, intent: 'done' });
     expect(w.suggestionStatus(suggestionIds[1]!)).toBe('done');
@@ -124,8 +125,8 @@ describe('commands: item verbs bind to the latest brief', () => {
     const snoozeCall = fb.apply.mock.calls.find((c) => (c[2] as SuggestionFeedback).action === 'snooze')!;
     expect((snoozeCall[2] as { until: number }).until).toBe(at(6) + 14 * DAY);
     expect(w.replies()).toEqual([
-      `${BOT_MARKER} ✓ 2 done (Priya S.) · undo to revert`,
-      `${BOT_MARKER} ✓ 1 done (Sam R.) · 3 snoozed (Jordan L.) → Oct 28 · undo to revert`,
+      `${BOT_MARKER} ✓ Nice, marked Priya S. done.\n\n(Text "undo" to take that back.)`,
+      `${BOT_MARKER} ✓ Nice, marked Sam R. done.\n✓ Snoozed Jordan L. until Wed Oct 28.\n\n(Text "undo" to take that back.)`,
     ]);
   });
 
@@ -138,12 +139,47 @@ describe('commands: item verbs bind to the latest brief', () => {
     w.say('snooze 2 banana', at(5));
     await w.run({ now: at(6) });
     expect(w.replies()).toEqual([
-      `${BOT_MARKER} No item 7 in that brief (1–3)`,
-      `${BOT_MARKER} Which one? reply done 1–3`,
-      `${BOT_MARKER} ✓ 1 done (Sam R.) · undo to revert`,
-      `${BOT_MARKER} 1 is already done`,
-      `${BOT_MARKER} Didn't get "banana" · try snooze 2 2w`,
+      `${BOT_MARKER} There's no #7 in that brief (it had 1–3).`,
+      `${BOT_MARKER} Which one? Reply "done 1", or reply to that suggestion's text with just "done".`,
+      `${BOT_MARKER} ✓ Nice, marked Sam R. done.\n\n(Text "undo" to take that back.)`,
+      `${BOT_MARKER} #1 was already done.`,
+      `${BOT_MARKER} I didn't understand "banana". Try "snooze 2 2w" or "snooze 2 friday".`,
     ]);
+  });
+
+  it('one text per suggestion: "done", "skip this one", "why" as a reply to a text act on that item', async () => {
+    const { w, suggestionIds, itemMessageIds } = briefWorld();
+    w.say('done', at(1), { replyTo: itemMessageIds[2] });
+    w.say('skip this one', at(2), { replyTo: itemMessageIds[0] });
+    // The self thread echoes every bot text as a second row with its own GUID: replying to the echo works too.
+    const original = w.db.prepare('SELECT conversation_id, sent_at, text FROM messages WHERE id = ?').get(itemMessageIds[1]) as { conversation_id: string; sent_at: number; text: string };
+    const echo = Number(
+      w.db
+        .prepare(
+          `INSERT INTO messages (source, source_msg_id, conversation_id, sender_identity_id, is_from_me, sent_at, kind, text, is_bot, ingested_at, updated_at)
+           VALUES ('imessage', 'TEST-ECHO-1', ?, NULL, 0, ?, 'text', ?, 1, ?, ?)`,
+        )
+        .run(original.conversation_id, original.sent_at + 500, original.text, original.sent_at, original.sent_at).lastInsertRowid,
+    );
+    w.say('snooze 2w', at(3), { replyTo: echo });
+    await w.run({ now: at(5) });
+    expect(w.suggestionStatus(suggestionIds[2]!)).toBe('done');
+    expect(w.suggestionStatus(suggestionIds[0]!)).toBe('dismissed');
+    expect(w.suggestionStatus(suggestionIds[1]!)).toBe('snoozed');
+    expect(w.replies()).toEqual([
+      `${BOT_MARKER} ✓ Nice, marked Jordan L. done.\n\n(Text "undo" to take that back.)`,
+      `${BOT_MARKER} ✓ Skipped Sam R. I'll suggest things like that a bit less.\n\n(Text "undo" to take that back.)`,
+      `${BOT_MARKER} ✓ Snoozed Priya S. until Wed Oct 28.\n\n(Text "undo" to take that back.)`,
+    ]);
+  });
+
+  it('"why" with no number explains the suggestion it replies to; on its own it is free text', async () => {
+    const { w, itemMessageIds } = briefWorld();
+    const alone = w.say('why', at(1));
+    w.say('why', at(2), { replyTo: itemMessageIds[1] });
+    await w.run({ now: at(3) });
+    expect(w.command(alone.commandId)).toMatchObject({ status: 'ignored', response_outbound_id: null });
+    expect(w.replies()).toEqual([`${BOT_MARKER} #2 is a "reply owed" suggestion about Priya S.\nMore at yeackbot.com/today`]);
   });
 
   it('an inline reply binds to its own (older) digest', async () => {
@@ -166,7 +202,7 @@ describe('commands: item verbs bind to the latest brief', () => {
     const { suggestionIds } = w.digest([{ personId: p, sensitive: true }]);
     w.say('skip 1', at(1));
     await w.run({ now: at(2) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ 1 skipped · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Skipped #1. I'll suggest things like that a bit less.\n\n(Text "undo" to take that back.)`);
     expect(w.suggestionStatus(suggestionIds[0]!)).toBe('dismissed');
   });
 
@@ -177,8 +213,142 @@ describe('commands: item verbs bind to the latest brief', () => {
     });
     const { commandId } = w.say('done 2', at(1));
     await w.run({ now: at(2) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Feedback by text isn’t available yet · use yeackbot.com/today`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Feedback by text isn't available yet. You can do it at yeackbot.com/today`);
     expect(w.db.prepare('SELECT effect FROM command_effects WHERE command_id = ?').pluck().get(commandId)).toBe('none');
+  });
+});
+
+describe('commands: one text per suggestion — replies bind to the right thing', () => {
+  it('notes-to-self that start with "wrong", "snooze" or "skip" stay notes, even with one suggestion open', async () => {
+    const w = commandsWorld();
+    const p = w.person('Rowan', 'Ellis');
+    const { suggestionIds } = w.digest([{ personId: p }]);
+    const notes = ['wrong number lol', 'Wrong size shoes, return them', 'snooze button is broken', 'skip', 'snooze 2w', 'wrong'];
+    const ids = notes.map((t, k) => w.say(t, at(60 * 13 + k)).commandId); // 13 h after the brief: past the free-text window
+    await w.run({ now: at(60 * 13 + 10) });
+    for (const id of ids) expect(w.command(id)).toMatchObject({ status: 'ignored', response_outbound_id: null });
+    expect(fb.apply).not.toHaveBeenCalled();
+    expect(w.suggestionStatus(suggestionIds[0]!)).toBe('delivered');
+  });
+
+  it('a bare verb replying to a text that carries no suggestion never acts on one', async () => {
+    const w = commandsWorld();
+    const p = w.person('Rowan', 'Ellis');
+    const { digestId, suggestionIds } = w.digest([{ personId: p }]);
+    const heads = w.botSays("Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up.", at(1), digestId, null);
+    const answer = w.botSays('Rowan E. works at a bakery in Austin.', at(2));
+    w.say('done', at(3), { replyTo: heads });
+    const wrong = w.say('wrong, they moved to Denver', at(4), { replyTo: answer });
+    await w.run({ now: at(5) });
+    expect(fb.apply).not.toHaveBeenCalled();
+    expect(w.suggestionStatus(suggestionIds[0]!)).toBe('delivered');
+    expect(w.replies()[0]).toBe(`${BOT_MARKER} Which one? Reply "done 1", or reply to that suggestion's text with just "done".`);
+    // Without the AI key the correction can't be understood, so it says so instead of marking anything wrong.
+    expect(w.command(wrong.commandId).status).toBe('handled');
+    expect(w.replies()[1]).toContain("Sorry, I didn't get that.");
+  });
+
+  it('while a brief is still going out, replies bind to it (not to yesterday\'s)', async () => {
+    const w = commandsWorld();
+    const a = w.person('Alex', 'Moreno');
+    const b = w.person('Blair', 'Novak');
+    const yesterday = w.digest([{ personId: a }, { personId: a, kind: 'cooling' }], BRIEF_AT - DAY, '2026-10-13');
+    const today = w.digest([{ personId: b }, { personId: b, kind: 'cooling' }]);
+    // Its first texts are out, the rest are still on their way: no sent_at / status yet.
+    w.db.prepare(`UPDATE digests SET status = 'ready', sent_at = NULL WHERE id = ?`).run(today.digestId);
+    w.say('done 1', at(1));
+    w.say('done', at(2), { replyTo: today.itemMessageIds[1] });
+    await w.run({ now: at(3) });
+    expect(w.suggestionStatus(today.suggestionIds[0]!)).toBe('done');
+    expect(w.suggestionStatus(today.suggestionIds[1]!)).toBe('done');
+    expect(w.suggestionStatus(yesterday.suggestionIds[0]!)).toBe('delivered');
+    expect(w.suggestionStatus(yesterday.suggestionIds[1]!)).toBe('delivered');
+  });
+
+  it('"2" replying to the "Which Sam?" question (its echo, right after the brief) answers it, not brief item 2', async () => {
+    const { w, suggestionIds } = briefWorld();
+    const samK = w.person('Sam', 'Kowalski');
+    const log = w.say('log: drinks with Sam', at(1));
+    await w.run({ now: at(2) });
+    const question = w.outbound.sent.at(-1)!.text;
+    const conv = w.db.prepare(`SELECT id FROM conversations WHERE kind = 'self'`).pluck().get() as string;
+    // The self-thread echo of the question: its own GUID, is_bot, minutes after the brief.
+    const echo = Number(
+      w.db
+        .prepare(
+          `INSERT INTO messages (source, source_msg_id, conversation_id, sender_identity_id, is_from_me, sent_at, kind, text, is_bot, ingested_at, updated_at)
+           VALUES ('imessage', 'TEST-ECHO-Q', ?, NULL, 0, ?, 'text', ?, 1, ?, ?)`,
+        )
+        .run(conv, at(2), question, at(2), at(2)).lastInsertRowid,
+    );
+    const options = JSON.parse(w.db.prepare(`SELECT options FROM command_clarifications WHERE status = 'open'`).pluck().get() as string) as { personId: string }[];
+    const k = options.findIndex((o) => o.personId === samK) + 1;
+    w.say(String(k), at(3), { replyTo: echo });
+    await w.run({ now: at(4) });
+    expect(w.command(log.commandId).status).toBe('handled');
+    expect(w.db.prepare(`SELECT count(*) FROM interactions WHERE person_id = ?`).pluck().get(samK)).toBe(1);
+    expect(w.suggestionStatus(suggestionIds[k - 1]!)).toBe('delivered');
+  });
+
+  it('a number-less note processed late is dropped silently (no "seen late" reply)', async () => {
+    const { w } = briefWorld();
+    const ids = ['wrong number lol', 'skip', 'snooze button is broken'].map((t, k) => w.say(t, at(60 + k)).commandId);
+    await w.run({ now: at(60) + 7 * HOUR });
+    for (const id of ids) expect(w.command(id)).toMatchObject({ status: 'ignored', response_outbound_id: null });
+    expect(w.outbound.sent).toHaveLength(0);
+  });
+
+  it('"snooze one week" replying to a suggestion snoozes it for a week', async () => {
+    const { w, suggestionIds, itemMessageIds } = briefWorld();
+    w.say('snooze one week', at(1), { replyTo: itemMessageIds[1] });
+    await w.run({ now: at(2) });
+    expect(w.suggestionStatus(suggestionIds[1]!)).toBe('snoozed');
+    const call = fb.apply.mock.calls.find((c) => (c[2] as SuggestionFeedback).action === 'snooze')!;
+    expect((call[2] as { until: number }).until).toBe(at(1) + 7 * DAY);
+  });
+
+  it('"skip it" replying to a suggestion skips it; an open "Which Sam?" question stays open', async () => {
+    const { w, suggestionIds, itemMessageIds } = briefWorld();
+    w.person('Sam', 'Kowalski');
+    const log = w.say('log: drinks with Sam', at(1));
+    await w.run({ now: at(2) });
+    expect(w.command(log.commandId).status).toBe('clarifying');
+    w.say('skip it', at(3), { replyTo: itemMessageIds[2] });
+    await w.run({ now: at(4) });
+    expect(w.suggestionStatus(suggestionIds[2]!)).toBe('dismissed');
+    expect(w.command(log.commandId).status).toBe('clarifying');
+    expect(w.db.prepare(`SELECT status FROM command_clarifications`).pluck().get()).toBe('open');
+  });
+
+  it('"more" passes over a suggestion it can no longer show, and a reply to its text acts on it', async () => {
+    const { w } = briefWorld();
+    const hidden = w.person('Kit', 'Arden', { is_hidden: 1 });
+    const cleo = w.person('Cleo', 'Marsh');
+    const intro = w.suggestion({ personId: cleo, kind: 'intro', score: 0.9 });
+    w.db.prepare('UPDATE suggestions SET related_person_id = ? WHERE id = ?').run(hidden, intro);
+    const p = w.person('Emery', 'Vale');
+    const extra = w.suggestion({ personId: p, kind: 'dormant', score: 0.4 });
+    w.say('more', at(1));
+    await w.run({ now: at(2) });
+    const reply = w.outbound.sent.at(-1)!;
+    expect(reply.text).toMatch(/^\u{1F168} 4\. Reconnect with Emery V\.\?/u);
+    expect(reply.text).not.toMatch(/Kit|Arden|Cleo/);
+    expect(reply.options).toMatchObject({ digestOrdinal: 4 });
+    // The bot's own row for that reply, as the iMessage ingest would store it:
+    const guid = (w.db.prepare('SELECT message_guids FROM outbound_messages WHERE id = ?').pluck().get(reply.outboundId) as string).slice(2, -2);
+    const conv = w.db.prepare(`SELECT id FROM conversations WHERE kind = 'self'`).pluck().get() as string;
+    const row = Number(
+      w.db
+        .prepare(
+          `INSERT INTO messages (source, source_msg_id, conversation_id, sender_identity_id, is_from_me, sent_at, kind, text, is_bot, ingested_at, updated_at)
+           VALUES ('imessage', ?, ?, NULL, 1, ?, 'text', ?, 1, ?, ?)`,
+        )
+        .run(guid, conv, at(2), reply.text, at(2), at(2)).lastInsertRowid,
+    );
+    w.say('done', at(3), { replyTo: row });
+    await w.run({ now: at(4) });
+    expect(w.suggestionStatus(extra)).toBe('done');
+    expect(w.suggestionStatus(intro)).toBe('candidate');
   });
 });
 
@@ -212,7 +382,7 @@ describe('commands: gating keeps notes-to-self private', () => {
     await w.run({ now: at(62 + 12 * 60 + 7) });
     expect(askMock.askForImessage.mock.calls.map((c) => c[0])).toEqual(['who do I know in Austin', 'who do I know in Denver']);
     expect(w.command(late.commandId).status).toBe('ignored');
-    // Without the LLM, plain notes in the window stay silent (only explicitly addressed text gets "Didn't get that").
+    // Without the LLM, plain notes in the window stay silent (only explicitly addressed text gets "Sorry, I didn't get that").
     expect(w.command(notes.commandId)).toMatchObject({ status: 'ignored', response_outbound_id: null });
   });
 
@@ -230,7 +400,7 @@ describe('commands: gating keeps notes-to-self private', () => {
     const w = commandsWorld();
     w.say('yb hello there', at(0));
     await w.run({ now: at(1) });
-    expect(w.lastReply()).toContain("Didn't get that · try help");
+    expect(w.lastReply()).toContain("Sorry, I didn't get that.");
     setSetting(w.db, 'commands.enabled', false);
     const c = w.say('? anything', at(2));
     await w.run({ now: at(3) });
@@ -247,7 +417,7 @@ describe('commands: gating keeps notes-to-self private', () => {
     expect(w.command(c.commandId).status).toBe('seen_late');
     expect(w.command(note.commandId).status).toBe('ignored');
     expect(w.suggestionStatus(suggestionIds[0]!)).toBe('delivered');
-    expect(w.replies()).toEqual([`${BOT_MARKER} Seen late (sent 8:01 AM) · didn't act on it · send it again if you still want it`]);
+    expect(w.replies()).toEqual([`${BOT_MARKER} I only just saw your text from 8:01 AM, so I didn't act on it.\nSend it again if you still want it.`]);
   });
 });
 
@@ -273,9 +443,9 @@ describe('commands: limits and idempotency', () => {
 
   it('the outbound circuit breaker holds replies (effects still apply)', async () => {
     const { w, suggestionIds } = briefWorld();
-    for (let i = 0; i < 20; i++) w.botSays(`answer ${i}`, at(10 + i));
-    const c = w.say('done 1', at(31));
-    await w.run({ now: at(32) });
+    for (let i = 0; i < MAX_OUTBOUND_PER_HOUR; i++) w.botSays(`answer ${i}`, at(10 + i));
+    const c = w.say('done 1', at(10 + MAX_OUTBOUND_PER_HOUR));
+    await w.run({ now: at(11 + MAX_OUTBOUND_PER_HOUR) });
     expect(w.suggestionStatus(suggestionIds[0]!)).toBe('done');
     expect(w.outbound.sent).toHaveLength(0);
     expect(w.command(c.commandId).parsed).toMatchObject({ replyStatus: 'circuit_open' });
@@ -294,7 +464,7 @@ describe('commands: limits and idempotency', () => {
     await w.run({ now: at(5) });
     expect(fb.apply).toHaveBeenCalledTimes(1);
     expect(w.command(c.commandId)).toMatchObject({ status: 'error' });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Something went wrong with a command · check yeackbot.com/today`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Something went wrong with a command. You can check it at yeackbot.com/today`);
   });
 
   it('a reply composed but never handed to the sender (crash) goes out once on the next pass', async () => {
@@ -335,7 +505,7 @@ describe('commands: log', () => {
       origin: 'text_log',
       source_message_id: messageId,
     });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged for Sam R.: coffee yesterday · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged coffee with Sam R. yesterday.\n\n(Text "undo" to take that back.)`);
     const batch = w.db.prepare(`SELECT kind, actor, subject_person_id, run_id FROM change_batches WHERE kind = 'text_log'`).get() as Record<string, string>;
     expect(batch).toMatchObject({ kind: 'text_log', actor: 'user', subject_person_id: sam });
     expect(w.db.prepare('SELECT kind FROM runs WHERE id = ?').pluck().get(batch.run_id)).toBe('command');
@@ -343,27 +513,27 @@ describe('commands: log', () => {
 
     w.say('undo', at(2));
     await w.run({ now: at(3) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undid: log for Sam R. (coffee yesterday)`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undone: log for Sam R. (coffee yesterday)`);
     expect(w.db.prepare('SELECT retracted_at FROM interactions WHERE person_id = ?').pluck().get(sam)).toBe(at(3));
     expect(w.db.prepare('SELECT status FROM notes WHERE person_id = ?').pluck().get(sam)).toBe('retracted');
     w.say('undo', at(4));
     await w.run({ now: at(5) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Already undone · nothing else to undo by text`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} That's already undone, and there's nothing else I can undo by text.`);
   });
 
-  it('two people named Sam → "Sam R. or Sam K.? reply 1/2", then "2" logs Sam K. (not done 2)', async () => {
+  it('two people named Sam → "Which Sam did you mean? 1. Sam R. 2. Sam K.", then "2" logs Sam K. (not done 2)', async () => {
     const { w, suggestionIds } = briefWorld();
     const samK = w.person('Sam', 'Kowalski');
     const c = w.say('log: drinks with Sam', at(5));
     await w.run({ now: at(6) });
-    expect(w.lastReply()).toMatch(/^🅨 Sam [RK]\. or Sam [RK]\.\? reply 1\/2$/u);
+    expect(w.lastReply()).toMatch(/^🅨 Which Sam did you mean\?\n1\. Sam [RK]\.\n2\. Sam [RK]\.\nReply 1 or 2\.$/u);
     expect(w.command(c.commandId).status).toBe('clarifying');
     const options = JSON.parse(w.db.prepare(`SELECT options FROM command_clarifications WHERE status = 'open'`).pluck().get() as string) as { personId: string }[];
     const k = options.findIndex((o) => o.personId === samK) + 1;
     w.say(String(k), at(7));
     await w.run({ now: at(8) });
     expect(w.db.prepare(`SELECT count(*) FROM interactions WHERE person_id = ? AND kind = 'text_log'`).pluck().get(samK)).toBe(1);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged for Sam K.: drinks today · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged drinks with Sam K. today.\n\n(Text "undo" to take that back.)`);
     expect(w.command(c.commandId).status).toBe('handled');
     expect(w.suggestionStatus(suggestionIds[k - 1]!)).toBe('delivered');
   });
@@ -380,14 +550,14 @@ describe('commands: log', () => {
       const opts = JSON.parse(w.db.prepare(`SELECT options FROM command_clarifications WHERE status = 'open'`).pluck().get() as string) as { personId: string }[];
       return String(opts.findIndex((o) => o.personId === personId) + 1);
     };
-    expect(w.lastReply()).toMatch(/^🅨 Sam [RK]\. or Sam [RK]\.\? reply 1\/2$/u);
+    expect(w.lastReply()).toMatch(/^🅨 Which Sam did you mean\?\n1\. Sam [RK]\.\n2\. Sam [RK]\.\nReply 1 or 2\.$/u);
     w.say(pick(samR), at(2));
     await w.run({ now: at(3) });
-    expect(w.lastReply()).toMatch(/^🅨 Alex [MN]\. or Alex [MN]\.\? reply 1\/2$/u);
+    expect(w.lastReply()).toMatch(/^🅨 Which Alex did you mean\?\n1\. Alex [MN]\.\n2\. Alex [MN]\.\nReply 1 or 2\.$/u);
     expect(w.command(c.commandId).status).toBe('clarifying');
     w.say(pick(alexN), at(4));
     await w.run({ now: at(5) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged for Sam R. and Alex N.: meal today · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged a meal with Sam R. and Alex N. today.\n\n(Text "undo" to take that back.)`);
     expect(w.command(c.commandId).status).toBe('handled');
     expect((w.db.prepare(`SELECT person_id FROM interactions ORDER BY person_id`).pluck().all() as string[]).sort()).toEqual([samR, alexN].sort());
 
@@ -422,7 +592,7 @@ describe('commands: log', () => {
     await w.run({ now: at(64) });
     w.say('cancel', at(65));
     await w.run({ now: at(66) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Dropped that log`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ OK, I dropped that log.`);
     expect(w.db.prepare('SELECT count(*) FROM interactions').pluck().get()).toBe(0);
   });
 
@@ -431,7 +601,7 @@ describe('commands: log', () => {
     w.person('Morgan', 'Hale', { is_hidden: 1 });
     w.say('log: coffee with Morgan', at(0));
     await w.run({ now: at(1) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Couldn't tell who that was with · try log: coffee with Sam R.`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Who was that with? Try "log: coffee with Sam R."`);
     expect(w.db.prepare('SELECT count(*) FROM interactions').pluck().get()).toBe(0);
   });
 
@@ -460,7 +630,7 @@ describe('commands: log', () => {
     expect(INTENT_SYSTEM).not.toMatch(/\d{4}-\d{2}-\d{2}/); // byte-stable prefix: no dates
     const fact = w.db.prepare('SELECT type, value, confidence, source, status FROM facts WHERE person_id = ?').get(sam);
     expect(fact).toEqual({ type: 'location_next', value: 'moving to Denver', confidence: 0.95, source: 'user_log', status: 'confirmed' });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged for Sam R.: meal today · “moving to Denver” · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged a meal with Sam R. today.\nNoted: “moving to Denver”\n\n(Text "undo" to take that back.)`);
   });
 
   it('with the AI key, free text in the window is classified: notes stay silent, questions go to Ask', async () => {
@@ -471,8 +641,26 @@ describe('commands: log', () => {
     const note = w.say('remember to water plants', at(1));
     w.say('anyone around Austin', at(2));
     await w.run({ now: at(3) });
+    expect(llm.calls[0]!.userText).toContain('### ADDRESSED\nno');
     expect(w.command(note.commandId)).toMatchObject({ status: 'ignored', response_outbound_id: null });
     expect(askMock.askForImessage.mock.calls[0]![0]).toBe('Who lives in Austin?');
+  });
+
+  it('text addressed to the bot is never dropped as a note: yb and inline replies get "Sorry, I didn\'t get that"', async () => {
+    const llm = new FakeLlmClient().on('intent', { json: { intent: 'note', command: null, log: null, question: null } });
+    const w = commandsWorld({ llm });
+    const bot = w.botSays('✓ done', at(-13 * 60)); // outside the 12 h window: only yb or an inline reply reaches the bot
+    const yb = w.say('Yb prioritize inviting this person to parties, is a great DJ', at(0));
+    const inline = w.say('put them on the party list', at(1), { replyTo: bot });
+    await w.run({ now: at(2) });
+    expect(llm.calls).toHaveLength(2);
+    for (const call of llm.calls) expect(call.userText).toContain('### ADDRESSED\nyes');
+    for (const c of [yb, inline]) {
+      const row = w.command(c.commandId);
+      expect(row).toMatchObject({ status: 'handled', intent: 'note' });
+      expect(row.response_outbound_id).not.toBeNull();
+    }
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Sorry, I didn't get that. Text "help" to see what I can do.`);
   });
 
   it('people excluded from the AI are never sent: the text is logged deterministically', async () => {
@@ -493,7 +681,7 @@ describe('commands: log', () => {
     w.say('log: call with sam', at(0));
     await w.run({ now: at(1) });
     expect(w.db.prepare(`SELECT summary FROM interactions WHERE person_id = ?`).pluck().get(sam)).toBe('Call');
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged for Sam R.: call today · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged a call with Sam R. today.\n\n(Text "undo" to take that back.)`);
   });
 });
 
@@ -510,10 +698,10 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     expect(fb.undo.mock.calls[0]!.slice(1)).toEqual([done, { now: at(4), channel: 'imessage' }]);
     expect(w.suggestionStatus(suggestionIds[1]!)).toBe('delivered');
     expect(w.db.prepare('SELECT count(*) FROM suggestion_outcomes').pluck().get()).toBe(0);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undid: 2 done (Priya S.)`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undone: 2 done (Priya S.)`);
     w.say('undo 3', at(5));
     await w.run({ now: at(6) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Only your last command can be undone by text · everything else at yeackbot.com/today`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} I can only undo your last command by text. Everything else is at yeackbot.com/today`);
   });
 
   it('pause 2w writes digest.paused_until (journaled); undo and resume clear it', async () => {
@@ -522,7 +710,7 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     await w.run({ now: at(2) });
     const paused = () => JSON.parse((w.db.prepare(`SELECT value FROM settings WHERE key = 'digest.paused_until'`).pluck().get() as string | undefined) ?? 'null');
     expect(paused()).toBe(at(1) + 14 * DAY);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Brief paused until Wed Oct 28 (the brief is also off in Settings) · resume to restart · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Paused your brief until Wed Oct 28. (It's also turned off in Settings.)\nText "resume" to start it again.\n\n(Text "undo" to take that back.)`);
     expect(w.db.prepare(`SELECT count(*) FROM change_batches WHERE kind = 'setting'`).pluck().get()).toBe(1);
     w.say('undo', at(3));
     await w.run({ now: at(4) });
@@ -531,14 +719,14 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     w.say('resume', at(6));
     await w.run({ now: at(7) });
     expect(paused()).toBeNull();
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Brief resumed (turn it on in Settings to get it) · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Unpaused. Turn the brief on in Settings to get it.\n\n(Text "undo" to take that back.)`);
   });
 
   it('why N: the learned explanation, or a fallback while the module is not built', async () => {
     const { w, suggestionIds } = briefWorld();
     w.say('why 1', at(1));
     await w.run({ now: at(2) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Why 1 · Sam R.: quiet a while · score 0.50 · more at yeackbot.com/today`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} #1 is a "quiet a while" suggestion about Sam R.\nMore at yeackbot.com/today`);
     const why: WhyThis = {
       suggestionId: suggestionIds[0]!,
       kind: 'fading',
@@ -553,25 +741,27 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     fb.why.mockReturnValue(why);
     w.say('why 1', at(3));
     await w.run({ now: at(4) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Why 1 · Sam R.: Quiet 41 days; you usually talk every 9.\n• Quiet: 41 days\nLearned: Fading overall ×1.3\nyeackbot.com/today`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Why I suggested Sam R.:\nQuiet 41 days; you usually talk every 9.\n\n• Quiet: 41 days\n\nWhat I've learned: Fading overall ×1.3\n\nMore at yeackbot.com/today`);
   });
 
   it('draft N: needs the AI key; with it, two drafts (shown to self only)', async () => {
     const off = briefWorld();
     off.w.say('draft 1', at(1));
     await off.w.run({ now: at(2) });
-    expect(off.w.lastReply()).toBe(`${BOT_MARKER} Drafts need the AI key`);
+    expect(off.w.lastReply()).toBe(`${BOT_MARKER} I need the AI key to write drafts.`);
 
     const llm = new FakeLlmClient().on('command', { json: { openers: ['Hey Sam, been too long. Coffee this week?', 'Sam! How did the move go?'] } });
     const on = briefWorld({ llm });
     on.w.say('draft 1', at(1));
     await on.w.run({ now: at(2) });
     expect(llm.calls[0]).toMatchObject({ kind: 'command', effort: 'low' });
-    expect(on.w.lastReply()).toBe(`${BOT_MARKER} Drafts for Sam R. (copy them; nothing is sent):\n1) Hey Sam, been too long. Coffee this week?\n2) Sam! How did the move go?`);
+    expect(on.w.lastReply()).toBe(
+      `${BOT_MARKER} Something you could send Sam R.:\n\n“Hey Sam, been too long. Coffee this week?”\n\nOr:\n\n“Sam! How did the move go?”\n\nCopy it over yourself. I never text anyone but you.`,
+    );
     expect(on.w.outbound.sent).toHaveLength(1); // the drafts went to self, never to Sam
   });
 
-  it('more: the next candidates continue the numbering and bind like brief items', async () => {
+  it('more: the next suggestion, one per text, continues the numbering and binds like brief items', async () => {
     const { w } = briefWorld();
     const p = w.person('Emery', 'Vale');
     const extra = w.suggestion({ personId: p, kind: 'dormant', score: 0.4 });
@@ -584,13 +774,13 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     w.suggestion({ personId: muted, kind: 'fading', score: 0.95 });
     w.say('more', at(1));
     await w.run({ now: at(2) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} 4 Emery V. · long time\ndone 4 · skip 4 · yeackbot.com/today`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} 4. Reconnect with Emery V.?\nYou used to be close, but it's been a long time.\n\nReply "done 4", "skip 4", or "more" for another.`);
     w.say('done 4', at(3));
     await w.run({ now: at(4) });
     expect(w.suggestionStatus(extra)).toBe('done');
     w.say('more', at(5));
     await w.run({ now: at(6) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} That's everything for now · yeackbot.com/today`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} That's all I've got for now. Everything's at yeackbot.com/today`);
   });
 
   it('help and status', async () => {
@@ -598,8 +788,9 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     w.say('help', at(1));
     w.say('status', at(2));
     await w.run({ now: at(3) });
-    expect(w.replies()[0]).toContain('done 2 · snooze 1 2w');
-    expect(w.replies()[1]).toBe(`${BOT_MARKER} Brief: off\nLast sent: Oct 14\nAI: off · commands: on`);
+    expect(w.replies()[0]).toContain("Here's what you can text me:\n");
+    expect(w.replies()[0]).toContain('\n• done 2: you did it\n');
+    expect(w.replies()[1]).toBe(`${BOT_MARKER} Your brief is off. You can turn it on in Settings.\nThe last one went out Wed Oct 14.\nAI features are off (no key or budget).`);
   });
 
   it('? → the shared Ask engine through its iMessage entry point; the reply goes out as an answer (≤600 chars)', async () => {
@@ -617,11 +808,11 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     expect(w.outbound.sent.at(-1)).toMatchObject({ purpose: 'answer', options: { bypassQuietHours: true } });
   });
 
-  it('? without the AI key and nothing found → "Ask needs the AI key"; an answer citing a sensitive fact is withheld', async () => {
+  it('? without the AI key and nothing found → "I need the AI key"; an answer citing a sensitive fact is withheld', async () => {
     const w = commandsWorld();
     w.say('? who do I know in Austin', at(0));
     await w.run({ now: at(1) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Ask needs the AI key · try yeackbot.com/ask`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} I need the AI key to answer questions. You can still search at yeackbot.com/ask`);
 
     const p = w.person('Sam', 'Rivera');
     w.db.prepare(
@@ -632,12 +823,12 @@ describe('commands: undo, pause, why, draft, more, help, ask', () => {
     askMock.askForImessage.mockResolvedValue(askAnswer('Sam¹', { citations: [{ ref: `F${seq.toString(36)}`, kind: 'fact', label: 'private', href: null, at: null }] }));
     w.say('? tell me about Sam', at(2));
     await w.run({ now: at(3) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} That answer touches something personal · see it at yeackbot.com/ask`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} That answer touches something personal, so it's only in the app: yeackbot.com/ask`);
 
     askMock.askForImessage.mockRejectedValue(new Error('boom'));
     w.say('? anything', at(4));
     await w.run({ now: at(5) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Ask hit a problem · try yeackbot.com/ask`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} I hit a problem answering that. Try yeackbot.com/ask`);
   });
 });
 

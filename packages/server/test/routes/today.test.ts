@@ -56,7 +56,7 @@ describe('GET /today', () => {
     expect(t.items.map((i) => i.suggestionId)).toEqual(r.selectedIds);
     const debt = t.items.find((i) => i.kind === 'reply_debt')!;
     expect(debt).toMatchObject({ copy: 'template', people: [{ id: sam.id, firstName: 'Avery' }], target: { type: 'person', href: `/p/${sam.id}` } });
-    expect(debt.headline).toMatch(/^Avery Q\./);
+    expect(debt.headline).toBe('Reply to Avery Q.');
     expect(debt.actions).toEqual(expect.arrayContaining(['done', 'snooze', 'skip', 'wrong', 'why']));
     expect(t.allClear).toBe(false);
     const seen = () => db.prepare(`SELECT count(*) FROM feedback WHERE action = 'seen' AND channel = 'web'`).pluck().get() as number;

@@ -19,6 +19,7 @@
     "test:watch": "vitest",
     "lint:pii": "node scripts/lint-pii.mjs",
     "eval": "node scripts/eval.mjs",
+    "smoke:llm-schemas": "tsx packages/server/src/cli.ts llm-smoke --live",
     "hooks:install": "git config core.hooksPath .githooks",
     "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "yb": "tsx packages/server/src/cli.ts",
