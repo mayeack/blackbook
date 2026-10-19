@@ -20,6 +20,8 @@ export interface LogFields {
   duration_ms?: number;
   error_class?: string;
   error_code?: string;
+  /** an upstream API's request id (Anthropic `req_…`), never a message */
+  request_id?: string;
   /** redacted + truncated before writing */
   error_message?: string;
   /** access log: method, route PATTERN (never the raw URL), status */
@@ -43,6 +45,7 @@ export interface Logger {
 
 const ID_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{1,12}|[a-z]{1,4}:\d{1,12})$/i;
 const TOKEN_RE = /^[a-z0-9_.:/-]{1,80}$/i;
+const REQUEST_ID_RE = /^req_[A-Za-z0-9]{1,64}$/;
 
 /** Keeps allow-listed fields with safe shapes; everything else is dropped. */
 export function sanitize(level: LogLevel, event: string, fields: LogFields = {}, now = Date.now()): LogRecord {
@@ -63,6 +66,7 @@ export function sanitize(level: LogLevel, event: string, fields: LogFields = {},
   if (Number.isFinite(fields.duration_ms)) rec.duration_ms = Math.round(fields.duration_ms!);
   if (token(fields.error_class)) rec.error_class = fields.error_class;
   if (token(fields.error_code)) rec.error_code = fields.error_code;
+  if (typeof fields.request_id === 'string' && REQUEST_ID_RE.test(fields.request_id)) rec.request_id = fields.request_id;
   if (fields.error_message !== undefined) rec.error_message = redact(fields.error_message);
   if (token(fields.method)) rec.method = fields.method;
   if (token(fields.route)) rec.route = fields.route;

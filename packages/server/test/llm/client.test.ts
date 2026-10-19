@@ -6,11 +6,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { createLlmClient, echoContent, finalText, MAX_BATCH_ITEMS, promptsOverLimit, usageFrom } from '../../src/llm/client';
+import { API_ERROR_CODES, createLlmClient, echoContent, errorBodyCode, finalText, MAX_BATCH_ITEMS, promptsOverLimit, usageFrom } from '../../src/llm/client';
 import { createEgress } from '../../src/llm/egress';
 import { BudgetExceeded, getRequest, llmExclusions, requireBudget } from '../../src/llm/ledger';
 import { HAIKU_5_5, SONNET_5_5 } from '../../src/llm/models';
 import { customId, FALLBACK_BETA, LLM_MODEL, type LlmBatchItem, type LlmClient } from '../../src/llm/types';
+import { createLogger } from '../../src/ops/logger';
 import { writeSettings } from '../../src/settings/registry';
 import { memDb, seedPerson, T0 } from '../helpers';
 import { FakeAnthropic, reply } from './fakeAnthropic';
@@ -157,6 +158,79 @@ describe('parse (sync structured output)', () => {
     const ac = new AbortController();
     ac.abort();
     expect(await llm.parse(req({ signal: ac.signal }))).toMatchObject({ status: 'unavailable', reason: 'aborted' });
+  });
+
+  it('a 400 is classified without its message: content-free code + request id in the log, the ledger and the outcome', async () => {
+    // The message echoes request text (a marker word stands in for it): it must never reach a log line or a row.
+    const message = 'tools.3.custom.input_schema: too many parameters with union types near MARKERWORD';
+    const api = new FakeAnthropic().onMessage(
+      () =>
+        new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message }, request_id: 'req_011CSynthetic' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json', 'request-id': 'req_011CSynthetic' },
+        }),
+    );
+    const db = memDb();
+    const lines: unknown[] = [];
+    const log = createLogger([(r) => lines.push(r)], 'debug');
+    const llm = createLlmClient({ db, apiKey: 'synthetic-test-key', egress: createEgress(db), fetch: api.fetch, now: () => T0, maxRetries: 0, log });
+    const out = await llm.parse(req());
+    const code = 'invalid_request_error:strict_union_limit:tools.3.custom';
+    expect(out).toEqual({ status: 'unavailable', reason: 'api_error', detail: 'BadRequestError:400', errorCode: code, apiRequestId: 'req_011CSynthetic' });
+    expect(lines).toContainEqual(expect.objectContaining({ event: 'llm_call_failed', job: 'digest', error_class: 'BadRequestError:400', error_code: code, request_id: 'req_011CSynthetic' }));
+    const row = db.prepare("SELECT * FROM llm_requests WHERE kind = 'digest'").get() as { status: string; error_type: string };
+    expect(row).toMatchObject({ status: 'errored', error_type: `api_error:${code}` });
+    expect(JSON.stringify([lines, row])).not.toContain('MARKERWORD');
+  });
+
+  it('errorBodyCode: fixed codes for known messages, allowlisted field paths, unknown types and messages', () => {
+    const body = (message: unknown, type: unknown = 'invalid_request_error') => ({ type: 'error', error: { type, message } });
+    const cases: [unknown, string][] = [
+      [body('Schema is too complex for compilation.'), 'invalid_request_error:schema_too_complex'],
+      [body('The compiled grammar is too large, which would cause performance issues.'), 'invalid_request_error:grammar_too_large'],
+      [body('Too many optional parameters across strict tools (max 24).'), 'invalid_request_error:strict_optional_limit'],
+      [body('prompt is too long: 215000 tokens > 200000 maximum'), 'invalid_request_error:prompt_too_long'],
+      [body('tool_choice: type "tool" and "any" are not supported for this model.'), 'invalid_request_error:tool_choice:tool_choice'],
+      [body('messages.1.content.0.type: Expected `thinking` or `redacted_thinking`, but found `tool_use`.'), 'invalid_request_error:thinking_blocks:messages.1.content'],
+      [body('messages.2: `tool_use` ids were found without `tool_result` blocks immediately after'), 'invalid_request_error:tool_pairing:messages.2'],
+      [body('A maximum of 4 blocks with cache_control may be provided. Found 5.'), 'invalid_request_error:cache_control'],
+      [body('fallbacks: Extra inputs are not permitted'), 'invalid_request_error:fallbacks_beta:fallbacks'],
+      // A path outside the allowlist is dropped, and so is any segment after an unknown word.
+      [body('hello.world: something new'), 'invalid_request_error:unrecognized'],
+      [body('tools.0.mystery: something new'), 'invalid_request_error:unrecognized:tools.0'],
+      [body('Overloaded', 'overloaded_error'), 'overloaded_error:unrecognized'],
+      [body('x', 'brand_new_error'), 'other:unrecognized'],
+      [{ type: 'error', error: { type: 'api_error' } }, 'api_error:no_message'],
+      [undefined, 'other:no_message'],
+    ];
+    for (const [b, code] of cases) expect(errorBodyCode(b), JSON.stringify(b)).toBe(code);
+    for (const [, code] of API_ERROR_CODES) expect(code).toMatch(/^[a-z_]+$/);
+  });
+
+  it('a tool loop that fails after tool results logs which turn failed', async () => {
+    const api = new FakeAnthropic().onMessage(
+      () => reply({ toolUses: [{ name: 'search_people', input: { query: 'Springfield' }, id: 'toolu_1' }] }),
+      () => new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'messages.2.content.0: unexpected `tool_use_id`' } }), { status: 400, headers: { 'content-type': 'application/json', 'request-id': 'req_fake' } }),
+    );
+    const db = memDb();
+    const warns: { event: string; fields: unknown }[] = [];
+    const log = { debug: () => {}, info: () => {}, error: () => {}, warn: (event: string, fields?: unknown) => void warns.push({ event, fields }) };
+    const llm = createLlmClient({ db, apiKey: 'synthetic-test-key', egress: createEgress(db), fetch: api.fetch, now: () => T0, maxRetries: 0, log });
+    const out = await llm.runTools({
+      kind: 'ask',
+      route: 'ask_imessage',
+      subjectRef: 'turn-1',
+      promptVersion: 'v1',
+      system: 'You answer questions about my network using the tools.',
+      messages: [{ role: 'user', content: 'Who do I know in Springfield?' }],
+      tools: [{ name: 'search_people', description: 'Search people.', inputSchema: { type: 'object', additionalProperties: false, properties: { query: { type: 'string' } }, required: ['query'] } }],
+      maxToolCalls: 8,
+      executeTool: async () => ({ content: '[]' }),
+    });
+    const code = 'invalid_request_error:tool_pairing:messages.2.content';
+    expect(out).toMatchObject({ status: 'unavailable', reason: 'api_error', errorCode: code });
+    expect(warns).toEqual([{ event: 'llm_call_failed', fields: { job: 'ask', error_class: 'BadRequestError:400', error_code: code, request_id: 'req_fake', counts: { turn: 1 } } }]);
+    expect(db.prepare("SELECT error_type FROM llm_requests WHERE kind = 'ask'").pluck().get()).toBe(`api_error:${code}`);
   });
 });
 
@@ -512,6 +586,18 @@ describe('batches', () => {
     const reqs = api.requests.find((r) => r.path === '/v1/messages/batches')!.body!.requests as { custom_id: string; params: { max_tokens: number } }[];
     expect(reqs.map((r) => r.custom_id.split('-')[1])).toEqual(['h1', 's1', 's2']);
     expect(reqs.map((r) => r.params.max_tokens)).toEqual([8000, 4000, 4000]);
+  });
+
+  it('errored items are counted per content-free error code in llm_batch_results', async () => {
+    const api = new FakeAnthropic().onBatchItem((r) => (r.custom_id.includes('ok') ? { message: reply({ json: { facts: [] } }) } : { errored: 'invalid_request_error' }));
+    const db = memDb();
+    const infos: { event: string; fields: unknown }[] = [];
+    const log = { debug: () => {}, warn: () => {}, error: () => {}, info: (event: string, fields?: unknown) => void infos.push({ event, fields }) };
+    const llm = createLlmClient({ db, apiKey: 'synthetic-test-key', egress: createEgress(db), fetch: api.fetch, now: () => T0, maxRetries: 0, log });
+    const sub = await llm.submitBatch([item('ok'), item('b1'), item('b2')], { purpose: 'extract', runId: 'r' });
+    if (sub.status !== 'submitted') throw new Error('not submitted');
+    for await (const r of llm.batchResults(sub.batchId)) void r;
+    expect(infos.find((l) => l.event === 'llm_batch_results')!.fields).toMatchObject({ counts: { results: 3, 'invalid_request_error:unrecognized': 2 } });
   });
 
   it('a failed submit leaves re-usable rows; a submitted custom_id can never be re-used', async () => {

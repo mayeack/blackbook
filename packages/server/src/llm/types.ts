@@ -245,7 +245,15 @@ export interface LlmParseRequest<T> extends LlmRequestBase {
   signal?: AbortSignal;
 }
 
-export type LlmUnavailable = { status: 'unavailable'; reason: LlmUnavailableReason; detail?: string };
+export type LlmUnavailable = {
+  status: 'unavailable';
+  reason: LlmUnavailableReason;
+  detail?: string;
+  /** An API error, content-free (llm/client.ts apiErrorCode): `{error type}:{known-message code}[:{field path}]`. */
+  errorCode?: string;
+  /** The API's request-id header of a failed call (look it up in the Console; never the message). */
+  apiRequestId?: string;
+};
 
 export type LlmOutcome<T> =
   | { status: 'ok'; value: T; text: string; usage: LlmUsage; requestId: string }

@@ -241,6 +241,110 @@
 .ask-people {
   margin-top: 10px;
 }
+
+/* People answers: one row per person. On a phone each row stacks into a small card with labelled fields. */
+.ask-table-wrap {
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+.ask-text > .ask-table-wrap:last-child {
+  margin-bottom: 0;
+}
+.ask-people-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.4;
+  /* .ask-text breaks anywhere; in a table that squeezes short columns mid-word ("Springfie ld"). */
+  overflow-wrap: break-word;
+}
+.ask-people-table th,
+.ask-people-table td {
+  padding: 7px 10px 7px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.ask-people-table thead th {
+  padding-top: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.ask-people-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.ask-people-table tbody th {
+  font-weight: 500;
+}
+.ask-people-table td[data-label='Last contact'] {
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.ask-people-table td[data-label='Circles'] {
+  color: var(--text-secondary);
+}
+.ask-table-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  text-decoration: none;
+  min-height: 28px;
+}
+.ask-table-person:hover span {
+  text-decoration: underline;
+}
+@media (max-width: 599px) {
+  .ask-people-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .ask-people-table,
+  .ask-people-table tbody,
+  .ask-people-table th,
+  .ask-people-table td {
+    display: block;
+  }
+  .ask-people-table tr {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .ask-people-table tbody th {
+    order: -2;
+  }
+  .ask-people-table td[data-label='Details'] {
+    order: -1;
+  }
+  .ask-people-table td.empty {
+    display: none;
+  }
+  .ask-people-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .ask-people-table th,
+  .ask-people-table td {
+    padding: 1px 0;
+    border-bottom: 0;
+  }
+  .ask-people-table tbody th {
+    padding-bottom: 3px;
+  }
+  .ask-people-table td::before {
+    content: attr(data-label) ': ';
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .ask-people-table td[data-label='Details']::before {
+    content: none;
+  }
+}
 .ask-usage {
   margin: 8px 0 0;
   color: var(--text-muted);

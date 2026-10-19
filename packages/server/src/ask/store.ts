@@ -3,7 +3,7 @@
  * nothing here is journaled. Titles are the first question (masked); answers are stored de-tokenized for display
  * plus the validated model text (tokens intact) for follow-ups.
  */
-import { uuidv7, type AskCitation, type AskConversation, type AskConversationSummary, type AskTurn, type AskUsage, type PersonChip } from '@yb/shared';
+import { uuidv7, type AskCitation, type AskConversation, type AskConversationSummary, type AskPeopleList, type AskTurn, type AskUsage, type PersonChip } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { hiddenNameRedactor, maskText } from '../routes/people';
 import type { AskChannel, PriorTurn } from './prompt';
@@ -48,6 +48,8 @@ export interface TurnResult {
   modelAnswer: string | null;
   citations: AskCitation[];
   people: PersonChip[];
+  /** An answer listing people (people-list.ts), or null. */
+  list: AskPeopleList | null;
   citableIds: string[];
   degradedReason?: string | null;
   errorCode?: string | null;
@@ -61,7 +63,7 @@ export interface TurnResult {
 export function finishTurn(db: DB, turnId: string, r: TurnResult, now: number): void {
   db.prepare(
     `UPDATE ask_turns SET status = @status, answer = @answer, model_answer = @model, citations = @citations, people = @people,
-       citable_ids = @citable, degraded_reason = @degraded, error_code = @error, tool_calls = @toolCalls, violations = @violations,
+       people_list = @list, citable_ids = @citable, degraded_reason = @degraded, error_code = @error, tool_calls = @toolCalls, violations = @violations,
        usage = @usage, cost_usd = @cost, llm_request = @req, prompt_version = @pv, finished_at = @now
      WHERE id = @id`,
   ).run({
@@ -71,6 +73,7 @@ export function finishTurn(db: DB, turnId: string, r: TurnResult, now: number): 
     model: r.modelAnswer,
     citations: JSON.stringify(r.citations),
     people: JSON.stringify(r.people),
+    list: r.list ? JSON.stringify(r.list) : null,
     citable: JSON.stringify(r.citableIds),
     degraded: r.degradedReason ?? null,
     error: r.errorCode ?? null,
@@ -103,6 +106,7 @@ interface TurnRow {
   answer: string | null;
   citations: string;
   people: string;
+  people_list: string | null;
   channel: AskChannel;
   status: AskTurn['status'];
   created_at: number;
@@ -133,11 +137,18 @@ function visibilityFilter(db: DB): { turn: (r: TurnRow) => AskTurn; title: (t: s
         return !pid || isVisible(pid);
       }),
       people: (JSON.parse(r.people) as PersonChip[]).filter((p) => isVisible(p.id)),
+      list: r.people_list ? visibleList(JSON.parse(r.people_list) as AskPeopleList, isVisible, redact) : null,
       channel: r.channel,
       status: r.status,
       createdAt: r.created_at,
     }),
   };
+}
+
+/** A stored people list as of now: rows of people hidden since drop out, hidden names are blanked in its text. */
+function visibleList(l: AskPeopleList, isVisible: (id: string) => boolean, redact: (s: string) => string | null): AskPeopleList | null {
+  const rows = l.rows.filter((r) => isVisible(r.person.id)).map((r) => ({ ...r, detail: redact(r.detail) ?? r.detail }));
+  return rows.length ? { intro: redact(l.intro) ?? l.intro, rows, note: redact(l.note) ?? l.note } : null;
 }
 
 export function getConversation(db: DB, id: string): AskConversation | null {
@@ -147,7 +158,7 @@ export function getConversation(db: DB, id: string): AskConversation | null {
   if (!c) return null;
   const f = visibilityFilter(db);
   const turns = (db
-    .prepare('SELECT id, question, answer, citations, people, channel, status, created_at FROM ask_turns WHERE conversation_id = ? ORDER BY seq')
+    .prepare('SELECT id, question, answer, citations, people, people_list, channel, status, created_at FROM ask_turns WHERE conversation_id = ? ORDER BY seq')
     .all(id) as TurnRow[]).map(f.turn);
   return { id: c.id, title: f.title(c.title), turns, createdAt: c.created_at, updatedAt: c.updated_at };
 }
