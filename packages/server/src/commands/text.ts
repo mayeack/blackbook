@@ -33,6 +33,14 @@ export function shortName(p: NameParts): string {
   return p.display_name.trim() || 'someone';
 }
 
+/** "Sam Rivera" (first name + full last name, else the whole display name): for a short name that would be ambiguous. */
+export function longName(p: NameParts): string {
+  const first = p.first_name?.trim();
+  const last = p.last_name?.trim().replace(/\s+/g, ' ');
+  if (first) return last ? `${first} ${last}` : first;
+  return p.display_name.trim().replace(/\s+/g, ' ') || 'someone';
+}
+
 /** "Oct 28" in the owner's zone; with the weekday: "Thu Oct 23". */
 export function formatDay(ms: number, timeZone: string, weekday = false): string {
   return new Intl.DateTimeFormat('en-US', {

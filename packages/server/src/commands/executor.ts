@@ -27,10 +27,11 @@ import { commandImageRefs } from '../adapters/imessage/attachments';
 import { canonicalId } from '../db/canon';
 import type { DB } from '../db/connection';
 import { itemLines, mainLine } from '../delivery/compose';
-import { selectedItemById } from '../delivery/selection';
+import { peopleInfo, selectedItemById } from '../delivery/selection';
 import { templateCopy } from '../delivery/template';
-import { clockWords, endSentence } from '../delivery/text';
+import { briefNames, clockWords, endSentence } from '../delivery/text';
 import { MAX_ANSWER_CHARS, type OutboundSender } from '../delivery/types';
+import { ownerNames } from '../identity/ownerNames';
 import type { ResolveContext } from '../identity/resolver';
 import { withBatch } from '../journal/batch';
 import { finishRun, startRun } from '../journal/runs';
@@ -1057,8 +1058,11 @@ class CommandRun {
       ex.lines.push("That's all I've got for now. Everything's at yeackbot.com/today");
       return;
     }
-    // Written like a brief item: the numbered headline and its context, then how to act on it.
-    const copy = templateCopy(item, { db: this.db, now: this.now, timeZone: this.tz });
+    // Written like a brief item: the numbered headline and its context, then how to act on it. Named alongside the
+    // brief's people, so a short name the brief already uses for someone else gets the full last name.
+    const brief = peopleInfo(this.db, items.flatMap((i) => [i.personId, i.relatedPersonId]).filter((id): id is string => !!id));
+    const names = briefNames([...brief.values(), ...item.people], ownerNames(this.db));
+    const copy = templateCopy(item, { db: this.db, now: this.now, timeZone: this.tz, names });
     const lines = itemLines({ line: mainLine(next, copy.headline, item.sensitive), body: copy.body, openers: [], copy: 'template', sensitive: item.sensitive });
     ex.lines.push([...lines, '', `Reply "done ${next}", "skip ${next}", or "more" for another.`].join('\n'));
     ex.replyItem = { digestId: digest.id, ordinal: next };

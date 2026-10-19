@@ -26,7 +26,7 @@ import { nullLogger, errorFields, type Logger } from '../../ops/logger';
 import { settingsSnapshot, type SettingsSnapshot } from '../../settings/registry';
 import { preferredPeople } from '../circles/preferences';
 import { adaptiveCap, armsFor, ArmSampler, personState, sampleFactors, snapshotArms, type ArmRef, type ScoredFactors } from './learner';
-import { PeopleCache, shortName } from './people';
+import { PeopleCache } from './people';
 import { rankDetailed, type DetailedRankResult } from './ranker';
 import { allGenerators, allWildcardSources } from './registry';
 import { newSeed, stream } from './rng';
@@ -285,7 +285,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
         sampler,
         c.kind,
         primary,
-        primary ? shortName(primary) : null,
+        primary ? people.names([primary])[0]! : null,
         g,
         (cid) => (circleName.get(cid) as string | undefined) ?? null,
         c.links?.circleId ?? null,

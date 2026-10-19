@@ -4,6 +4,7 @@
  */
 import type { PersonChip, TieState } from '@yb/shared';
 import type { DB } from '../../db/connection';
+import { collisionAware, ownerNames } from '../../identity/ownerNames';
 
 export interface TieStats {
   tie: number | null;
@@ -128,6 +129,7 @@ interface PersonRow {
 /** Loads visible people (canonical ids only; invisible ones are simply absent from the map). */
 export class PeopleCache {
   private readonly cache = new Map<string, PersonInfo | null>();
+  private ownerShorts: string[] | null = null;
   private readonly personStmt;
   private readonly statsStmt;
   private readonly circlesStmt;
@@ -170,13 +172,31 @@ export class PeopleCache {
     const p = this.get(id);
     return p ? { id: p.id, displayName: p.displayName, firstName: p.firstName, state: p.stats?.state ?? null } : null;
   }
+
+  /**
+   * Names for people shown together (one suggestion): shortName, or longName where the short one reads as the
+   * owner's own or as another of them (identity/ownerNames.ts).
+   */
+  names(infos: readonly PersonInfo[]): string[] {
+    this.ownerShorts ??= ownerNames(this.db).map(shortName);
+    const named = collisionAware(infos, this.ownerShorts, { short: shortName, long: longName });
+    return infos.map((p) => named.of(p) ?? shortName(p));
+  }
 }
+
+const firstOf = (p: Pick<PersonInfo, 'firstName' | 'displayName'>): string =>
+  (p.firstName ?? '').trim() || (p.displayName ?? '').trim().split(/\s+/)[0] || 'Someone';
 
 /** "Sam R." — first name + last initial (the digest's name rule); falls back to the display name's first word. */
 export function shortName(p: Pick<PersonInfo, 'firstName' | 'lastName' | 'displayName'>): string {
-  const first = (p.firstName ?? '').trim() || (p.displayName ?? '').trim().split(/\s+/)[0] || 'Someone';
   const last = (p.lastName ?? '').trim();
-  return last ? `${first} ${[...last][0]!.toUpperCase()}.` : first;
+  return last ? `${firstOf(p)} ${[...last][0]!.toUpperCase()}.` : firstOf(p);
+}
+
+/** "Sam Rivera" — first name + full last name, for a short name that would be ambiguous (PeopleCache.names). */
+export function longName(p: Pick<PersonInfo, 'firstName' | 'lastName' | 'displayName'>): string {
+  const last = (p.lastName ?? '').trim().replace(/\s+/g, ' ');
+  return last ? `${firstOf(p)} ${last}` : firstOf(p);
 }
 
 /** Active circles with their visible member ids (3–60 members), for circle-level generators. */
