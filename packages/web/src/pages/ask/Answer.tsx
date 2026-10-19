@@ -1,8 +1,22 @@
 import { Link } from 'react-router';
 import { Avatar } from '../../components/Avatar';
 import { PersonLink } from '../../components/PersonLink';
+import { date, relativeDay } from '../../lib/format';
 import { spendUsd } from '../settings/logic';
-import { citationHref, citationPersonId, isActive, isNeedsKeyAnswer, parseAnswer, superscript, toolLabel, type Inline, type LiveTurn } from './logic';
+import {
+  citationHref,
+  citationPersonId,
+  isActive,
+  isNeedsKeyAnswer,
+  parseAnswer,
+  parsePeopleList,
+  superscript,
+  toolLabel,
+  type Block,
+  type Inline,
+  type LiveTurn,
+  type ParsedPeopleList,
+} from './logic';
 
 function InlineView({ x }: { x: Inline }) {
   if (x.kind === 'text') return <>{x.text}</>;
@@ -40,6 +54,92 @@ const Inlines = ({ items }: { items: Inline[] }) => (
   </>
 );
 
+/** Paragraphs and bullet lists; the caret follows the last block while the answer streams. */
+function Blocks({ blocks, caret = false }: { blocks: Block[]; caret?: boolean }) {
+  return (
+    <>
+      {blocks.map((b, i) =>
+        b.kind === 'p' ? (
+          <p key={i}>
+            <Inlines items={b.inlines} />
+            {caret && i === blocks.length - 1 && <span className="ask-caret" aria-hidden />}
+          </p>
+        ) : (
+          <ul key={i}>
+            {b.items.map((it, j) => (
+              <li key={j}>
+                <Inlines items={it} />
+              </li>
+            ))}
+          </ul>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * A people answer as a table: one row per person (name links to their page), where they live, the answer's
+ * detail for them with its citations, circles and last contact. Columns nobody has a value for are left out; on
+ * a phone each row stacks into a card (details first, empty fields hidden).
+ */
+function PeopleTable({ rows }: { rows: ParsedPeopleList['rows'] }) {
+  const city = rows.some((r) => r.row.city);
+  const circles = rows.some((r) => r.row.circles.length > 0);
+  const last = rows.some((r) => r.row.lastContactAt != null);
+  return (
+    <div className="ask-table-wrap">
+      <table className="ask-people-table">
+        <thead>
+          <tr>
+            <th scope="col">Person</th>
+            {city && <th scope="col">Lives in</th>}
+            <th scope="col">Details</th>
+            {circles && <th scope="col">Circles</th>}
+            {last && <th scope="col">Last contact</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ row, detail }) => (
+            <tr key={row.person.id}>
+              <th scope="row">
+                <PersonLink id={row.person.id} className="ask-table-person">
+                  <Avatar id={row.person.id} name={row.person.displayName} size={24} />
+                  <span>{row.person.displayName}</span>
+                </PersonLink>
+              </th>
+              {city && (
+                <td data-label="Lives in" className={row.city ? undefined : 'empty'}>
+                  {row.city ?? <span className="muted">—</span>}
+                </td>
+              )}
+              <td data-label="Details" className={detail.length ? undefined : 'empty'}>
+                {detail.length ? <Inlines items={detail} /> : <span className="muted">—</span>}
+              </td>
+              {circles && (
+                <td data-label="Circles" className={row.circles.length ? undefined : 'empty'}>
+                  {row.circles.length ? row.circles.join(', ') : <span className="muted">—</span>}
+                </td>
+              )}
+              {last && (
+                <td data-label="Last contact" className={row.lastContactAt != null ? undefined : 'empty'}>
+                  {row.lastContactAt != null ? (
+                    <time dateTime={new Date(row.lastContactAt).toISOString()} title={date(row.lastContactAt)}>
+                      {relativeDay(row.lastContactAt)}
+                    </time>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ToolSteps({ t }: { t: LiveTurn }) {
   if (!t.tools.length) return t.status === 'pending' ? <p className="ask-tools caption">Thinking…</p> : null;
   const active = isActive(t);
@@ -60,10 +160,16 @@ function ToolSteps({ t }: { t: LiveTurn }) {
   );
 }
 
-/** One answer: tool steps, streamed text with footnote citations and person chips, sources, people. */
+/**
+ * One answer: tool steps, streamed text with footnote citations and person chips, sources, people. A finished
+ * answer that lists people is a table instead (citations stay on their row; no separate footnote list).
+ */
 export function Answer({ t, onRetry }: { t: LiveTurn; onRetry?: () => void }) {
-  const parsed = parseAnswer(t.text, t.citations);
   const active = isActive(t);
+  const table = !active && t.list && t.list.rows.length > 0 ? parsePeopleList(t.list, t.citations) : null;
+  const parsed = table ? null : parseAnswer(t.text, t.citations);
+  const inTable = new Set(table?.rows.map((r) => r.row.person.id));
+  const otherPeople = t.people.filter((p) => !inTable.has(p.id));
   const degraded = t.status === 'degraded';
   return (
     <div className={`ask-answer status-${t.status}`} aria-live={active ? 'polite' : undefined} aria-busy={active}>
@@ -73,24 +179,16 @@ export function Answer({ t, onRetry }: { t: LiveTurn; onRetry?: () => void }) {
           <span className="badge">{isNeedsKeyAnswer(t.text) ? 'Needs AI key' : 'Plain search'}</span> No AI wrote this; it’s a local search.
         </p>
       )}
-      {parsed.blocks.length > 0 && (
+      {parsed && parsed.blocks.length > 0 && (
         <div className="ask-text">
-          {parsed.blocks.map((b, i) =>
-            b.kind === 'p' ? (
-              <p key={i}>
-                <Inlines items={b.inlines} />
-                {active && i === parsed.blocks.length - 1 && <span className="ask-caret" aria-hidden />}
-              </p>
-            ) : (
-              <ul key={i}>
-                {b.items.map((it, j) => (
-                  <li key={j}>
-                    <Inlines items={it} />
-                  </li>
-                ))}
-              </ul>
-            ),
-          )}
+          <Blocks blocks={parsed.blocks} caret={active} />
+        </div>
+      )}
+      {table && (
+        <div className="ask-text">
+          <Blocks blocks={table.intro} />
+          <PeopleTable rows={table.rows} />
+          <Blocks blocks={table.note} />
         </div>
       )}
       {t.status === 'error' && (
@@ -104,7 +202,7 @@ export function Answer({ t, onRetry }: { t: LiveTurn; onRetry?: () => void }) {
         </div>
       )}
       {t.status === 'stopped' && <p className="caption">Stopped.</p>}
-      {parsed.footnotes.length > 0 && (
+      {parsed && parsed.footnotes.length > 0 && (
         <ol className="ask-footnotes" aria-label="Sources">
           {parsed.footnotes.map((f) => {
             const href = citationHref(f.citation);
@@ -117,9 +215,9 @@ export function Answer({ t, onRetry }: { t: LiveTurn; onRetry?: () => void }) {
           })}
         </ol>
       )}
-      {!active && t.people.length > 0 && (
-        <div className="chips ask-people" aria-label="People in this answer">
-          {t.people.slice(0, 12).map((p) => (
+      {!active && otherPeople.length > 0 && (
+        <div className="chips ask-people" aria-label={table ? 'Also mentioned' : 'People in this answer'}>
+          {otherPeople.slice(0, 12).map((p) => (
             <PersonLink key={p.id} id={p.id} className="chip">
               <Avatar id={p.id} name={p.displayName} size={22} />
               <span>{p.displayName}</span>
