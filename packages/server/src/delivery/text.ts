@@ -1,9 +1,11 @@
 /**
- * Text helpers for everything yeackbot sends the owner: names (first name + last initial), safe fragments
+ * Text helpers for everything yeackbot sends the owner: names (first name + last initial; the full last name when
+ * that would read as the owner or as someone else in the same brief), safe fragments
  * (no URLs, phones, emails, long digit runs), length caps, the digest date header and stable client refs.
  * Pure functions; no database.
  */
 import { createHash } from 'node:crypto';
+import { collisionAware } from '../identity/ownerNames';
 import { BOT_MARKER } from './types';
 
 export { BOT_MARKER };
@@ -149,8 +151,8 @@ export interface NameParts {
 
 const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u;
 
-/** "Sam R." from first + last (falls back to the display name's first and last words); null when unusable. */
-export function shortName(p: NameParts): string | null {
+/** The first name (one word) and last name a short name is made from; null when unusable. */
+function nameWords(p: NameParts): { first: string; last: string | null } | null {
   const clean = (s: string | null | undefined) => {
     const t = s?.normalize('NFKC').replace(/\s+/g, ' ').trim() ?? '';
     return t && NAME_OK.test(t) ? t : null;
@@ -162,10 +164,46 @@ export function shortName(p: NameParts): string | null {
     first = words[0] ?? null;
     if (!last && words.length > 1) last = words[words.length - 1] ?? null;
   }
-  if (!first) return null;
-  first = truncate(first.split(' ')[0]!, 18);
-  const initial = last ? last.replace(/[^\p{L}]/gu, '').slice(0, 1).toUpperCase() : '';
-  return initial ? `${first} ${initial}.` : first;
+  return first ? { first: truncate(first.split(' ')[0]!, 18), last } : null;
+}
+
+/** "Sam R." from first + last (falls back to the display name's first and last words); null when unusable. */
+export function shortName(p: NameParts): string | null {
+  const n = nameWords(p);
+  if (!n) return null;
+  const initial = n.last ? n.last.replace(/[^\p{L}]/gu, '').slice(0, 1).toUpperCase() : '';
+  return initial ? `${n.first} ${initial}.` : n.first;
+}
+
+/** "Sam Rivera": shortName's first name + the full last name (for a short name that would be ambiguous). */
+export function longName(p: NameParts): string | null {
+  const n = nameWords(p);
+  if (!n) return null;
+  return n.last && /\p{L}/u.test(n.last) ? `${n.first} ${truncate(n.last, 24)}` : n.first;
+}
+
+export interface BriefNames {
+  /** The name the brief uses: shortName, or longName when the short one is ambiguous (see briefNames). */
+  of(p: NameParts & { id: string }): string | null;
+  /**
+   * First names that point at nobody in particular here: the owner's own, and those of the people named by their
+   * long name. LLM copy names these people by token only (llmComposer), so a bare "Sam" can't stand in for them.
+   */
+  ambiguousFirstNames: ReadonlySet<string>;
+}
+
+/**
+ * Names for the people one brief names together (every item's people): "Sam R.", unless that reads the same as
+ * the owner's own short name or another person's in the brief; then "Sam Rivera" (identity/ownerNames.ts).
+ */
+export function briefNames(people: readonly (NameParts & { id: string })[], owner: readonly NameParts[]): BriefNames {
+  const names = collisionAware(people, owner.map(shortName), { short: shortName, long: longName });
+  const firsts = new Set<string>();
+  for (const p of [...owner, ...people.filter((x) => names.colliding.has(x.id))]) {
+    const first = nameWords(p)?.first;
+    if (first) firsts.add(first);
+  }
+  return { of: names.of, ambiguousFirstNames: firsts };
 }
 
 /** First name only (push bodies with names turned on). */

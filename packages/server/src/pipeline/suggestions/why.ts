@@ -63,7 +63,7 @@ export function textInputOf(db: DB, r: SuggestionRow, people = new PeopleCache(d
     kind: r.kind as SuggestionKind,
     isWildcard: r.is_wildcard === 1,
     wildcardGenerator: (WILDCARD_GENERATORS as readonly string[]).includes(r.wildcard_generator ?? '') ? (r.wildcard_generator as WildcardGenerator) : null,
-    names: infos.map(shortName),
+    names: people.names(infos),
     firstNames: infos.map((p) => (p.firstName ?? '').trim() || shortName(p).split(' ')[0]!),
     circleName,
     payload: JSON.parse(r.signals) as Record<string, unknown>,

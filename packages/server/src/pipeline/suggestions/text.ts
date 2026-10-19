@@ -1,7 +1,8 @@
 /**
  * Deterministic copy for suggestions: template headlines (the history list and the composer's fallback), the
  * "Why this?" summary and signal rows, and template conversation-starter drafts. Names follow the digest rule
- * (first name + last initial). Nothing here is ever sent: openers are DRAFTS ONLY (copy on the web).
+ * (first name + last initial, or the full last name where that reads as the owner or as another of the item's
+ * people: PeopleCache.names). Nothing here is ever sent: openers are DRAFTS ONLY (copy on the web).
  */
 import type { SuggestionKind, WhySignal } from '@yb/shared';
 import { KIND_LABEL, WILDCARD_LABEL } from './learner';
@@ -10,7 +11,7 @@ export interface TextInput {
   kind: SuggestionKind;
   isWildcard: boolean;
   wildcardGenerator: keyof typeof WILDCARD_LABEL | null;
-  /** Short names of the item's people, primary first. */
+  /** The item's people as copy names them (PeopleCache.names), primary first. */
   names: string[];
   /** First names (openers). */
   firstNames: string[];
