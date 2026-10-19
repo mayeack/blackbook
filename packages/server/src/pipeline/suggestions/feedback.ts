@@ -215,7 +215,7 @@ const DRAFT_SYSTEM = [
   'Use only what the packet says: never invent facts, plans, places or dates. No links, phone numbers, emails or @handles.',
   'Answer only with the JSON object {"openers": ["…", "…"]}.',
 ].join('\n');
-const DraftOut = z.object({ openers: z.array(z.string()) });
+export const DraftOut = z.object({ openers: z.array(z.string()) });
 const DRAFT_VERSION = routePromptVersion('draft_openers', DRAFT_SYSTEM, '{"openers":["string"]}');
 const BAD_DRAFT = /(https?:\/\/|www\.|\.com\b|@|\d{6,})/i;
 

@@ -42,20 +42,22 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('GET /digest/preview', () => {
-  it('renders the exact text without sending, spending or writing', async () => {
+  it('renders the exact texts, one per suggestion, without sending, spending or writing', async () => {
     typicalDay(w);
     const res = await request(app()).get('/api/v1/digest/preview');
     expect(res.status).toBe(200);
     const p = DigestPreview.parse(res.body);
     expect(p.date).toBe(DAY_DATE);
-    expect(p.text.codePointAt(0)).toBe(0x1f168);
-    expect(p.text.split('\n')[0]).toBe(`${BOT_MARKER} Wed Oct 14 · 4 for today`);
+    expect(p.texts).toHaveLength(4);
+    for (const t of p.texts) expect(t.codePointAt(0)).toBe(0x1f168);
+    expect(p.texts[0]!.split('\n')[0]).toBe(`${BOT_MARKER} Good morning! 4 things for today.`);
+    expect(p.text).toBe(p.texts.join('\n\n'));
     expect(p).toMatchObject({ composer: 'template', wouldSend: false, reasonNotSent: 'disabled', pushBody: 'Your brief is ready · 4 things' });
     expect(p.items.map((i) => i.ordinal)).toEqual([1, 2, 3, 4]);
     expect(p.items[0]).toMatchObject({ kind: 'fading', copy: 'template', target: { type: 'person', id: w.ava, href: `/p/${w.ava}` } });
     expect(p.items[2]!.target).toMatchObject({ type: 'pair', id: w.cleo, otherId: w.dora });
     expect(p.items[3]).toMatchObject({ sensitive: true });
-    expect(p.charCount).toBe([...p.text].length);
+    expect(p.charCount).toBe(p.texts.reduce((n, t) => n + [...t].length, 0));
     expect(outbound.sent).toHaveLength(0);
     expect(llm.calls).toHaveLength(0);
     expect(w.db.prepare('SELECT composed_at FROM digests').pluck().get()).toBeNull();
@@ -66,7 +68,7 @@ describe('GET /digest/preview', () => {
     setSettings(w.db, { 'digest.enabled': true });
     expect((await request(app()).get('/api/v1/digest/preview')).body).toMatchObject({ wouldSend: true, reasonNotSent: null });
     expect((await request(app()).get('/api/v1/digest/preview?date=2026-10-20')).body).toMatchObject({ reasonNotSent: 'empty', items: [] });
-    expect((await request(app()).get('/api/v1/digest/preview?date=2026-10-20')).body.text).toMatch(/all clear/);
+    expect((await request(app()).get('/api/v1/digest/preview?date=2026-10-20')).body.texts).toEqual([`${BOT_MARKER} All clear! Nothing needs you today.`]);
     vi.setSystemTime(zoned(DAY_DATE, '11:30'));
     expect((await request(app()).get('/api/v1/digest/preview')).body).toMatchObject({ reasonNotSent: 'catch_up_passed' });
     expect((await request(app()).get('/api/v1/digest/preview?date=bad')).status).toBe(400);
@@ -91,7 +93,14 @@ describe('POST /digest/send-test', () => {
     typicalDay(w);
     const digest = await post('/api/v1/digest/send-test', { confirm: true, mode: 'digest' });
     expect(digest.status).toBe(200);
-    expect(outbound.sent[1]!.text).toContain('4 for today');
+    // the test brief goes out exactly like the real one: one text per suggestion, in order
+    expect(outbound.sent.slice(1).map((x) => x.text.split('\n')[0])).toEqual([
+      `${BOT_MARKER} Good morning! 4 things for today.`,
+      `${BOT_MARKER} 2. Reply to Ben O.`,
+      `${BOT_MARKER} 3. Introduce Cleo M. and Dora V.?`,
+      `${BOT_MARKER} 4. Something personal`,
+    ]);
+    expect(outbound.sent.slice(1).every((x) => x.purpose === 'test')).toBe(true);
   });
 
   it('only ever to self: no collector/self handle → 409; at most a few per hour', async () => {
@@ -137,7 +146,7 @@ describe('delivery jobs', () => {
     expect(todayDigest(w.db, DAY_DATE)).toMatchObject({ status: 'ready', imessage: 'disabled', skipReason: 'disabled' });
     setSettings(w.db, { 'digest.enabled': true });
     await jobs[1]!.run(ctx(zoned(DAY_DATE, '08:01')));
-    expect(outbound.sent).toHaveLength(1);
+    expect(outbound.sent).toHaveLength(4);
     // The fake LLM answered nothing usable at 07:30, so the template copy went out: 'fallback_sent'.
     expect(todayDigest(w.db, DAY_DATE)).toMatchObject({ status: 'fallback_sent', imessage: 'sent' });
   });

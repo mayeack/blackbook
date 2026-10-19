@@ -47,14 +47,40 @@ describe('grammar: item verbs', () => {
     ]);
   });
 
-  it('wrong takes the rest as a note; why/draft take exactly one number', () => {
+  it('wrong takes the rest as a note; why/draft take at most one number', () => {
     expect(clauses('wrong 4 she moved to Denver, not Austin')).toEqual([
       { verb: 'wrong', sel: { all: false, nums: [4] }, note: 'she moved to Denver, not Austin' },
     ]);
     expect(clauses('why 2')).toEqual([{ verb: 'why', n: 2 }]);
     expect(clauses('draft 3')).toEqual([{ verb: 'draft', n: 3 }]);
     expect(parseCommand('why 2 3').kind).toBe('free');
-    expect(parseCommand('why').kind).toBe('free');
+    expect(parseCommand('why is the sky blue').kind).toBe('free');
+  });
+
+  it('no number: the item verb targets the text it replies to (resolved by the executor)', () => {
+    expect(clauses('done')).toEqual([{ verb: 'done', sel: null }]);
+    expect(clauses('skip')).toEqual([{ verb: 'skip', sel: null }]);
+    expect(clauses('skip this one')).toEqual([{ verb: 'skip', sel: null }]);
+    expect(clauses('snooze 2w')).toEqual([{ verb: 'snooze', sel: null, dur: '2w' }]);
+    expect(clauses('snooze')).toEqual([{ verb: 'snooze', sel: null, dur: null }]);
+    expect(clauses('why?')).toEqual([{ verb: 'why', n: null }]);
+    expect(clauses('draft')).toEqual([{ verb: 'draft', n: null }]);
+    expect(clauses('wrong, she moved to Denver')).toEqual([{ verb: 'wrong', sel: null, note: 'she moved to Denver' }]);
+    // fillers come before the number, which stays the verb's own
+    expect(clauses('done with 2')).toEqual([{ verb: 'done', sel: { all: false, nums: [2] } }]);
+    expect(clauses('why this 2')).toEqual([{ verb: 'why', n: 2 }]);
+    expect(clauses('skip this 3')).toEqual([{ verb: 'skip', sel: { all: false, nums: [3] } }]);
+    // a number followed by a unit is the duration ("snooze 2 weeks" replying to a text), after an item number too
+    expect(clauses('snooze 2 weeks')).toEqual([{ verb: 'snooze', sel: null, dur: '2 weeks' }]);
+    expect(clauses('snooze 3 2 weeks')).toEqual([{ verb: 'snooze', sel: { all: false, nums: [3] }, dur: '2 weeks' }]);
+    // "d" is a unit and the done verb: a clause, not a duration
+    expect(clauses('s 2 d 3')).toEqual([{ verb: 'snooze', sel: { all: false, nums: [2] }, dur: null }, { verb: 'done', sel: { all: false, nums: [3] } }]);
+    // "one" before a unit is a number, not a filler
+    expect(clauses('snooze one week')).toEqual([{ verb: 'snooze', sel: null, dur: 'one week' }]);
+    expect(clauses('snooze it one day')).toEqual([{ verb: 'snooze', sel: null, dur: 'one day' }]);
+    // one-letter verbs still need numbers
+    expect(parseCommand('x').kind).toBe('free');
+    expect(parseCommand('later').kind).toBe('free');
   });
 
   it('one-letter verbs need numbers; plain words stay free text', () => {

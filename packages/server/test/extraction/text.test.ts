@@ -5,11 +5,14 @@ import {
   CONSOLIDATION_PROMPT_VERSION,
   CONSOLIDATION_SYSTEM,
   EXTRACTION_PROMPT_VERSION,
-  EXTRACTION_SCHEMA_JSON,
-  EXTRACTION_SYSTEM,
+  extractionPromptText,
   estimateTokens,
+  KNOWLEDGE_SCHEMA_JSON,
+  KNOWLEDGE_SYSTEM,
+  OBLIGATIONS_SCHEMA_JSON,
+  OBLIGATIONS_SYSTEM,
 } from '../../src/extraction/prompt';
-import { Extraction } from '../../src/extraction/schema';
+import { Extraction, ExtractionKnowledge, ExtractionObligations, mergeExtractionParts } from '../../src/extraction/schema';
 import {
   attachmentToken,
   checkQuote,
@@ -26,28 +29,54 @@ import {
 import { chronoDates } from '../../src/extraction/validate';
 import { localDateEndMs, localDateToMs } from '../../src/extraction/env';
 
-describe('the system prompt', () => {
-  it('is byte-stable (~5k tokens), has no identifiers, timestamps of "now" or flags; the version is stable', () => {
-    expect(estimateTokens(EXTRACTION_SYSTEM)).toBeGreaterThan(3500);
-    expect(estimateTokens(EXTRACTION_SYSTEM)).toBeLessThan(7000);
-    expect(findRawIdentifiers(EXTRACTION_SYSTEM)).toEqual([]);
-    expect(findRawIdentifiers(CONSOLIDATION_SYSTEM)).toEqual([]);
-    expect(EXTRACTION_SYSTEM).not.toMatch(/\$\{|undefined|NaN/);
+describe('the system prompts (knowledge + obligations)', () => {
+  it('are byte-stable, have no identifiers, timestamps of "now" or flags; the version covers both and moved off the refused one', () => {
+    expect(estimateTokens(KNOWLEDGE_SYSTEM)).toBeGreaterThan(2500);
+    expect(estimateTokens(KNOWLEDGE_SYSTEM)).toBeLessThan(6000);
+    expect(estimateTokens(OBLIGATIONS_SYSTEM)).toBeGreaterThan(1500);
+    expect(estimateTokens(OBLIGATIONS_SYSTEM)).toBeLessThan(4000);
+    for (const sys of [KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM, CONSOLIDATION_SYSTEM]) {
+      expect(findRawIdentifiers(sys)).toEqual([]);
+      expect(sys).not.toMatch(/\$\{|undefined|NaN/);
+    }
     expect(EXTRACTION_PROMPT_VERSION).toMatch(/^[0-9a-f]{8}$/);
-    expect(EXTRACTION_PROMPT_VERSION).toBe(promptVersion(EXTRACTION_SYSTEM, EXTRACTION_SCHEMA_JSON, 'low'));
+    const text = extractionPromptText();
+    expect(EXTRACTION_PROMPT_VERSION).toBe(promptVersion(text.system, text.schemaJson, 'low'));
+    // 7e37e334 was the one-request prompt every batch item of 2026-10-16/17 was refused under.
+    expect(EXTRACTION_PROMPT_VERSION).not.toBe('7e37e334');
     expect(CONSOLIDATION_PROMPT_VERSION).not.toBe(EXTRACTION_PROMPT_VERSION);
-    // Op semantics, exclusions, the injection notice and the mode rules are all in it.
-    for (const s of ['ADD', 'UPDATE', 'INVALIDATE', 'NOOP', 'birthdays', 'untrusted data', 'mode=historical', 'sensitive: true', 'next week']) {
-      expect(EXTRACTION_SYSTEM).toContain(s);
+    // Op semantics, exclusions, the injection notice and the mode rules are in the knowledge prompt …
+    for (const s of ['ADD', 'UPDATE', 'INVALIDATE', 'NOOP', 'birthdays', 'untrusted data', 'mode=historical', 'sensitive: true', '# Mentions', '# Self-identification']) {
+      expect(KNOWLEDGE_SYSTEM).toContain(s);
+    }
+    // … date rules, commitments and needs_reply in the obligations prompt; neither carries the other's sections.
+    for (const s of ['next week', 'due.kind = "vague"', 'untrusted data', 'mode=historical', '# Commitments', '# needs_reply', 'closes']) {
+      expect(OBLIGATIONS_SYSTEM).toContain(s);
+    }
+    for (const s of ['# Commitments', '# needs_reply', 'due.kind']) expect(KNOWLEDGE_SYSTEM).not.toContain(s);
+    for (const s of ['# Facts', '# Mentions', '# Relations', '# Summary and topics']) expect(OBLIGATIONS_SYSTEM).not.toContain(s);
+    // The shared sections are word for word the same in both.
+    const section = (sys: string, title: string) => sys.slice(sys.indexOf(`# ${title}`), sys.indexOf('\n\n# ', sys.indexOf(`# ${title}`)));
+    for (const title of ['Input layout', 'Line format', 'Confidence', 'Safety of the input', 'Output']) {
+      expect(section(KNOWLEDGE_SYSTEM, title).length).toBeGreaterThan(50);
+      expect(section(OBLIGATIONS_SYSTEM, title)).toBe(section(KNOWLEDGE_SYSTEM, title));
     }
   });
 
-  it('the few-shot outputs are valid Extraction objects (structured outputs: every field present)', () => {
-    const outputs = [...EXTRACTION_SYSTEM.matchAll(/^Output:\n(\{.*\})$/gm)].map((m) => JSON.parse(m[1]!));
-    expect(outputs).toHaveLength(3);
-    for (const o of outputs) expect(Extraction.safeParse(o).success).toBe(true);
-    // No numeric bounds in the schema (the API drops them; code validates).
-    expect(EXTRACTION_SCHEMA_JSON).not.toMatch(/"(minimum|maximum|minLength|maxLength)"/);
+  it('the few-shot outputs are valid part answers and merge into valid Extraction objects', () => {
+    const outputs = (sys: string) => [...sys.matchAll(/^Output:\n(\{.*\})$/gm)].map((m) => JSON.parse(m[1]!));
+    const knowledge = outputs(KNOWLEDGE_SYSTEM);
+    const obligations = outputs(OBLIGATIONS_SYSTEM);
+    expect(knowledge).toHaveLength(3);
+    expect(obligations).toHaveLength(2); // example 3 is historical and older than 30 days: no obligations request
+    for (const o of knowledge) expect(ExtractionKnowledge.safeParse(o).success).toBe(true);
+    for (const o of obligations) expect(ExtractionObligations.safeParse(o).success).toBe(true);
+    // The examples keep the schema's key order (structured outputs emit it).
+    expect(Object.keys(knowledge[0]!)).toEqual(Object.keys(ExtractionKnowledge.shape));
+    expect(Object.keys(obligations[0]!)).toEqual(Object.keys(ExtractionObligations.shape));
+    for (const [i, k] of knowledge.entries()) expect(Extraction.safeParse(mergeExtractionParts(k, obligations[i] ?? null)).success).toBe(true);
+    // No numeric bounds in the schemas (the API drops them; code validates).
+    for (const json of [KNOWLEDGE_SCHEMA_JSON, OBLIGATIONS_SCHEMA_JSON]) expect(json).not.toMatch(/"(minimum|maximum|minLength|maxLength)"/);
   });
 });
 

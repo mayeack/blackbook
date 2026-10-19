@@ -3,19 +3,27 @@
  * item, then the LLM composer over the eligible ones (grounded items replace their template copy), then the
  * iMessage text and the push body. The composer never ranks and never sends.
  *
- * iMessage format (delivery §3):
- *   🅨 Wed Oct 14 · 4 for today            ← U+1F168 is the very first character
+ * iMessage format: ONE TEXT PER SUGGESTION, written like a person would text (line breaks, no "·" separators):
  *
- *   1 Sam R. · quiet 41d (usually ~9d)      ← numbered, first name + last initial, ≤70 chars
- *     ↳ "Hey Sam, how's the new place?"     ← first opener draft (LLM copy only), to copy into a text yourself
- *   2 Something personal — open the app     ← sensitive items never show details outside the web
+ *   🅨 Good morning! 3 things for today.     ← U+1F168 is the very first character of every text
  *
- *   Last night: 2 merges · 4 links · 11 facts
- *   ⚠ WhatsApp quiet 4d · open WhatsApp on your phone      ← at most one health line
- *   yeackbot.com/today                      ← the only link
- *   reply done 1 · snooze 1 2w · skip 1 · ? ask
- * The finished text is checked with checkOutboundText; a failure falls back to template copy, then to a minimal
- * header + link text, so a bad fragment can never block the brief.
+ *   1. Reply to Sam R.                       ← ordinal + headline (first name + last initial)
+ *   Sam has been waiting 2 days for an answer.
+ *
+ *   🅨 2. Check in with Priya S.
+ *   It's been 6 weeks. You usually talk about once a week.
+ *
+ *   Maybe: “Hey! How's the new place?”      ← first opener draft (LLM copy only), to copy into a text yourself
+ *
+ *   🅨 3. Something personal                 ← sensitive items never show details outside the web
+ *   The details are in the app.
+ *
+ *   That's it! Reply "done 2", "skip 2" or "snooze 2" anytime.   ← or an inline reply to one text: just "done"
+ *   yeackbot.com/today                       ← the only link, once, in the last text
+ *
+ *   🅨 Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up.   ← ≤1 health text
+ * Each text is checked with checkOutboundText; an item whose LLM copy fails falls back to its template copy, then
+ * to a bare "open the app" line, so a bad fragment can never block the brief. "Last night: …" counts stay on the web.
  */
 import type { DigestItem } from '@yb/shared';
 import type { DB } from '../db/connection';
@@ -34,9 +42,9 @@ import {
   type SelectDigestItems,
   type SelectedItem,
 } from './selection';
-import { healthLine, lastNightCounts, lastNightLine, pipelineFailure, topHealthIssue } from './status';
-import { SENSITIVE_LINE, templateCopy, type ItemCopy } from './template';
-import { BOT_MARKER, firstNameOnly, headerDate, MAX_MAIN_LINE, MAX_SUB_LINE, nameList, plural, TODAY_LINK, truncate } from './text';
+import { failureLine, healthLine, lastNightCounts, lastNightLine, pipelineFailure, topHealthIssue } from './status';
+import { SENSITIVE_BODY, SENSITIVE_LINE, templateCopy, type ItemCopy } from './template';
+import { BOT_MARKER, firstNameOnly, MAX_MAIN_LINE, MAX_SUB_LINE, nameList, plural, TODAY_LINK, truncate } from './text';
 import { checkOutboundText } from './types';
 
 const DAY = 86_400_000;
@@ -46,15 +54,24 @@ export interface ComposedItem extends SelectedItem {
   headline: string;
   body: string | null;
   openers: string[];
-  /** The numbered main line as it appears in the iMessage text. */
+  /** The numbered main line as it appears in the item's text. */
   line: string;
+}
+
+export interface TextPart {
+  suggestionId: string;
+  ordinal: number;
 }
 
 export interface ComposedDigest {
   localDate: string;
   digestId: string | null;
   items: ComposedItem[];
-  /** iMessage text (first char U+1F168). */
+  /** The iMessage texts in send order: one per item, then at most one health text (each starts with U+1F168). */
+  texts: string[];
+  /** Per text (same order): the suggestion and ordinal it carries, or null (the health text, the minimal fallback). */
+  parts: (TextPart | null)[];
+  /** The texts joined with blank lines (digests.imessage_text; display only). */
   text: string;
   pushBody: string;
   composer: 'llm' | 'template';
@@ -72,6 +89,10 @@ export interface WebBody {
   pushBody: string;
   lastNight: string | null;
   health: string | null;
+  /** The iMessage texts in send order (absent in compositions written before one-text-per-item: recomposed). */
+  texts?: string[];
+  /** Per text: the item it carries (null for the health text). Sending freezes these once a text was attempted. */
+  parts?: (TextPart | null)[];
   items: { suggestionId: string; ordinal: number; copy: 'llm' | 'template'; headline: string; body: string | null; openers: string[]; line: string }[];
 }
 
@@ -90,7 +111,7 @@ export interface ComposeOptions {
 // ---------------------------------------------------------------------------------------------- text
 
 export function mainLine(ordinal: number, headline: string, sensitive: boolean): string {
-  return truncate(`${ordinal} ${sensitive ? SENSITIVE_LINE : headline}`, MAX_MAIN_LINE);
+  return truncate(`${ordinal}. ${sensitive ? SENSITIVE_LINE : headline}`, MAX_MAIN_LINE);
 }
 
 /** "Your brief is ready · 4 things" (first names only when names_in_notifications; never sensitive items). */
@@ -108,46 +129,72 @@ export function pushBodyFor(items: Pick<ComposedItem, 'people' | 'sensitive'>[],
 }
 
 export interface TextParts {
-  localDate: string;
   items: Pick<ComposedItem, 'ordinal' | 'line' | 'copy' | 'body' | 'openers' | 'sensitive'>[];
-  lastNight: string | null;
   health: string | null;
   commandsEnabled: boolean;
+  /** settings digest.time ("08:00"): picks the greeting. */
+  digestTime?: string;
 }
 
-export function digestText(p: TextParts): string {
-  const lines: string[] = [`${BOT_MARKER} ${headerDate(p.localDate)} · ${p.items.length} for today`, ''];
-  for (const i of p.items) {
-    lines.push(i.line);
-    if (i.sensitive || i.copy !== 'llm') continue;
-    if (i.body) lines.push(`  ${truncate(i.body, MAX_SUB_LINE)}`);
-    const opener = i.openers[0];
-    if (opener) lines.push(`  ↳ "${truncate(opener.replace(/["“”]/g, ''), MAX_SUB_LINE - 6)}"`);
-  }
-  lines.push('');
-  if (p.lastNight) lines.push(p.lastNight);
-  if (p.health) lines.push(p.health);
-  lines.push(TODAY_LINK);
-  const first = p.items[0]?.ordinal ?? 1;
-  if (p.commandsEnabled) lines.push(`reply done ${first} · snooze ${first} 2w · skip ${first} · ? ask`);
-  return lines.join('\n');
+/** "Good morning! 3 things for today." (time-of-day aware; "Just one thing today." for one). */
+export function greeting(n: number, digestTime = '08:00'): string {
+  const h = Number(digestTime.slice(0, 2));
+  const hi = h < 12 ? 'Good morning!' : h < 17 ? 'Hi!' : 'Evening!';
+  return `${hi} ${n === 1 ? 'Just one thing today.' : `${n} things for today.`}`;
 }
 
-/** The last resort: header, count and the link (always passes the outbound rules). */
-export function minimalText(localDate: string, n: number): string {
-  return `${BOT_MARKER} ${headerDate(localDate)} · ${n} for today\n${TODAY_LINK}`;
+/** The closing lines of the last item's text. */
+export function closing(items: Pick<ComposedItem, 'ordinal'>[], commandsEnabled: boolean): string[] {
+  if (!commandsEnabled) return [`That's it! It's all at ${TODAY_LINK}`];
+  if (items.length === 1) return [`That's it! Reply "done", "skip" or "snooze" anytime.`, TODAY_LINK];
+  const n = items[1]?.ordinal ?? 2;
+  return [`That's it! Reply "done ${n}", "skip ${n}" or "snooze ${n}" anytime.`, TODAY_LINK];
 }
 
-/** "🅨 Wed Oct 14 · all clear" (preview of an empty day; nothing is sent). */
-export function allClearText(localDate: string): string {
-  return `${BOT_MARKER} ${headerDate(localDate)} · all clear, nothing needs you today\n${TODAY_LINK}`;
+/** One item's lines (no marker, no greeting/closing): the numbered headline, its context, an opener draft. */
+export function itemLines(i: Pick<ComposedItem, 'line' | 'copy' | 'body' | 'openers' | 'sensitive'>): string[] {
+  if (i.sensitive) return [i.line, SENSITIVE_BODY];
+  const lines = [i.line];
+  if (i.body) lines.push(truncate(i.body, MAX_SUB_LINE * 2));
+  const opener = i.copy === 'llm' ? i.openers[0] : undefined;
+  if (opener) lines.push('', `Maybe: “${truncate(opener.replace(/["“”]/g, ''), MAX_SUB_LINE)}”`);
+  return lines;
 }
+
+/** The fallback for an item none of whose copy passes the outbound rules. */
+const bareLines = (ordinal: number): string[] => [`${ordinal}. One for you in the app.`];
+
+const asText = (lines: string[]): string => `${BOT_MARKER} ${lines.join('\n')}`;
+
+/** One text per item (greeting on the first, closing on the last), then the health text. */
+export function digestTexts(p: TextParts, linesOf: (i: TextParts['items'][number], k: number) => string[] = (i) => itemLines(i)): string[] {
+  const n = p.items.length;
+  const texts = p.items.map((i, k) => {
+    const lines = [...(k === 0 ? [greeting(n, p.digestTime), ''] : []), ...linesOf(i, k), ...(k === n - 1 ? ['', ...closing(p.items, p.commandsEnabled)] : [])];
+    return asText(lines);
+  });
+  if (p.health) texts.push(asText([p.health]));
+  return texts;
+}
+
+/** The last resort: one text with the count and the link (always passes the outbound rules). */
+export function minimalText(n: number): string {
+  return `${BOT_MARKER} ${n === 1 ? 'One thing' : `${n} things`} for today. They're all at ${TODAY_LINK}`;
+}
+
+/** Preview of an empty day (nothing is sent). */
+export function allClearText(): string {
+  return `${BOT_MARKER} All clear! Nothing needs you today.`;
+}
+
+/** The stored display form of a brief (digests.imessage_text). */
+export const joinTexts = (texts: string[]): string => texts.join('\n\n');
 
 // ---------------------------------------------------------------------------------------------- compose
 
 function statusLines(db: DB, now: number): { lastNight: string | null; health: string | null } {
   const failure = pipelineFailure(db, now);
-  const health = failure ? `⚠ Last night's run failed at ${failure.stage} · see Sources` : healthLine(topHealthIssue(db, now));
+  const health = failure ? failureLine(failure.stage) : healthLine(topHealthIssue(db, now));
   return { lastNight: lastNightLine(lastNightCounts(db, now - DAY, now)), health };
 }
 
@@ -179,27 +226,37 @@ export async function composeSelection(
       log: o.log,
     });
   }
-  const build = (useLlmCopy: boolean): ComposedItem[] =>
-    items.map((i) => {
-      const llmCopy = useLlmCopy ? llm?.copies.get(i.suggestionId) : undefined;
-      const c = llmCopy ?? templates.get(i.suggestionId)!;
-      return { ...i, copy: llmCopy ? 'llm' : 'template', headline: c.headline, body: c.body, openers: c.openers, line: mainLine(i.ordinal, c.headline, i.sensitive) };
-    });
+  const build = (i: SelectedItem, useLlmCopy: boolean): ComposedItem => {
+    const llmCopy = useLlmCopy ? llm?.copies.get(i.suggestionId) : undefined;
+    const c = llmCopy ?? templates.get(i.suggestionId)!;
+    return { ...i, copy: llmCopy ? 'llm' : 'template', headline: c.headline, body: c.body, openers: c.openers, line: mainLine(i.ordinal, c.headline, i.sensitive) };
+  };
   const { lastNight, health } = statusLines(db, o.now);
-  let composed = build(true);
-  let text = digestText({ localDate: o.localDate, items: composed, lastNight, health, commandsEnabled: settings['commands.enabled'] });
-  if (checkOutboundText(text).length) {
-    o.log?.warn('digest.text_rejected', { counts: { problems: checkOutboundText(text).length } });
-    composed = build(false);
-    text = digestText({ localDate: o.localDate, items: composed, lastNight, health, commandsEnabled: settings['commands.enabled'] });
-    if (checkOutboundText(text).length) text = minimalText(o.localDate, composed.length);
+  // Per item: LLM copy if its text passes the outbound rules, else template copy, else a bare "open the app" line.
+  const ok = (lines: string[]) => checkOutboundText(asText(lines)).length === 0;
+  let rejected = 0;
+  const composed = items.map((i) => {
+    const withLlm = build(i, true);
+    if (ok(itemLines(withLlm))) return withLlm;
+    rejected++;
+    return build(i, false);
+  });
+  const parts: TextParts = { items: composed, health, commandsEnabled: settings['commands.enabled'], digestTime: settings['digest.time'] };
+  let texts = digestTexts(parts, (i) => (ok(itemLines(i)) ? itemLines(i) : bareLines(i.ordinal)));
+  let textParts: (TextPart | null)[] = [...composed.map((i) => ({ suggestionId: i.suggestionId, ordinal: i.ordinal })), ...(health ? [null] : [])];
+  if (texts.some((t) => checkOutboundText(t).length)) {
+    texts = [minimalText(composed.length)];
+    textParts = [null];
   }
+  if (rejected) o.log?.warn('digest.text_rejected', { counts: { items: rejected } });
   const usage: LlmUsage | null = llm?.usage ?? null;
   return {
     localDate: o.localDate,
     digestId: selection.digest.id,
     items: composed,
-    text,
+    texts,
+    parts: textParts,
+    text: joinTexts(texts),
     pushBody: pushBodyFor(composed, settings['push.names_in_notifications']),
     composer: composed.some((i) => i.copy === 'llm') ? 'llm' : 'template',
     lastNight,
@@ -219,6 +276,8 @@ export function webBodyOf(c: ComposedDigest): WebBody {
     pushBody: c.pushBody,
     lastNight: c.lastNight,
     health: c.health,
+    texts: c.texts,
+    parts: c.parts,
     items: c.items.map((i) => ({ suggestionId: i.suggestionId, ordinal: i.ordinal, copy: i.copy, headline: i.headline, body: i.body, openers: i.openers, line: i.line })),
   };
 }
@@ -238,12 +297,19 @@ export function compositionCurrent(selection: DigestSelection): boolean {
   const d = selection.digest;
   if (!d.composed_at || !d.imessage_text) return false;
   const body = parseWebBody(d.web_body);
-  if (!body) return false;
+  if (!body?.texts?.length) return false;
   const now = selection.items.map((i) => i.suggestionId);
   return body.suggestionIds.length === now.length && body.suggestionIds.every((id, k) => id === now[k]);
 }
 
-/** Writes the composition onto the digest row (never once it was sent) and the copy onto its suggestions. */
+/**
+ * Whether any of the brief's texts was handed to the sender. From then on its texts and their per-position
+ * client_refs are frozen: nothing recomposes it (a text may have reached the owner before the collector answered).
+ */
+export const partsAttempted = (db: DB, digestId: string): boolean =>
+  db.prepare(`SELECT 1 FROM outbound_messages WHERE digest_id = ? AND purpose = 'digest' LIMIT 1`).get(digestId) !== undefined;
+
+/** Writes the composition onto the digest row (never once a text went out) and the copy onto its suggestions. */
 export function persistComposition(db: DB, c: ComposedDigest, now: number): boolean {
   if (!c.digestId) return false;
   return db.transaction(() => {
@@ -251,7 +317,8 @@ export function persistComposition(db: DB, c: ComposedDigest, now: number): bool
       .prepare(
         `UPDATE digests SET imessage_text = ?, web_body = ?, composed_at = ?, composer = ?, llm_usage = ?,
            status = CASE status WHEN 'composing' THEN 'ready' ELSE status END
-         WHERE id = ? AND status IN ('composing','ready') AND sent_at IS NULL`,
+         WHERE id = ? AND status IN ('composing','ready') AND sent_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM outbound_messages om WHERE om.digest_id = digests.id AND om.purpose = 'digest')`,
       )
       .run(c.text, JSON.stringify(webBodyOf(c)), now, c.composer, c.llm ? JSON.stringify(c.llm) : null, c.digestId);
     if (!res.changes) return false;
@@ -268,7 +335,9 @@ export function persistComposition(db: DB, c: ComposedDigest, now: number): bool
 export async function composeDigest(db: DB, services: Pick<AgentServices, 'llm' | 'egress'>, o: ComposeOptions): Promise<ComposedDigest | null> {
   const selection = (o.select ?? readDigestSelection)(db, { localDate: o.localDate, now: o.now });
   if (!selection) return null;
-  if (selection.digest.sent_at || !['composing', 'ready'].includes(selection.digest.status)) return storedComposition(selection);
+  if (selection.digest.sent_at || !['composing', 'ready'].includes(selection.digest.status) || partsAttempted(db, selection.digest.id)) {
+    return storedComposition(selection);
+  }
   const composed = await composeSelection(db, services, selection, o);
   persistComposition(db, composed, o.now);
   return composed;
@@ -294,6 +363,8 @@ export function storedComposition(selection: DigestSelection): ComposedDigest | 
     localDate: d.local_date,
     digestId: d.id,
     items,
+    texts: body.texts?.length ? body.texts : [d.imessage_text],
+    parts: body.texts?.length && body.parts?.length === body.texts.length ? body.parts : (body.texts ?? [d.imessage_text]).map(() => null),
     text: d.imessage_text,
     pushBody: body.pushBody,
     composer: body.composer,

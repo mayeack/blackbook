@@ -23,7 +23,22 @@ export {
   type RouteOverrides,
   type ThinkingMode,
 } from './models';
-export { createLlmClient, unavailableLlmClient, MAX_BATCH_ITEMS, requestParams, requestIssues, promptTokens, routeOverrides, type LlmClientOptions } from './client';
+export {
+  createLlmClient,
+  unavailableLlmClient,
+  MAX_BATCH_ITEMS,
+  requestParams,
+  requestIssues,
+  promptTokens,
+  routeOverrides,
+  GRAMMAR_MAX_NODES,
+  grammarIssues,
+  grammarNodes,
+  smokeSchemas,
+  type LlmClientOptions,
+  type SchemaSmokeCase,
+  type SchemaSmokeResult,
+} from './client';
 export {
   createEgress,
   detokenizeKeepingCitations,

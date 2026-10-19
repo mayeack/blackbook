@@ -5,10 +5,13 @@
  *   nums   := "all" | N ( [ ,]+ N | "-" N )*                ; N = digest item number (1–20)
  *   dur    := \d+(h|d|w|m) | tomorrow | next week | until <weekday|date> | <date>   ; default 7d
  *   done   := (done|d|✅|👍|✓) nums? | bare nums            ; bare "2" == done 2 ("d" needs numbers)
- *   snooze := (snooze|s|later) nums dur?
- *   skip   := (skip|x|dismiss|no) nums
- *   wrong  := wrong nums text?
- *   why    := why N            draft := draft N
+ *   snooze := (snooze|s|later) nums? dur?                   ; "s"/"later" need numbers
+ *   skip   := (skip|x|dismiss|no) nums?                     ; "x"/"no" need numbers
+ *   wrong  := wrong nums? text?
+ *   why    := why N?           draft := draft N?
+ *   (no number: the suggestion whose own text this replies to. Bare "done" may also mean the only open item; the
+ *    others without a number are free text unless they reply to a suggestion's text. "this"/"it"/"one"/"with" right
+ *    after the verb are fillers: "skip this one", "done with 2")
  *   undo   := undo [last]      ; only the last acknowledged command's effect (agent-run undo is web-only)
  *   log    := (log|l) ":" text ; always accepted.  "log text" (no colon) is a gated command
  *   ask    := "?" text         ; always accepted.  who/what/… questions are gated free text
@@ -24,11 +27,11 @@ export type Selection = { all: true } | { all: false; nums: number[] };
 
 export type Clause =
   | { verb: 'done'; sel: Selection | null }
-  | { verb: 'snooze'; sel: Selection; dur: string | null }
-  | { verb: 'skip'; sel: Selection }
-  | { verb: 'wrong'; sel: Selection; note: string | null }
-  | { verb: 'why'; n: number }
-  | { verb: 'draft'; n: number }
+  | { verb: 'snooze'; sel: Selection | null; dur: string | null }
+  | { verb: 'skip'; sel: Selection | null }
+  | { verb: 'wrong'; sel: Selection | null; note: string | null }
+  | { verb: 'why'; n: number | null }
+  | { verb: 'draft'; n: number | null }
   /** `target`: anything after "undo" other than "last" (only the last command can be undone over iMessage). */
   | { verb: 'undo'; target: string | null }
   | { verb: 'log'; text: string; explicit: boolean }
@@ -43,6 +46,13 @@ export type Verb = Clause['verb'];
 
 /** Verbs that act on digest items (need a target digest). */
 export const ITEM_VERBS: ReadonlySet<Verb> = new Set(['done', 'snooze', 'skip', 'wrong', 'why', 'draft']);
+
+/**
+ * An item verb written without a number that only makes sense as a reply to one suggestion's own text ("skip",
+ * "wrong, she moved", "snooze 2w", "why", "draft"). Bare "done" is older and keeps its own rule (the only open item).
+ */
+export const isImplicitItemClause = (c: Clause): boolean =>
+  ((c.verb === 'skip' || c.verb === 'snooze' || c.verb === 'wrong') && c.sel === null) || ((c.verb === 'why' || c.verb === 'draft') && c.n === null);
 
 export interface Parsed {
   raw: string;
@@ -95,6 +105,14 @@ const VERBS: Record<string, Verb> = {
 const NEEDS_NUMS = new Set(['d', 's', 'x', 'no', 'nope', 'did', 'later']);
 const FILLER = new Set([',', 'and', '&', 'then', 'please', 'pls', 'plz', '+', '.', '!', '?', 'also', 'thanks', 'thx', 'ty']);
 const UNDO_TAIL = new Set(['last', 'that', 'it', 'this']);
+/** Words after an item verb with no number ("skip this one", "done with that"). */
+const ITEM_TAIL = new Set(['it', 'this', 'that', 'one', 'with']);
+const skipItemTail = (tokens: Tok[], i: number): number => {
+  let j = i;
+  // "one" before a unit is a number ("snooze one week"), not a filler.
+  while (j < tokens.length && ITEM_TAIL.has(tokens[j]!.lower) && !(tokens[j]!.lower === 'one' && tokens[j + 1] && isUnitWord(tokens[j + 1]!.lower))) j++;
+  return j;
+};
 
 const NUM_RE = /^#?(\d{1,2})[.)]?$/;
 const RANGE_RE = /^(\d{1,2})\s*[-–]\s*(\d{1,2})$/;
@@ -135,9 +153,12 @@ function parseSelection(tokens: Tok[], i: number, opts: { stopBeforeUnit?: boole
     const t = tokens[j]!;
     if (isNumTok(t)) {
       const n = numsOf(t);
-      // "snooze 1 2 weeks", "snooze 1 10/28": the trailing number belongs to the duration.
+      // "snooze 1 2 weeks", "snooze 1 10/28": the trailing number belongs to the duration. With no item number yet,
+      // "snooze 2 weeks" / "snooze 10/28" (a reply to one suggestion's text) is all duration.
       const next = tokens[j + 1]?.lower;
-      if (opts.stopBeforeUnit && nums.length && (!n || next === '/' || (next !== undefined && isUnitWord(next)))) break;
+      // ("d" is both a unit and the done verb: "s 2 d 3" is snooze 2 + done 3.)
+      const durNext = next === '/' || (next !== undefined && isUnitWord(next) && !verbStartsAt(tokens, j + 1));
+      if (opts.stopBeforeUnit && (nums.length ? !n || durNext : durNext)) break;
       if (!n) throw new ParseFail();
       nums.push(...n);
       j++;
@@ -192,30 +213,29 @@ function parseSegment(s: string): Clause[] {
     if (NEEDS_NUMS.has(t.lower) && !isNumTok(tokens[i + 1]) && tokens[i + 1]?.lower !== 'all') throw new ParseFail();
     i++;
     switch (verb) {
+      // Fillers come before the number ("done with 2", "why this 2", "skip this one"), so a number after them is the
+      // verb's own selection, never a new bare-number clause.
       case 'done': {
-        const [sel, j] = parseSelection(tokens, i);
+        const [sel, j] = parseSelection(tokens, skipItemTail(tokens, i));
         out.push({ verb, sel });
         i = sel ? skipRemark(tokens, j) : j;
         break;
       }
       case 'snooze': {
-        const [sel, j] = parseSelection(tokens, i, { stopBeforeUnit: true });
-        if (!sel) throw new ParseFail();
+        const [sel, j] = parseSelection(tokens, skipItemTail(tokens, i), { stopBeforeUnit: true });
         const [dur, k] = tailUntilVerb(s, tokens, j);
         out.push({ verb, sel, dur });
         i = k;
         break;
       }
       case 'skip': {
-        const [sel, j] = parseSelection(tokens, i);
-        if (!sel) throw new ParseFail();
+        const [sel, j] = parseSelection(tokens, skipItemTail(tokens, i));
         out.push({ verb, sel });
-        i = skipRemark(tokens, j);
+        i = sel ? skipRemark(tokens, j) : j;
         break;
       }
       case 'wrong': {
-        const [sel, j] = parseSelection(tokens, i);
-        if (!sel) throw new ParseFail();
+        const [sel, j] = parseSelection(tokens, skipItemTail(tokens, i));
         const note = j < tokens.length ? s.slice(tokens[j]!.start).replace(/^[\s:,–—-]+/, '').trim() : '';
         out.push({ verb, sel, note: note || null });
         i = tokens.length;
@@ -223,9 +243,9 @@ function parseSegment(s: string): Clause[] {
       }
       case 'why':
       case 'draft': {
-        const [sel, j] = parseSelection(tokens, i);
-        if (!sel || sel.all || sel.nums.length !== 1) throw new ParseFail();
-        out.push({ verb, n: sel.nums[0]! });
+        const [sel, j] = parseSelection(tokens, skipItemTail(tokens, i));
+        if (sel && (sel.all || sel.nums.length !== 1)) throw new ParseFail();
+        out.push({ verb, n: sel ? sel.nums[0]! : null });
         i = j;
         break;
       }

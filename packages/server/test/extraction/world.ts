@@ -5,6 +5,7 @@
 import { uuidv7 } from '@yb/shared';
 import type { DB } from '../../src/db/connection';
 import type { ExtractionDeps } from '../../src/extraction/run';
+import type { Egress, EgressPacket, PseudonymizedPacket } from '../../src/llm/types';
 import { FakeEgress, FakeLlmClient, type FakeLlmOptions } from '../fakes/llm';
 import { memDb, seedIdentity, seedPerson } from '../helpers';
 
@@ -80,13 +81,28 @@ export function buildXWorld(): XWorld {
   return { db, me, sam, jordan, priya, dana, ids, dm, group, msg, conversation };
 }
 
-/** Fakes whose unscripted replies are valid empty answers (an empty extraction / consolidation). */
-export function fakes(o: FakeLlmOptions = {}): { llm: FakeLlmClient; egress: FakeEgress } {
-  const responder = (c: { kind: string }) => ({ json: c.kind === 'consolidate' ? { summary: '', merges: [], invalidate: [] } : extraction() });
-  return { llm: new FakeLlmClient({ responder, ...o }), egress: new FakeEgress() };
+/**
+ * A FakeEgress that re-scans its own output and throws, like the real pseudonymize(). Its scrub is a single pass, so
+ * back-to-back handles ("@a@b") leave the second one raw: the shape that stopped the 2026-10-16 backfill.
+ */
+export class StrictEgress extends FakeEgress {
+  override pseudonymize(packet: EgressPacket): PseudonymizedPacket {
+    const out = super.pseudonymize(packet);
+    this.scan(out.text);
+    return out;
+  }
 }
 
-export function deps(w: XWorld, f: { llm: FakeLlmClient; egress: FakeEgress }, now = NOW): ExtractionDeps {
+/** Two invented handles written back to back (no separator). */
+export const ADJACENT_HANDLES = '@trail_mix_42@summit_crew';
+
+/** Fakes whose unscripted replies are valid empty answers (an empty extraction / consolidation). */
+export function fakes(o: FakeLlmOptions = {}, egress: FakeEgress = new FakeEgress()): { llm: FakeLlmClient; egress: FakeEgress } {
+  const responder = (c: { kind: string }) => ({ json: c.kind === 'consolidate' ? { summary: '', merges: [], invalidate: [] } : extraction() });
+  return { llm: new FakeLlmClient({ responder, ...o }), egress };
+}
+
+export function deps(w: XWorld, f: { llm: FakeLlmClient; egress: Egress }, now = NOW): ExtractionDeps {
   let t = now;
   return { db: w.db, llm: f.llm, egress: f.egress, now: () => t++ };
 }

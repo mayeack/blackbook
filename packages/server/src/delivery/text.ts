@@ -42,6 +42,59 @@ export function shortTime(ms: number, timeZone: string): string {
   return `${parts.hour}${min}${(parts.dayPeriod ?? '').toLowerCase()}`;
 }
 
+/** A span of days in words: "1 day", "5 days", "3 weeks", "4 months", "over a year", "3 years". */
+export function humanDuration(d: number | null | undefined): string | null {
+  if (d === null || d === undefined || !Number.isFinite(d) || d < 0) return null;
+  const n = Math.max(1, Math.round(d));
+  if (n < 14) return n === 1 ? '1 day' : `${n} days`;
+  if (n < 60) return `${Math.round(n / 7)} weeks`;
+  if (n < 365) return `${Math.round(n / 30)} months`;
+  const y = Math.floor(n / 365);
+  return y === 1 ? 'over a year' : `${y} years`;
+}
+
+/** A usual gap in words: "almost every day", "about once a week", "about once a month". */
+export function humanEvery(gapD: number | null | undefined): string | null {
+  if (gapD === null || gapD === undefined || !Number.isFinite(gapD) || gapD <= 0) return null;
+  if (gapD <= 1.5) return 'almost every day';
+  if (gapD <= 4.5) return 'every few days';
+  if (gapD <= 10) return 'about once a week';
+  if (gapD <= 21) return 'every couple of weeks';
+  if (gapD <= 45) return 'about once a month';
+  if (gapD <= 100) return 'every couple of months';
+  return 'a few times a year';
+}
+
+/** "Sam R.", "Sam R. and Priya S.", "Sam R., Priya S. and 2 others" (for sentences, not headers). */
+export function peopleList(names: string[], max = 2): string {
+  const n = names.filter(Boolean);
+  if (n.length <= 1) return n[0] ?? '';
+  if (n.length === 2) return `${n[0]} and ${n[1]}`;
+  if (n.length <= max) return `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`;
+  const rest = n.length - max;
+  return `${n.slice(0, max).join(', ')} and ${rest === 1 ? '1 other' : `${rest} others`}`;
+}
+
+/** "today at 7pm", "tomorrow at 11am", "Sat at 7pm", "Oct 28 at 7pm" in the owner's zone. */
+export function whenPhrase(ms: number, timeZone: string, now: number): string {
+  const day = (t: number) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
+  const d = day(ms);
+  const at = ` at ${shortTime(ms, timeZone)}`;
+  if (d === day(now)) return `today${at}`;
+  if (d === day(now + 86_400_000)) return `tomorrow${at}`;
+  return `${shortDay(ms, timeZone, now)}${at}`;
+}
+
+/** "8am", "6:30pm" from "08:00" / "18:30". */
+export function clockWords(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number) as [number, number];
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}${m ? `:${String(m).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'}`;
+}
+
+/** Ends a sentence with a period unless it already ends in punctuation ("… with Sam R." stays one period). */
+export const endSentence = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
+
 /** Whole days as "41d". */
 export const days = (d: number | null | undefined): string | null =>
   d === null || d === undefined || !Number.isFinite(d) || d < 0 ? null : `${Math.round(d)}d`;

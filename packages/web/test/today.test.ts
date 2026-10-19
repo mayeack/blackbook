@@ -85,6 +85,13 @@ describe('Today delivery line', () => {
     expect(deliveryLine(null, t)).toEqual({ text: 'No brief yet today', tone: 'muted' });
   });
 
+  it('a brief part-way out says its other texts are still on the way', () => {
+    expect(deliveryLine(digest({ imessage: 'pending', push: 'disabled', skipReason: 'partial' }), t)).toEqual({
+      text: 'Sent 8:00 · iMessage pending · some texts are still on the way',
+      tone: 'muted',
+    });
+  });
+
   it('unknown skip reasons are humanized', () => {
     expect(skipReasonLabel('some_new_reason')).toBe('some new reason');
     expect(skipReasonLabel(null)).toBe('not sent');
