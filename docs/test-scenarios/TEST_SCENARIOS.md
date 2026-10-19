@@ -877,6 +877,61 @@ applies); a missing or errored part retries the whole window; the shadow eval's 
 knowledge prompt.
 **Platforms**: server only. Real extraction results (quality of the split prompts) are not verified by Claude.
 
+---
+
+## Screenshots in self-thread commands + "prioritize inviting X to parties" (2026-10-18)
+
+**What changed** (replies use the plain-sentence style from #60): a `yb …` text sent with a screenshot (or a screenshot sent up to 3 min before it) now carries the
+image to the intent step. The collector serves it from a new route, `GET /v1/imessage/attachment` (note-to-self thread
+only, images only, downscaled JPEG ≤1568 px), and the LLM client sends it on the `intent` route (Haiku 5.5, ≤2 images)
+through the egress choke point, which lets out only image bytes the client approved for that request. The model reads
+the profile's username and display name; "this person" (ref `IMG`) is matched locally against identities by Instagram
+username (key or raw), or added as a **roster-only** person with an `instagram_username` identity (journaled). A new
+intent, `set_preference`, puts people in a reserved user circle **Party invites** (signature `pref:party_invites`);
+facts like "great DJ" go in as `add_fact` facts. Party invites people lead pre-event brief and follow-up lists, and
+pre-event / follow-up / intro suggestions about them score ×1.3 ("Why this?" shows it). New setting: Settings → Agent →
+"Read screenshots in commands" (default on). Everything is in the command's run, so `undo` reverts it.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1302 tests; the one failure seen was
+   `pipeline/occasions/run.test.ts` matching `/555/` inside a random UUID (pre-existing flake, passes on rerun).
+2. `collector/run-tests.sh`: 68 Swift tests, including the "attachment images" suite (self-thread PNG → JPEG at
+   `max_edge`, DM photos / stickers / PDFs / undecodable / missing files / paths outside the root refused).
+3. `npm run eval -- intent` with the key (synthetic notes + `packages/server/src/eval/fixtures/intent-profile-screenshot.png`):
+   6/6 passed on Haiku 5.5 for $0.0022, including reading `yb.eval.rowan` off the screenshot.
+
+### Scenario B — New person from a screenshot (owner, after rebuilding the collector and deploying)
+**Setup**: rebuild + re-sign BlackbookServer.app (new route), restart yeackbot from `~/Blackbook` main.
+1. Screenshot the Instagram profile of someone yeackbot doesn't know. In your note-to-self thread send the screenshot
+   with the text `Yb prioritize inviting this person to parties, is a great DJ`.
+2. **Expected** within ~30 s: `🅨 ✓ Noted for <First L.> (new, from your screenshot).` / `Noted: “great DJ”` /
+   `Prioritized for party invites.` / `(Text "undo" to take that back.)`
+3. yeackbot.com → Circles → **Party invites** lists them. (They are roster-only, so People and suggestions leave them
+   out until they qualify, e.g. a DM; the circle membership stays and applies then.)
+4. Text `undo`. **Expected**: `✓ Undone: note for <First L.> + prioritized for party invites`; the circle no longer lists them.
+
+### Scenario C — Someone you already know
+1. Send a profile screenshot of a contact whose Instagram is already linked (Beeper) with `yb always invite this person to parties`.
+2. **Expected**: `✓ Noted for Sam R.` / `Prioritized for party invites.`; no new person appears.
+
+### Scenario D — By name, no screenshot
+1. `yb prioritize inviting Sam to parties` with two Sams in your contacts.
+2. **Expected**: `Which Sam did you mean?` with `1. Sam R.` / `2. Sam K.`; reply `2` → `✓ Noted for Sam K.` /
+   `Prioritized for party invites.`
+
+### Scenario E — Ranking
+1. With a Party invites person at one of today's events, read the morning brief. **Expected**: they lead the
+   pre-event item's people. The morning after, the follow-up lists them first in their group; "Why this?" on a
+   pre-event / follow-up / intro item about them shows "In Party invites ×1.3".
+
+**Edge cases**: Settings toggle off → `Reading screenshots is off (Settings → Agent). Tell me who it is by name.` and
+nothing is fetched or sent; the file not synced to the Mac yet → `I couldn't open the screenshot yet. Send it again in
+a minute.`; no username visible and no unique full-name match → `I couldn't tell who that screenshot shows. …`; a business /
+service account → refused; sending the same screenshot again adds nothing twice; a DM photo can never be fetched (the
+collector refuses non-self chats); a screenshot sent alone with no `yb` text is never read.
+**Platforms**: server + collector (Swift) + web (one toggle). Not deployed: needs the collector rebuild + signing and a
+server restart; until then the route 404s and commands stay text-only.
+
 ## 2026-10-18 — Unambiguous names in the brief and suggestion copy (collision-aware "First L.")
 
 **What changed**: copy shortens names to "First L."; when that short form reads the same as the owner's own (the

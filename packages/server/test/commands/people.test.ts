@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { BOT_MARKER } from '@yb/shared/collector/v1';
-import { validateIntent, type IntentOutput } from '../../src/commands/intent';
+import { IMAGE_REF, imageHandle, validateIntent, type IntentOutput } from '../../src/commands/intent';
 import { deterministicKind } from '../../src/commands/log';
 import { distinctLabels, findMentions, intentCandidates, resolveSurface, type PersonLite } from '../../src/commands/people';
 import { finalizeReply, scrub, shortName, stableRef } from '../../src/commands/text';
@@ -85,9 +85,11 @@ describe('reply text', () => {
 describe('intent output bounds (the API enforces none)', () => {
   const ok: IntentOutput = {
     intent: 'log_interaction',
+    image: null,
     command: null,
     question: null,
     log: { people: [{ surface: 'Sam', ref: 'P1' }], kind: 'coffee', date: '2026-10-14', facts: [{ ref: 'P1', cat: 'interest', value: 'bouldering' }], note: null },
+    preferences: [],
   };
   it('accepts a well-formed answer and rejects unknown tokens, stray fact refs and bad dates', () => {
     const tokens = new Set(['P1']);
@@ -96,8 +98,28 @@ describe('intent output bounds (the API enforces none)', () => {
     expect(validateIntent({ ...ok, log: { ...ok.log!, facts: [{ ref: 'P2', cat: 'interest', value: 'x' }] } }, tokens)).toContain('fact ref not among people');
     expect(validateIntent({ ...ok, log: { ...ok.log!, date: 'tomorrow' } }, tokens)).toContain('bad date');
     expect(validateIntent({ ...ok, intent: 'command', log: null }, tokens)).toContain('command missing');
-    expect(validateIntent({ intent: 'command', command: { verb: 'done', nums: [99], dur: null }, log: null, question: null }, tokens)).toContain(
+    expect(validateIntent({ ...ok, intent: 'command', command: { verb: 'done', nums: [99], dur: null }, log: null }, tokens)).toContain(
       'command.nums out of range',
     );
+  });
+
+  it('screenshots: IMG is a ref only with an image that shows a username or name; set_preference needs preferences', () => {
+    const tokens = new Set(['P1']);
+    const pref: IntentOutput = {
+      ...ok,
+      intent: 'set_preference',
+      image: { handle: 'yb.eval.rowan', name: 'Rowan Testperson' },
+      log: { people: [{ surface: 'this person', ref: IMAGE_REF }], kind: 'other', date: null, facts: [{ ref: IMAGE_REF, cat: 'activity_pref', value: 'great DJ' }], note: null },
+      preferences: [{ surface: 'this person', ref: IMAGE_REF, kind: 'party_invites' }],
+    };
+    expect(validateIntent(pref, tokens, true)).toEqual([]);
+    expect(validateIntent(pref, tokens, false)).toEqual(expect.arrayContaining(['image without an attachment', 'unknown ref', 'unknown preference ref']));
+    expect(validateIntent({ ...pref, image: { handle: null, name: null } }, tokens, true)).toContain('unknown ref');
+    expect(validateIntent({ ...pref, image: { handle: 'not a handle!', name: null } }, tokens, true)).toContain('bad image handle');
+    expect(validateIntent({ ...pref, preferences: [] }, tokens, true)).toContain('preferences missing');
+    expect(validateIntent({ ...pref, preferences: [{ surface: 'Sam', ref: 'P9', kind: 'party_invites' }] }, tokens, true)).toContain('unknown preference ref');
+    expect(imageHandle('@Yb.Eval.Rowan')).toBe('yb.eval.rowan');
+    expect(imageHandle('instagram.com/someone')).toBeNull();
+    expect(imageHandle(null)).toBeNull();
   });
 });

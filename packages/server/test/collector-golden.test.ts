@@ -9,6 +9,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
+  AttachmentImageResponse,
   ChatsResponse,
   CollectorError,
   ContactsResponse,
@@ -26,6 +27,7 @@ const SCHEMAS: Record<string, z.ZodType> = {
   'contacts.json': ContactsResponse,
   'error-recipient-not-allowed.json': CollectorError,
   'health.json': Health,
+  'imessage-attachment.json': AttachmentImageResponse,
   'imessage-chats.json': ChatsResponse,
   'imessage-edited.json': EditedResponse,
   'imessage-handles.json': HandlesResponse,

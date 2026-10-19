@@ -1,12 +1,14 @@
 /**
- * The agent's outward-facing services (LLM, egress, outbound iMessage-to-self, web push), built once per database
- * from the config and shared by routes and jobs. Every one is inert when unconfigured (no API key, no collector,
- * no VAPID keys), so callers always take their deterministic/template path in that case.
+ * The agent's outward-facing services (LLM, egress, outbound iMessage-to-self, web push, command screenshots from
+ * the collector), built once per database from the config and shared by routes and jobs. Every one is inert when
+ * unconfigured (no API key, no collector, no VAPID keys), so callers always take their deterministic/template path
+ * in that case.
  *
  * Route modules:  const { llm } = resolveServices(deps);          (deps: RouteDeps)
  * Job modules:    const { outbound } = resolveServices({ ...deps, db: ctx.db });
  * Tests inject fakes with `services: () => ({ llm: new FakeLlmClient(), … })`.
  */
+import { collectorAttachmentSource, disabledAttachmentSource, type AttachmentSource } from './adapters/imessage/attachments';
 import type { AppConfig } from './config';
 import type { DB } from './db/connection';
 import { createOutboundSender } from './delivery/outbound';
@@ -22,6 +24,8 @@ export interface AgentServices {
   egress: Egress;
   outbound: OutboundSender;
   push: PushSender;
+  /** Self-thread command screenshots from the collector (absent = commands are text-only). */
+  attachments?: AttachmentSource;
 }
 
 export type ServicesProvider = (db: DB) => AgentServices;
@@ -44,6 +48,10 @@ export function servicesFor(db: DB, config?: ServicesConfig, log?: Logger): Agen
         log,
       }),
       push: createPushSender({ vapid: config?.vapid ?? null, log }),
+      attachments:
+        config?.collectorUrl && config.collectorTokenFile
+          ? collectorAttachmentSource({ url: config.collectorUrl, tokenFile: config.collectorTokenFile, log })
+          : disabledAttachmentSource,
     };
     cache.set(db, s);
   }

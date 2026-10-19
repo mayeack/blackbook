@@ -157,6 +157,33 @@ final class MessageReader {
         return out
     }
 
+    // MARK: Attachment files
+
+    /// The `index`th attachment of message `guid` (chat.db order, the same order as `Msg.attachments`) and the
+    /// identifiers of the chats the message is in. Nil when either doesn't exist.
+    func attachment(messageGUID: String, index: Int) throws -> AttachmentLocation? {
+        try db.read { conn, _ in
+            let rows = try conn.query("""
+                SELECT m.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes, a.is_sticker
+                FROM message m
+                JOIN message_attachment_join j ON j.message_id = m.ROWID
+                JOIN attachment a ON a.ROWID = j.attachment_id
+                WHERE m.guid = ?
+                ORDER BY a.ROWID LIMIT 1 OFFSET ?
+                """, [.text(messageGUID), .int(Int64(index))]) { r in
+                (rowid: r.int(0), filename: nonEmpty(r.text(1)), mime: nonEmpty(r.text(2)), uti: nonEmpty(r.text(3)),
+                 bytes: max(0, r.int(4)), sticker: r.bool(5))
+            }
+            guard let row = rows.first else { return nil }
+            let chats = try conn.query("""
+                SELECT c.chat_identifier FROM chat_message_join j JOIN chat c ON c.ROWID = j.chat_id
+                WHERE j.message_id = ?
+                """, [.int(row.rowid)]) { nonEmpty($0.text(0)) }
+            return AttachmentLocation(filename: row.filename, mime: row.mime, uti: row.uti, bytes: row.bytes,
+                                      isSticker: row.sticker, chatIdentifiers: chats.compactMap { $0 })
+        }
+    }
+
     // MARK: Chats and handles
 
     func chats(afterRowID: Int64, limit: Int) throws -> RowPage<ChatRow> {

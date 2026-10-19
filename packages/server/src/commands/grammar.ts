@@ -276,7 +276,8 @@ const LOG_COLON_RE = /^(?:log|l)\s*:\s*/i;
 const LOG_WORD_RE = /^log\s+(?=\S)/i;
 
 export function parseCommand(raw: string): Parsed {
-  const trimmed = raw.trim();
+  // Attachment placeholders (U+FFFC) can lead a text sent with a screenshot; "yb" must still be seen.
+  const trimmed = raw.replace(/\uFFFC/g, '').trim();
   const ybMatch = YB_RE.exec(trimmed);
   const yb = !!ybMatch;
   const body = (ybMatch ? trimmed.slice(ybMatch[0].length) : trimmed).trim();

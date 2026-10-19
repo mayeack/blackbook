@@ -10,10 +10,12 @@
  *      bot message in the last 12 h, as an inline reply to a bot row, or with a "yb" prefix; other free text only
  *      within 12 h of a bot message, inline, or with "yb" (his own notes to self are never read as commands);
  *   5. limits: ≤30 commands/h (one "slow down" notice), outbound circuit breaker ≥30/h (effects still apply);
- *   6. execute: deterministic grammar first; free text through the LLM intent parser (route 'intent', egress),
- *      deterministic fallback; item verbs through THE suggestion feedback entry point; `log:` writes a journaled
- *      note + interaction (+ facts from the parser); `?` asks the shared Ask engine; `undo` reverts the last
- *      acknowledged command's effect only (no cascade);
+ *   6. execute: deterministic grammar first; free text through the LLM intent parser (route 'intent', egress, with
+ *      the command's screenshots when Settings allow), deterministic fallback; item verbs through THE suggestion
+ *      feedback entry point; `log:` writes a journaled note + interaction (+ facts from the parser); add_fact and
+ *      set_preference write notes + facts, and "prioritize inviting X to parties" puts X in the Party invites circle;
+ *      "this person" in a screenshot is matched by Instagram username or added as a roster-only person; `?` asks
+ *      the shared Ask engine; `undo` reverts the last acknowledged command's effect only (no cascade);
  *   7. one reply per command, "🅨 ✓ …", to self only (OutboundSender), quiet hours don't apply; the clientRef is
  *      derived from the command id, so a retry never texts twice.
  * Tapbacks on bot rows are recorded as "seen" feedback only. Everything that changes data is journaled
@@ -21,6 +23,7 @@
  */
 import { localParts, type SuggestionFeedback } from '@yb/shared';
 import { setImmediate as yieldLoop } from 'node:timers/promises';
+import { commandImageRefs } from '../adapters/imessage/attachments';
 import { canonicalId } from '../db/canon';
 import type { DB } from '../db/connection';
 import { itemLines, mainLine } from '../delivery/compose';
@@ -29,8 +32,12 @@ import { templateCopy } from '../delivery/template';
 import { briefNames, clockWords, endSentence } from '../delivery/text';
 import { MAX_ANSWER_CHARS, type OutboundSender } from '../delivery/types';
 import { ownerNames } from '../identity/ownerNames';
+import type { ResolveContext } from '../identity/resolver';
+import { withBatch } from '../journal/batch';
 import { finishRun, startRun } from '../journal/runs';
+import type { LlmImage } from '../llm/types';
 import { nullLogger, type Logger } from '../ops/logger';
+import { addToPreference, PREFERENCES, type PreferenceKind } from '../pipeline/circles/preferences';
 import type { FeedbackContext } from '../pipeline/suggestions/feedback';
 import { resolveServices, type AgentServices, type ServicesConfig, type ServicesProvider } from '../services';
 import { settingsSnapshot, writeSettings, type SettingsSnapshot } from '../settings/registry';
@@ -54,6 +61,7 @@ import { isImplicitItemClause, ITEM_VERBS, parseCommand, selectionNums, type Cla
 import { parseIntent, type IntentResult, type LogKind } from './intent';
 import { applyLog, deterministicKind, logKindTitle, type LogFact } from './log';
 import { distinctLabels, findMentions, intentCandidates, labelOf, loadPeople, resolveSurface, type PersonLite } from './people';
+import { resolveScreenshotPerson } from './screenshot';
 import { recordSeenReactions } from './seen';
 import {
   closeClarification,
@@ -82,12 +90,18 @@ import {
   type PendingCommand,
   type SuggestionSnapshot,
 } from './state';
-import { finalizeReply, formatDay, HELP_TEXT, listJoin, relativeDay, scrub, stableRef, truncate } from './text';
+import { finalizeReply, formatDay, HELP_TEXT, listJoin, relativeDay, scrub, shortName, stableRef, truncate } from './text';
 import { logTimeFromDate, resolveLogTime, resolveUntil } from './time';
 
 const MAX_PER_PASS = 10;
 /** `more` texts the next suggestion only (one suggestion per text), looking this far for one that can be shown. */
 const MORE_LOOKAHEAD = 3;
+/** Why "this person" in a screenshot couldn't be pinned down. */
+const SCREENSHOT_PROBLEM = {
+  unreadable: "I couldn't tell who that screenshot shows. Send the profile with the @username visible.",
+  ambiguous: 'More than one person has that name. Send the profile with the @username visible.',
+  service: "That profile is a business or service account, so I didn't note anything.",
+} as const;
 const CANCEL = new Set(['cancel', 'no', 'none', 'neither', 'nevermind', 'never mind', 'nvm', 'stop', 'no one', 'nobody', 'skip it']);
 
 export interface CommandsOptions {
@@ -282,6 +296,11 @@ class CommandRun {
   private readonly log: Logger;
   private readonly now: number;
   private people: PersonLite[] | null = null;
+  private images: LlmImage[] | null = null;
+  /** Screenshots the command had that didn't reach the parser (setting off, collector down, file not synced yet). */
+  private imagesMissed: 'off' | 'unavailable' | null = null;
+  /** Labels of people this command touched who aren't in the visible list (a roster-only screenshot person). */
+  private readonly extraLabels = new Map<string, string>();
   /** The digest item this command is an inline reply to (its own text), if any. */
   private inlineOrdinal: number | null = null;
   /** An inline reply to a bot text that carries no item (an answer, an ack, the "Heads up" text). */
@@ -435,12 +454,56 @@ class CommandRun {
     if (this.settings['llm.excluded_conversation_ids'].includes(msg.conversationId)) return null;
     if (excludedPeople.size && findMentions(text, people).some((m) => m.candidates.some((c) => excludedPeople.has(c.id)))) return null;
     const candidates = intentCandidates(text, people.filter((p) => !excludedPeople.has(p.id)));
+    const images = await this.commandImages(msg);
     const r = await parseIntent(
       { llm: this.services.llm, egress: this.services.egress, timeZone: this.tz, log: this.log, signal: this.o.signal },
-      { commandId: this.cmd.id, text, sentAt: msg.sentAt, candidates, addressed },
+      { commandId: this.cmd.id, text, sentAt: msg.sentAt, candidates, addressed, images },
     );
     if (r) this.usedLlm = true;
     return r;
+  }
+
+  /**
+   * The screenshots this command carries (its own image attachments, else ones sent just before it), fetched once
+   * from the collector. None when Settings → "Read screenshots in commands" is off, there is no collector, or the
+   * AI can't be used anyway.
+   */
+  private async commandImages(msg: MessageInfo): Promise<LlmImage[]> {
+    if (this.images) return this.images;
+    this.images = [];
+    const source = this.services.attachments;
+    if (!this.services.llm.canSpend('steady').ok) return this.images;
+    const refs = commandImageRefs(this.db, msg.id);
+    if (!refs.length) return this.images;
+    if (!this.settings['commands.read_images'] || !source?.configured) {
+      this.imagesMissed = this.settings['commands.read_images'] ? 'unavailable' : 'off';
+      return this.images;
+    }
+    for (const ref of refs) {
+      if (this.o.signal?.aborted) break;
+      const img = await source.image(ref);
+      if (img) this.images.push(img);
+    }
+    if (this.images.length < refs.length) this.imagesMissed = 'unavailable';
+    if (this.images.length) this.parsedMeta.images = this.images.length;
+    return this.images;
+  }
+
+  /** Who and when for identity writes this command makes (a person added from a screenshot). */
+  private resolveCtx(): ResolveContext {
+    return { db: this.db, runId: () => this.ensureRun(), now: this.now, source: 'screenshot', actor: 'user' };
+  }
+
+  /** "Sam R." for anyone, visible or not (a roster-only screenshot person; a person picked in a clarification). */
+  private labelFor(personId: string): string | null {
+    const known = this.loadPeopleOnce().find((p) => p.id === personId);
+    if (known) return labelOf(known);
+    const extra = this.extraLabels.get(personId);
+    if (extra) return extra;
+    const row = this.db.prepare('SELECT display_name, first_name, last_name FROM people WHERE id = ?').get(personId) as
+      | { display_name: string; first_name: string | null; last_name: string | null }
+      | undefined;
+    return row ? shortName(row) : null;
   }
 
   private loadPeopleOnce(): PersonLite[] {
@@ -519,6 +582,7 @@ class CommandRun {
       switch (intent.intent) {
         case 'log_interaction':
         case 'add_fact':
+        case 'set_preference':
           await this.logText(parsed.body, msg, ex, intent);
           return ex;
         case 'question':
@@ -727,9 +791,28 @@ class CommandRun {
     const resolved: string[] = [];
     const ambiguous: { surface: string; options: PersonLite[] }[] = [];
     const unresolved: string[] = [];
+    const created: string[] = [];
+    // "This person" in a screenshot: matched by username (or added) before any name is looked at.
+    let shot: string | null = null;
+    if (intent && usesImage(intent)) {
+      const r = intent.image ? resolveScreenshotPerson(this.resolveCtx(), intent.image, people) : ({ ok: false, reason: 'unreadable' } as const);
+      if (!r.ok) {
+        ex.lines.push(SCREENSHOT_PROBLEM[r.reason]);
+        return;
+      }
+      shot = r.personId;
+      visible.add(shot);
+      resolved.push(shot); // named somewhere in the parse (people, facts or preferences)
+      this.extraLabels.set(shot, r.label);
+      if (r.created) created.push(shot);
+    }
     const llmLog = intent?.log ?? null;
     if (llmLog && llmLog.people.length) {
       for (const p of llmLog.people) {
+        if (p.image && shot) {
+          resolved.push(shot);
+          continue;
+        }
         if (p.personId && visible.has(p.personId)) {
           resolved.push(p.personId);
           continue;
@@ -745,21 +828,40 @@ class CommandRun {
         else ambiguous.push({ surface: m.surface, options: m.candidates });
       }
     }
+    // Standing preferences ride along: their person is resolved like a named one (an ambiguous name is asked once).
+    const prefs: NonNullable<ClarifyPayload['prefs']> = [];
+    for (const p of intent?.preferences ?? []) {
+      const id = p.image ? shot : p.personId && visible.has(p.personId) ? p.personId : null;
+      const cands = id ? [] : resolveSurface(p.surface, people);
+      const chosen = id ?? (cands.length === 1 ? cands[0]!.id : null);
+      if (chosen) {
+        prefs.push({ personId: chosen, surface: p.surface, kind: p.kind });
+        resolved.push(chosen);
+      } else if (cands.length > 1) {
+        prefs.push({ personId: null, surface: p.surface, kind: p.kind });
+        if (!ambiguous.some((a) => a.surface === p.surface)) ambiguous.push({ surface: p.surface, options: cands });
+      } else if (!unresolved.includes(p.surface)) unresolved.push(p.surface);
+    }
     const kind: LogKind = llmLog?.kind ?? deterministicKind(text);
     const when = logTimeFromDate(llmLog?.date ?? null, msg.sentAt, this.tz) ?? resolveLogTime(text, msg.sentAt, this.tz);
-    const facts: LogFact[] = (llmLog?.facts ?? []).filter((f) => visible.has(f.personId));
+    const facts: LogFact[] = (llmLog?.facts ?? [])
+      .map((f) => ({ personId: f.image ? shot : f.personId, cat: f.cat, value: f.value }))
+      .filter((f): f is LogFact => !!f.personId && visible.has(f.personId));
+    const remember = intent?.intent === 'add_fact' || intent?.intent === 'set_preference';
     const payload: ClarifyPayload = {
       text,
       kind,
       at: when.at,
       date: when.date,
-      interaction: intent?.intent !== 'add_fact',
+      interaction: !remember,
       resolved: [...new Set(resolved)],
       surface: '',
       pending: [],
       facts,
-      unresolved,
+      unresolved: unresolved.filter((u) => !ambiguous.some((a) => a.surface === u)),
       llm: !!intent,
+      ...(prefs.length ? { prefs } : {}),
+      ...(created.length ? { created } : {}),
     };
     if (ambiguous.length) {
       const [first, ...rest] = ambiguous;
@@ -768,11 +870,22 @@ class CommandRun {
       this.askWhich(first!.surface, optionsFor(first!.options), payload, ex);
       return;
     }
+    if (!payload.resolved.length && this.imagesMissed && !this.images?.length) {
+      ex.lines.push(
+        this.imagesMissed === 'off'
+          ? 'Reading screenshots is off (Settings → Agent). Tell me who it is by name.'
+          : "I couldn't open the screenshot yet. Send it again in a minute.",
+      );
+      return;
+    }
     if (!payload.resolved.length) {
+      const hint = remember ? 'Try a full name like Sam R., or send their profile screenshot.' : 'Try a last initial, like "log: coffee with Sam R."';
       ex.lines.push(
         unresolved.length
-          ? `${endSentence(`I couldn't find ${listJoin(unresolved.map((u) => truncate(u, 30)), 'or')}`)} Try a last initial, like "log: coffee with Sam R."`
-          : 'Who was that with? Try "log: coffee with Sam R."',
+          ? `${endSentence(`I couldn't find ${listJoin(unresolved.map((u) => truncate(u, 30)), 'or')}`)} ${hint}`
+          : remember
+            ? `Who do you mean? ${hint}`
+            : 'Who was that with? Try "log: coffee with Sam R."',
       );
       return;
     }
@@ -789,9 +902,7 @@ class CommandRun {
   }
 
   private applyLogPlan(payload: ClarifyPayload, msg: MessageInfo, ex: Exec): void {
-    const people = this.loadPeopleOnce();
-    const byId = new Map(people.map((p) => [p.id, p]));
-    const names = payload.resolved.map((id) => (byId.get(id) ? labelOf(byId.get(id)!) : null)).filter((n): n is string => !!n);
+    const names = payload.resolved.map((id) => this.labelFor(id)).filter((n): n is string => !!n);
     const kind = payload.kind as LogKind;
     const plan = {
       text: payload.text,
@@ -806,18 +917,45 @@ class CommandRun {
     const title = payload.interaction ? `Logged ${logKindTitle(kind).toLowerCase()} with ${listJoin(names)} (text)` : `Noted about ${listJoin(names)} (text)`;
     const applied = applyLog(this.db, plan, { runId: this.ensureRun(), now: this.now, messageId: msg.id, title });
     if (applied.batchId) ex.batchIds.push(applied.batchId);
+    const prefAcks = this.applyPrefs(payload, ex);
     ex.effect = ex.effect === 'none' || ex.effect === 'log' ? 'log' : 'mixed';
     const day = relativeDay(payload.date, localParts(this.now, this.tz).date, payload.at, this.tz);
     const what = kind === 'other' ? 'note' : logKindTitle(kind).toLowerCase();
-    const factBits = applied.facts
+    const shown = applied.facts
       .filter((f) => !f.sensitive)
       .slice(0, 2)
       .map((f) => `“${truncate(f.value, 40)}”`);
     const missing = payload.unresolved.length ? [endSentence(`I couldn't find ${listJoin(payload.unresolved.map((u) => truncate(u, 30)), 'or')}`)] : [];
+    const created = new Set(payload.created ?? []);
+    const who = listJoin(payload.resolved.map((id) => `${this.labelFor(id) ?? 'someone'}${created.has(id) ? ' (new, from your screenshot)' : ''}`));
     const when = day === 'today' || day === 'yesterday' ? day : `on ${day}`;
-    const head = payload.interaction ? `✓ Logged ${LOG_PHRASE[kind]} ${listJoin(names)} ${when}.` : endSentence(`✓ Noted for ${listJoin(names)}`);
-    ex.lines.push([head, ...(factBits.length ? [`Noted: ${factBits.join(', ')}`] : []), ...missing].join('\n'));
-    ex.summaries.push(payload.interaction ? `log for ${listJoin(names)} (${what} ${day})` : `note for ${listJoin(names)}`);
+    const head = payload.interaction ? `✓ Logged ${LOG_PHRASE[kind]} ${who} ${when}.` : endSentence(`✓ Noted for ${who}`);
+    const prefLines = prefAcks.map((a) => endSentence(a[0]!.toUpperCase() + a.slice(1)));
+    ex.lines.push([head, ...(shown.length ? [`Noted: ${shown.join(', ')}`] : []), ...prefLines, ...missing].join('\n'));
+    const prefNote = prefAcks.length ? ` + ${prefAcks.join(', ')}` : '';
+    ex.summaries.push(payload.interaction ? `log for ${listJoin(names)} (${what} ${day})${prefNote}` : `note for ${listJoin(names)}${prefNote}`);
+  }
+
+  /** Standing preferences: each kind's circle gets its people, one journaled batch per kind. Returns the acks. */
+  private applyPrefs(payload: ClarifyPayload, ex: Exec): string[] {
+    const byKind = new Map<PreferenceKind, string[]>();
+    for (const p of payload.prefs ?? []) {
+      if (!p.personId || !payload.resolved.includes(p.personId)) continue;
+      byKind.set(p.kind, [...new Set([...(byKind.get(p.kind) ?? []), p.personId])]);
+    }
+    const acks: string[] = [];
+    for (const [kind, ids] of byKind) {
+      const names = listJoin(ids.map((id) => this.labelFor(id) ?? 'someone'));
+      const { batchId, changes } = withBatch(
+        this.db,
+        { runId: this.ensureRun(), kind: 'circle', title: `${names}: ${PREFERENCES[kind].ack} (text)`, subjectPersonId: ids[0], actor: 'user' },
+        (t) => addToPreference(t, kind, ids),
+        { now: this.now },
+      );
+      if (changes) ex.batchIds.push(batchId);
+      acks.push(PREFERENCES[kind].ack);
+    }
+    return acks;
   }
 
   private async answerClarification(clar: ClarificationRow, answer: ClarAnswer, msg: MessageInfo): Promise<Exec> {
@@ -830,7 +968,14 @@ class CommandRun {
       return ex;
     }
     const chosen = clar.options[answer.choice!]!;
-    const payload: ClarifyPayload = { ...clar.payload, resolved: [...new Set([...clar.payload.resolved, chosen.personId])] };
+    const payload: ClarifyPayload = {
+      ...clar.payload,
+      resolved: [...new Set([...clar.payload.resolved, chosen.personId])],
+      // A preference waiting on this name now has its person.
+      ...(clar.payload.prefs
+        ? { prefs: clar.payload.prefs.map((p) => (p.personId === null && p.surface === clar.payload.surface ? { ...p, personId: chosen.personId } : p)) }
+        : {}),
+    };
     closeClarification(this.db, clar.id, 'resolved', this.now, this.cmd.id);
     const [next, ...rest] = payload.pending;
     if (next) {
@@ -953,6 +1098,11 @@ function clarificationAnswer(p: Parsed, clar: ClarificationRow): ClarAnswer | nu
   if (!body || body.length > 40) return null;
   const hits = clar.options.map((o, i) => ({ i, label: o.label.toLowerCase() })).filter((o) => o.label === body || o.label.replace(/\.$/, '') === body);
   return hits.length === 1 ? { choice: hits[0]!.i } : null;
+}
+
+/** The parse names the person in the screenshot (ref IMG) somewhere. */
+function usesImage(r: IntentResult): boolean {
+  return !!r.log?.people.some((p) => p.image) || !!r.log?.facts.some((f) => f.image) || r.preferences.some((p) => p.image);
 }
 
 function optionsFor(cands: PersonLite[]): ClarifyOption[] {

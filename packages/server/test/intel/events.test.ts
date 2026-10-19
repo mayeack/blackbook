@@ -86,6 +86,18 @@ describe('pre_event_brief', () => {
   });
 });
 
+describe('Party invites (set by text) lead the lists', () => {
+  it('in the pre-event brief (ahead of tie strength); a member the owner removed no longer does', async () => {
+    w.db.prepare(`INSERT INTO circles (id, name, kind, signature, status, created_at, updated_at) VALUES ('pi', 'Party invites', 'user', 'pref:party_invites', 'active', ?, ?)`).run(NOW, NOW);
+    w.db.prepare(`INSERT INTO circle_members (circle_id, person_id, origin, excluded, created_at, updated_at) VALUES ('pi', ?, 'user', 0, ?, ?)`).run(bo, NOW, NOW);
+    const c = await preEventBriefGenerator.generate(ctx(at(0, 7, 16)));
+    expect(c[0]!.personIds).toEqual([bo, ana]); // Bo first despite the lower tie
+    expect(c[1]!.personIds).toEqual([ana, dee]); // not at that party: unchanged
+    w.db.prepare(`UPDATE circle_members SET excluded = 1 WHERE person_id = ?`).run(bo);
+    expect((await preEventBriefGenerator.generate(ctx(at(0, 7, 16))))[0]!.personIds).toEqual([ana, bo]);
+  });
+});
+
 describe('the brief', () => {
   it('attendees by tie strength with last contact, open loops and one recent non-sensitive fact; unknown guests; connectors', () => {
     const b = eventBrief(w.db, dinner, { now: NOW, timeZone: TZ })!;

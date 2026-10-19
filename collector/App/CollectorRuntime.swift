@@ -91,10 +91,11 @@ final class CollectorRuntime {
                                            ownAddresses: { try reader.ownAccountAddresses() })
         let send = SendService(allowlist: allowlist, ledger: SendLedger(fileURL: paths.sendLedger),
                                sender: MessagesSender(runner: NSAppleScriptRunner()), rows: reader, clock: clock)
+        let attachments = AttachmentService(reader: reader, allowlist: allowlist)
         let health = HealthReporter(reader: reader, whatsapp: whatsapp, probe: LiveSystemProbe(), startedAt: Date())
         let api = CollectorAPI(port: Self.port, dependencies: .init(
             token: { tokens.current() }, reader: reader, contacts: SystemContactsSource(),
-            whatsapp: whatsapp, send: send, health: health, now: Date.init))
+            whatsapp: whatsapp, send: send, attachments: attachments, health: health, now: Date.init))
         let server = LoopbackHTTPServer(port: Self.port, handler: { api.handle($0) })
         server.onStateChange = { [weak self] state in
             guard let self else { return }

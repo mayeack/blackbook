@@ -23,7 +23,7 @@ import { canonOf, isVisible, PeopleCache, shortName } from './people';
 import { armsOfRow } from './rewards';
 import { getSuggestion, personIdsOf, type SuggestionRow } from './store';
 import { templateHeadline, whySignals, whySummary, type TextInput } from './text';
-import { KIND_POLICY } from './types';
+import { KIND_POLICY, SELECTION } from './types';
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE_RE = /(?:\+\d[\d\s().-]{6,18}\d)|(?:\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b)|\b\d{10,11}\b/g;
@@ -175,6 +175,7 @@ function adjustmentsOf(r: SuggestionRow): WhySignal[] {
   const d = r.rank_details ? (JSON.parse(r.rank_details) as Record<string, unknown>) : {};
   out.push({ label: 'Kind weight', value: `×${typeof d.weight === 'number' ? d.weight : KIND_POLICY[kind].weight}` });
   if (d.priority === true) out.push({ label: 'Priority person', value: '×1.3' });
+  if (d.party === true) out.push({ label: 'In Party invites', value: `×${1 + SELECTION.partyBoost}` });
   if (d.fatigue === true) out.push({ label: 'In a brief in the last 3 days', value: '×0.5' });
   if (d.penalized === true) out.push({ label: 'Second item of this kind', value: '×0.6' });
   if (d.forced === true) out.push({ label: 'Time-critical', value: 'forced in' });

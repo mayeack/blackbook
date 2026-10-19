@@ -86,6 +86,8 @@ export const SettingsValues = z.object({
   // ---- features
   /** Two-way texting: commands from the self-thread. */
   'commands.enabled': z.boolean(),
+  /** A screenshot sent with a "yb …" self-thread command goes to Claude (downscaled) so it can read a profile off it. */
+  'commands.read_images': z.boolean(),
   'intros.enabled': z.boolean(),
   /** Home city for travel intel (falls back to the owner's location fact); free text, matched to a metro. */
   'travel.home_city': z.string().min(1).max(80).nullable(),
