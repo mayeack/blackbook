@@ -38,6 +38,29 @@ export const AskCitation = z.object({
 });
 export type AskCitation = z.infer<typeof AskCitation>;
 
+/** One person in a people answer ("who do I know in London?"): the web renders these rows as a table. */
+export const AskPeopleRow = z.object({
+  person: PersonChip,
+  /** Why they're on the list and the key details, as the answer line says it (citation ids inline: "lives in London [F2c]"). */
+  detail: z.string(),
+  /** Where they live now, from their profile. */
+  city: z.string().nullable(),
+  circles: z.array(z.string()),
+  lastContactAt: Ms.nullable(),
+});
+export type AskPeopleRow = z.infer<typeof AskPeopleRow>;
+
+/**
+ * An answer that lists people, one line per person (the answer text keeps the same lines for iMessage and history).
+ * `intro` is the text above the list (one short line at most) and `note` anything after it; both may be ''.
+ */
+export const AskPeopleList = z.object({
+  intro: z.string(),
+  rows: z.array(AskPeopleRow),
+  note: z.string(),
+});
+export type AskPeopleList = z.infer<typeof AskPeopleList>;
+
 export const AskUsage = z.object({
   toolCalls: z.number().int(),
   inputTokens: z.number().int(),
@@ -67,6 +90,8 @@ export const AskEvent = z.discriminatedUnion('type', [
     answer: z.string(),
     citations: z.array(AskCitation),
     people: z.array(PersonChip),
+    /** Set when the answer is a list of people (the web shows a table). Optional so an older server's frames still parse. */
+    list: AskPeopleList.nullish(),
     /** True when no LLM answered (retrieval-only fallback). */
     degraded: z.boolean(),
     usage: AskUsage.nullable(),
@@ -82,6 +107,7 @@ export const AskTurn = z.object({
   answer: z.string().nullable(),
   citations: z.array(AskCitation),
   people: z.array(PersonChip),
+  list: AskPeopleList.nullish(),
   channel: z.enum(['web', 'imessage']),
   status: z.enum(['running', 'done', 'error', 'degraded']),
   createdAt: Ms,

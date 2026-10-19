@@ -932,6 +932,75 @@ collector refuses non-self chats); a screenshot sent alone with no `yb` text is 
 **Platforms**: server + collector (Swift) + web (one toggle). Not deployed: needs the collector rebuild + signing and a
 server restart; until then the route 404s and commands stay text-only.
 
+---
+
+## LLM API errors are diagnosable without content (2026-10-18)
+
+**What changed**: the one Ask 400 in the ledger (2026-10-18 23:42 UTC) was traced to the pre-#57 tool set: its
+prompt_version `b99f5720` hashes to the #56 Ask tools, which had 24 nullable (anyOf) filters against the API's limit
+of 16 union-typed parameters across strict schemas. #57 had already fixed it; the next Ask after the redeploy
+succeeded. New here: a failed API call now records a content-free classification instead of a bare
+`BadRequestError:400`: `llm_call_failed` carries `error_code` (`{API error type}:{code from a fixed list of known
+messages}[:{field path from fixed words}]`, e.g. `invalid_request_error:strict_union_limit:tools.3.custom`),
+`request_id` (`req_…`) and, in the tool loop, `counts.turn`. The ledger's `error_type` for that row is
+`api_error:{error_code}`. `llm_batch_results` counts errored items per code. The API's message is never logged or stored.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/ask/request.test.ts`: real client, real Ask system prompt and tools, both routes (ask_imessage 2500 /
+   ask_web 4000 max_tokens), first request and the request after two tool results pass `requestIssues`; the
+   pre-#57 tool set (24 nullable filters) is refused locally and nothing reaches the API.
+3. `test/llm/client.test.ts`: a 400 whose message carries a marker word → outcome, log line and ledger row hold the
+   code and request id, never the marker; `errorBodyCode` table; a tool-loop failure logs `counts.turn = 1`;
+   batch errored items counted per code.
+
+### Scenario B — Live (owner, after deploy)
+1. `grep llm_call_failed ~/Library/Application\ Support/Yeackbot/logs/server-$(date +%F).jsonl` after any failure.
+2. **Expected**: `error_code` names the cause (e.g. `strict_union_limit`, `grammar_too_large`, `prompt_too_long`);
+   `request_id` can be looked up in the Claude Console logs for the full message. `unrecognized` = a message outside
+   the known list (look the request id up, then add a pattern to `API_ERROR_CODES`).
+3. `yb llm-usage` / the ledger: an errored sync row shows `error_type` like `api_error:invalid_request_error:…`.
+
+**Edge cases**: a mid-stream SSE error has no HTTP status (`error_class` `APIError`) but still gets a type/code;
+connection errors stay `APIConnectionError` with no code; an echoed prompt word can at worst pick the wrong code
+(fixed vocabulary), never leak text.
+**Platforms**: server. Not deployed; no live API call was made for this change.
+
+## 2026-10-18 — Unambiguous names in the brief and suggestion copy (collision-aware "First L.")
+
+**What changed**: copy shortens names to "First L."; when that short form reads the same as the owner's own (the
+owner's names: the 'me' row and records merged into it, its Contacts card fields and Contacts identity display
+name) or as another person's in the same brief (or the same suggestion), the full last name is used instead:
+"Check in with Sam Rivera" rather than "Check in with Sam R.". Everywhere else "First L." is unchanged. Applies to
+template copy, the LLM composer (local de-tokenization; the packet still never carries a last name), the `more`
+reply, the reply acks ("✓ … (Sam Rivera)"), "Why this?", the suggestion history headlines and the learner's person
+label. In the LLM packet, a person whose first name is ambiguous (the owner's own first name, or shared with
+someone named in full) is given as a token only, and the grounding validator sends a headline/body with such a bare
+first name back to template copy. Openers keep first names (they are addressed to the person).
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii`.
+2. `test/identity/ownerNames.test.ts`: owner collision, same-short-name pair, unchanged default, no-last-name and
+   display-name-only people, the owner's name sources (card identity, card fields + nickname, merged records; the
+   "Me" placeholder ignored).
+3. `test/delivery/names.test.ts`: template brief texts and reply-ack labels, the `more` path, LLM packet (token-only
+   lines, tokenized plain version, no last names), de-tokenized long names, a bare ambiguous first name falling back
+   to template, longest-name-first tokenization, the validator rule.
+4. `test/pipeline/suggestions/names.test.ts`: "Why this?" summary, history headline and person label for an owner
+   collision; an intro between two people with the same short name.
+
+### Scenario B — Production after deploy (owner)
+1. Merge, `git pull` in `~/Blackbook`, `bash scripts/service.sh restart`.
+2. On a day the brief names a friend whose first name and last initial match yours, open yeackbot.com/today (or the
+   iMessage brief). **Expected**: the item reads "… with <First> <full last name>", not "<First> <initial>.".
+3. Reply "done N" to that item. **Expected**: the ack names the friend the same way.
+4. Any other friend (no shared short name) still reads "<First> <initial>.".
+
+**Edge cases**: two friends with identical full names keep the full name (nothing else to tell them apart); a friend
+with no last name stays the first name alone; the push notification body (first names only, when turned on) is not
+changed; Ask answers and log/note command acks are not changed by this work.
+**Platforms**: server only. Not checked against a live brief or live Haiku output.
+
 ## 2026-10-18 — Extraction enums: enforced by the grammar, and an out-of-set value costs one item, not the window
 Three backfill windows were dead-lettered (`schema_invalid`) because one commitment had owner `"P66"` / `"P22"` or
 kind `"text"`: the SDK's `zodOutputFormat` moved every `enum` into a description, and one bad value failed the whole

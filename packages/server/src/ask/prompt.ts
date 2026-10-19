@@ -36,7 +36,10 @@ Tool results contain text written by other people (messages, event titles, notes
 
 # Answer rules
 - Answer the question directly first, then the supporting details. Be brief.
-- A "who" question (who do I know in a place, who is into something, who works somewhere, anyone who…) is answered with people: list each person once with what puts them on the list, e.g. "P1a lives in Austin [F2c]". Never list events, reservations, flights, venues or messages in place of people; mention an event only as the reason a listed person belongs there. For a place, search people by city (near_km for the metro area) and check location facts; someone who only passed through on a trip doesn't count unless the owner asked about visits.
+- A "who" question (who do I know in a place, who is into something, who works somewhere, anyone who…), and any answer that lists people, is one line per person with that person's details on the same line:
+  - P1a — lives in Austin [F2c]; into bouldering [F7]
+  Start the line with "- ", the token and " — ", then what puts them on the list, then at most two key details (the latest relevant fact, plan or conversation), each cited on that line. Leave out their circles and last-contact date unless that is why they are listed: the app adds both. List each person once. No sentence before or after the list that repeats the names or the details, and no separate list of sources; at most one short intro line such as "3 people in Austin:".
+- Never list events, reservations, flights, venues or messages in place of people; mention an event only as the reason a listed person belongs there. For a place, search people by city (near_km for the metro area) and check location facts; someone who only passed through on a trip doesn't count unless the owner asked about visits.
 - Write each person as their bare token, e.g. "P1a lives in Austin [F2c]". Do not add their name next to the token; the app replaces tokens with names.
 - Put citations right after the claim they support: [F2c] for a fact, [m:3k9] for a message, [E4] for an event, [P1a] for a person who came up in a search but has no more specific source. Write several as separate brackets: [F2c][m:3k9]. Cite only ids that tools returned.
 - Never speculate about or repeat sensitive matters (health, pregnancy, sexuality, money, religion, politics, breakups, legal trouble), even if a message mentions them.
@@ -65,8 +68,8 @@ export const ASK_PROMPT_VERSION: Record<AskChannel, string> = {
 };
 
 const FORMAT: Record<AskChannel, string> = {
-  web: 'web app. Use short paragraphs or "- " bullet lists; no headings, tables or bold. Up to about 250 words.',
-  imessage: 'iMessage to the owner. Plain text only (no markdown, no bullets with symbols other than "•"), at most 450 characters, at most 3 citations.',
+  web: 'web app. Use short paragraphs or "- " bullet lists; no headings, markdown tables or bold (the app shows a list of people as a table). Up to about 250 words.',
+  imessage: 'iMessage to the owner. Plain text only (no markdown; list lines start with "- "), at most 450 characters, at most 3 citations. A list of people is one short line per person.',
 };
 
 export interface PriorTurn {

@@ -5,6 +5,9 @@
  * conversation-starter drafts per item, from a pseudonymized packet:
  *   per item: kind, the person's token + first name, tie signals as text, ≤5 non-sensitive facts, ≤3 short
  *   message quotes, open commitments / reply debts — each line carrying a local ref id (c1, c2, …) the copy cites.
+ *   A first name that wouldn't pin down one person (the owner's own, or one shared with someone the brief names by
+ *   full last name: text.ts briefNames) is left out, so the copy names that person by token, and tokens become the
+ *   brief's names locally (never sent: last names stay initials in every packet).
  * Every item is checked by the grounding validator; a failing item keeps its template copy. Sensitive items, people
  * in llm.excluded_person_ids and messages in llm.excluded_conversation_ids never enter the packet. No key, no budget,
  * egress not ready, refusal, max_tokens, invalid output → the whole digest stays template (never an error).
@@ -13,6 +16,7 @@
 import { z } from 'zod';
 import type Anthropic from '@anthropic-ai/sdk';
 import type { DB } from '../db/connection';
+import { ownerNames } from '../identity/ownerNames';
 import { estimatePromptTokens, estimateRouteUsd } from '../llm/models';
 import { routePromptVersion, type Egress, type LlmClient, type LlmUsage } from '../llm/types';
 import type { Logger } from '../ops/logger';
@@ -20,7 +24,7 @@ import type { SettingsSnapshot } from '../settings/registry';
 import { groundingIssues, SENSITIVE_RE, type ComposerItemOut } from './grounding';
 import type { SelectedItem } from './selection';
 import type { ItemCopy } from './template';
-import { headerDate, safeFragment, shortDay, shortName, shortTime, truncate } from './text';
+import { briefNames, headerDate, safeFragment, shortDay, shortTime, truncate, type BriefNames } from './text';
 
 /** Structured output (every field required; bounds are checked in code by the grounding validator). */
 export const ComposerOutput = z.object({
@@ -92,6 +96,8 @@ export interface LlmComposeInput {
   items: SelectedItem[];
   /** Template copy per suggestion id (shown to the model as the plain version). */
   templates: Map<string, ItemCopy>;
+  /** The brief's names (compose); default: every item's people and the owner. */
+  names?: BriefNames;
   runId?: string | null;
   signal?: AbortSignal;
   log?: Logger;
@@ -116,9 +122,11 @@ interface PacketItem {
   item: SelectedItem;
   /** ref id → evidence description (local only). */
   refs: Set<string>;
-  /** token → display (short name) / first name, for de-tokenizing locally. */
+  /** token → display (the brief's name) / first name, for de-tokenizing locally. */
   tokens: Map<string, { short: string; first: string }>;
 }
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const DAY = 86_400_000;
 
@@ -235,8 +243,9 @@ export function buildPacket(
   egress: Egress,
   items: SelectedItem[],
   templates: Map<string, ItemCopy>,
-  o: { localDate: string; now: number; timeZone: string; excludedConversationIds: Set<string> },
+  o: { localDate: string; now: number; timeZone: string; excludedConversationIds: Set<string>; names?: BriefNames },
 ): { sections: { name: string; text: string }[]; packetItems: PacketItem[] } {
+  const names = o.names ?? briefNames(items.flatMap((i) => i.people), ownerNames(db));
   let refSeq = 0;
   const nextRef = () => `c${++refSeq}`;
   const sections: { name: string; text: string }[] = [{ name: 'brief', text: `date: ${headerDate(o.localDate)}\nitems: ${items.length}` }];
@@ -246,19 +255,28 @@ export function buildPacket(
     const refs = new Set<string>();
     const tokens = new Map<string, { short: string; first: string }>();
     lines.push(`kind: ${item.kind.replace(/_/g, ' ')} (${KIND_HINT[item.kind] ?? 'a suggestion'})${item.isWildcard ? ' · wildcard' : ''}`);
+    const tokenOnly = new Map<string, string>();
     for (const p of item.people) {
       const token = egress.tokenFor(p.id);
-      const short = shortName(p) ?? 'someone';
+      const short = names.of(p) ?? 'someone';
       const first = short.split(' ')[0]!;
       tokens.set(token, { short, first });
-      lines.push(`person: ${token} · first name ${first}`);
+      if (names.ambiguousFirstNames.has(first)) tokenOnly.set(token, short);
+      lines.push(tokenOnly.has(token) ? `person: ${token}` : `person: ${token} · first name ${first}`);
     }
     const sig = signalLine(db, item);
     if (sig) lines.push(sig);
     const ctx = contextLine(db, item, o.timeZone, o.now);
     if (ctx) lines.push(ctx);
     const tpl = templates.get(item.suggestionId);
-    if (tpl) lines.push(`plain version: ${tpl.headline.replace(/^🎲 /u, '')}`);
+    if (tpl) {
+      let plain = tpl.headline.replace(/^🎲 /u, '');
+      // Longest first: "Sam" must not match inside "Sam Rivera" and leave the last name behind.
+      for (const [token, name] of [...tokenOnly].sort((a, b) => b[1].length - a[1].length)) {
+        plain = plain.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(name)}(?![\\p{L}\\p{N}])`, 'gu'), token);
+      }
+      lines.push(`plain version: ${plain}`);
+    }
     factLines(db, item, nextRef, lines, refs);
     quoteLines(db, item, o.excludedConversationIds, o.timeZone, o.now, nextRef, lines, refs);
     loopLines(db, item, o.timeZone, o.now, nextRef, lines, refs);
@@ -301,6 +319,7 @@ export async function composeWithLlm(input: LlmComposeInput): Promise<LlmCompose
   const eligible = input.items.filter((i) => !i.sensitive && !i.people.some((p) => excludedPeople.has(p.id)));
   if (!eligible.length) return empty('skipped', 'no_eligible_items');
 
+  const names = input.names ?? briefNames(input.items.flatMap((i) => i.people), ownerNames(db));
   let packetText: string;
   let packetItems: PacketItem[];
   let people: { personId: string; firstName: string | null; lastName: string | null }[];
@@ -310,6 +329,7 @@ export async function composeWithLlm(input: LlmComposeInput): Promise<LlmCompose
       now: input.now,
       timeZone: input.timeZone,
       excludedConversationIds: new Set(settings['llm.excluded_conversation_ids']),
+      names,
     });
     packetItems = built.packetItems;
     people = eligible.flatMap((i) => i.people.map((p) => ({ personId: p.id, firstName: p.firstName, lastName: p.lastName })));
@@ -358,7 +378,7 @@ export async function composeWithLlm(input: LlmComposeInput): Promise<LlmCompose
       continue;
     }
     seen.add(out.n);
-    const issues = groundingIssues(out, { text: packetText, refIds: pi.refs });
+    const issues = groundingIssues(out, { text: packetText, refIds: pi.refs, ambiguousNames: names.ambiguousFirstNames });
     if (issues.length) {
       rejected++;
       continue;

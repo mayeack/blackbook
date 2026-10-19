@@ -5,7 +5,9 @@
  *   - headline 1–90 chars, body ≤240, ≤2 openers each 1–160 chars (the API doesn't enforce bounds);
  *   - every capitalized token, number and date in the copy appears in the packet text the model saw, or in the
  *     whitelist (weekday/month names and common sentence words) — so invented names, places and dates fail;
- *   - no URLs, emails, phone numbers, @handles, money amounts, or quotes longer than 6 words in headline/body.
+ *   - no URLs, emails, phone numbers, @handles, money amounts, or quotes longer than 6 words in headline/body;
+ *   - no ambiguous first name in headline/body (the owner's own, or one shared with someone the brief names by full
+ *     last name): those people go by token, which becomes the brief's unambiguous name locally.
  * Pure; exported for tests.
  */
 
@@ -22,6 +24,8 @@ export interface GroundingPacket {
   text: string;
   /** Ref ids the model may cite for this item. */
   refIds: ReadonlySet<string>;
+  /** First names that don't pin down one person in this brief (text.ts BriefNames.ambiguousFirstNames). */
+  ambiguousNames?: ReadonlySet<string>;
 }
 
 export const LIMITS = { headline: 90, body: 240, openers: 2, opener: 160, quoteWords: 6 } as const;
@@ -121,6 +125,11 @@ export function ungroundedTokens(s: string, vocab: { words: Set<string>; numbers
   return bad;
 }
 
+/** Whether `s` uses one of `names` as a word (possessive included): "Sam", "Sam's". */
+function usesName(s: string, names: ReadonlySet<string>): boolean {
+  return (s.match(WORD_RE) ?? []).some((w) => names.has(w) || names.has(w.replace(/['’]s$/u, '')));
+}
+
 /** Every reason this item's LLM copy can't be used (empty = grounded). */
 export function groundingIssues(out: ComposerItemOut, packet: GroundingPacket, whitelist: ReadonlySet<string> = DEFAULT_WHITELIST): string[] {
   const issues: string[] = [];
@@ -145,6 +154,8 @@ export function groundingIssues(out: ComposerItemOut, packet: GroundingPacket, w
   for (const [field, s, quotes] of fields) {
     if (!s) continue;
     issues.push(...safetyIssues(field, s, quotes));
+    // Openers are addressed to the person (a first name is right there); headline and body are read by the owner.
+    if ((field === 'headline' || field === 'body') && packet.ambiguousNames?.size && usesName(s, packet.ambiguousNames)) issues.push(`${field}: an ambiguous first name`);
     const bad = ungroundedTokens(s, vocab, whitelist);
     if (bad.length) issues.push(`${field}: ungrounded ${bad.length === 1 ? 'token' : 'tokens'} (${bad.length})`);
   }

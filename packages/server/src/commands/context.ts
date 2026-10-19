@@ -1,11 +1,13 @@
 /**
  * What a self-thread row is answering: its inline-reply target, the latest digest it can bind to (≤36 h), and
  * when the bot last texted (the 12 h free-text window). Plus the item list of a digest (digest_items and the
- * extra items `more` added), with the names a reply shows.
+ * extra items `more` added), with the names a reply shows ("Sam R.", or "Sam Rivera" where the short form reads as
+ * the owner's own or as another person on the list).
  */
 import { stripPartPrefix, outboundTextHash } from '../adapters/imessage/mapping';
 import type { DB } from '../db/connection';
-import { shortName } from './text';
+import { collisionAware, ownerNames } from '../identity/ownerNames';
+import { longName, shortName, type NameParts } from './text';
 
 const HOUR = 3_600_000;
 /** Bare numbers and commands bind to the most recent digest sent this long before the command. */
@@ -244,20 +246,28 @@ interface RawItem {
 const ITEM_COLS = `s.id AS suggestion_id, s.kind, s.status, s.person_id, s.related_person_id, s.circle_id, s.title, s.sensitive,
   s.is_wildcard, s.snoozed_until, s.score`;
 
-export function personLabel(db: DB, personId: string | null): string | null {
-  if (!personId) return null;
-  const p = db
-    .prepare(
-      `SELECT p.first_name, p.last_name, p.display_name FROM people p
-       WHERE p.id = coalesce((SELECT canonical_id FROM person_canon WHERE person_id = ?), ?)`,
-    )
-    .get(personId, personId) as { first_name: string | null; last_name: string | null; display_name: string } | undefined;
-  return p ? shortName(p) : null;
+/** The reply names of the rows' people (canonical): collision-aware across the rows and against the owner. */
+function personLabels(db: DB, rows: readonly RawItem[]): (personId: string | null) => string | null {
+  const get = db.prepare(
+    `SELECT p.id, p.first_name, p.last_name, p.display_name FROM people p
+     WHERE p.id = coalesce((SELECT canonical_id FROM person_canon WHERE person_id = ?), ?)`,
+  );
+  const people = new Map<string, NameParts & { id: string }>();
+  for (const id of rows.flatMap((r) => [r.person_id, r.related_person_id])) {
+    const p = id && !people.has(id) ? (get.get(id, id) as (NameParts & { id: string }) | undefined) : undefined;
+    if (id && p) people.set(id, p);
+  }
+  const owner = ownerNames(db).map((o) => shortName({ first_name: o.firstName, last_name: o.lastName, display_name: o.displayName }));
+  const named = collisionAware([...people.values()], owner, { short: shortName, long: longName });
+  return (personId) => {
+    const p = personId ? people.get(personId) : undefined;
+    return p ? named.of(p) : null;
+  };
 }
 
-function toItem(db: DB, r: RawItem): ItemRow {
-  const a = personLabel(db, r.person_id);
-  const b = personLabel(db, r.related_person_id);
+function toItem(db: DB, r: RawItem, label: (personId: string | null) => string | null): ItemRow {
+  const a = label(r.person_id);
+  const b = label(r.related_person_id);
   const circle = r.circle_id ? ((db.prepare('SELECT name FROM circles WHERE id = ?').pluck().get(r.circle_id) as string | undefined) ?? null) : null;
   return {
     ordinal: r.ordinal,
@@ -287,7 +297,8 @@ export function digestItems(db: DB, digestId: string): ItemRow[] {
        ORDER BY 1`,
     )
     .all({ d: digestId }) as RawItem[];
-  return rows.map((r) => toItem(db, r));
+  const label = personLabels(db, rows);
+  return rows.map((r) => toItem(db, r, label));
 }
 
 const hasTable = (db: DB, name: string): boolean =>
@@ -322,5 +333,6 @@ export function moreCandidates(db: DB, digestId: string, now: number, limit: num
        LIMIT @limit`,
     )
     .all({ d: digestId, now, limit, muted: JSON.stringify(mutedKinds) }) as RawItem[];
-  return rows.map((r) => toItem(db, r));
+  const label = personLabels(db, rows);
+  return rows.map((r) => toItem(db, r, label));
 }

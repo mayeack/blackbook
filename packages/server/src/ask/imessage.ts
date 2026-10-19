@@ -8,12 +8,15 @@
  * Rules (enforced here, whatever the model wrote):
  *   - effort low, plain text; citations become footnotes ("¹ Sam · iMessage Oct 3"), at most 3; person
  *     citations are dropped (the names are in the text);
+ *   - a list of people (engine `list`) is one line per person with the details on it and no footnotes at all
+ *     (they would only repeat the lines); when it doesn't fit, whole lines go and "+N more" says how many;
  *   - no sensitive content: sentences touching health, sex, money, breakups, life events and the like are
  *     removed (the tools never return sensitive facts in the first place);
  *   - no phone numbers or emails (masked), and the only link is yeackbot.com (the full answer); every other URL
  *     is reduced to its first label;
  *   - names are first name + last initial.
  */
+import type { AskPeopleList } from '@yb/shared';
 import { BOT_MARKER, checkOutboundText, MAX_ANSWER_CHARS, stripIpLinks } from '../delivery/types';
 import type { DB } from '../db/connection';
 import type { Logger } from '../ops/logger';
@@ -67,10 +70,31 @@ function truncate(s: string, max: number): string {
   return `${(sp > max * 0.5 ? cut.slice(0, sp) : cut).trim()}…`;
 }
 
+/** A people list keeps whole lines: as many as fit, then "+N more" for the people left out. */
+function fitLines(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const lines = s.split('\n');
+  const out: string[] = [];
+  let used = 0;
+  for (const l of lines) {
+    const add = (out.length ? 1 : 0) + l.length;
+    if (used + add > max - 12) break;
+    out.push(l);
+    used += add;
+  }
+  if (!out.length) return truncate(s, max);
+  const left = lines.slice(out.length).filter((l) => l.startsWith('• ')).length;
+  return left ? `${out.join('\n')}\n+${left} more` : out.join('\n');
+}
+
 const clipLabel = (s: string, n = 44) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Formats an engine answer as the iMessage reply body (see the module comment for the rules). */
-export function formatImessageAnswer(r: Pick<AskEngineAnswer, 'answer' | 'citations' | 'conversationId'>, max = IMESSAGE_ANSWER_CHARS): string {
+export function formatImessageAnswer(
+  r: Pick<AskEngineAnswer, 'answer' | 'citations' | 'conversationId'> & { list?: AskPeopleList | null },
+  max = IMESSAGE_ANSWER_CHARS,
+): string {
+  const isList = !!r.list?.rows.length;
   const labels = new Map(r.citations.map((c) => [c.ref, c]));
   const notes: string[] = [];
   const numberOf = new Map<string, number>();
@@ -82,7 +106,7 @@ export function formatImessageAnswer(r: Pick<AskEngineAnswer, 'answer' | 'citati
     .trim();
   body = body.replace(/ ?\[(m:[0-9a-z]{1,10}|[FEP][0-9a-z]{1,10})\]/g, (_m, ref: string) => {
     const c = labels.get(ref);
-    if (!c || c.kind === 'person' || isSensitiveSentence(c.label)) return '';
+    if (isList || !c || c.kind === 'person' || isSensitiveSentence(c.label)) return '';
     let n = numberOf.get(ref);
     if (n === undefined) {
       if (notes.length >= MAX_FOOTNOTES) return '';
@@ -109,7 +133,7 @@ export function formatImessageAnswer(r: Pick<AskEngineAnswer, 'answer' | 'citati
     foot = footer();
   }
   const room = max - (foot ? foot.length + 1 : 0);
-  let text = `${truncate(body, Math.max(40, room))}${foot ? `\n${foot}` : ''}`;
+  let text = `${(isList ? fitLines : truncate)(body, Math.max(40, room))}${foot ? `\n${foot}` : ''}`;
   if (text.length > max) text = truncate(text, max);
   // Belt and braces: what the sender would refuse never leaves here.
   if (checkOutboundText(`${BOT_MARKER} ${text}`).length) {

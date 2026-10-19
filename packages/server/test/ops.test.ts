@@ -128,6 +128,11 @@ describe('logger', () => {
     expect(JSON.stringify(rec)).not.toMatch(/Sam Quill|secret message|555/);
   });
 
+  it('keeps an upstream request id only in its req_… shape', () => {
+    expect(sanitize('warn', 'llm_call_failed', { request_id: 'req_011CSynthetic' }).request_id).toBe('req_011CSynthetic');
+    for (const bad of ['sam@example.com', 'req_with space', 'Sam Quill']) expect(sanitize('warn', 'llm_call_failed', { request_id: bad })).not.toHaveProperty('request_id');
+  });
+
   it('writes JSONL files and prunes old ones', () => {
     const dir = tmp();
     const mem = memorySink();
