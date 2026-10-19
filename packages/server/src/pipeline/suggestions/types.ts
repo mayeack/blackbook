@@ -103,6 +103,7 @@ export const KIND_POLICY: Readonly<Record<SuggestionKind, KindPolicy>> = {
   pre_event_brief: { weight: 1.0, cooldownDays: null, maxShowings: 1, actWindowMs: 72 * H },
   commitment_due: { weight: 0.95, cooldownDays: 3, maxShowings: null, actWindowMs: 72 * H },
   event_followup: { weight: 0.85, cooldownDays: null, maxShowings: 1, actWindowMs: 7 * D },
+  party_invite: { weight: 0.8, cooldownDays: null, maxShowings: 1, actWindowMs: 7 * D },
   fading: { weight: 0.8, cooldownDays: 14, maxShowings: null, actWindowMs: 7 * D },
   travel_overlap: { weight: 0.8, cooldownDays: null, maxShowings: 1, actWindowMs: 7 * D },
   cooling: { weight: 0.5, cooldownDays: 21, maxShowings: null, actWindowMs: 7 * D },
@@ -114,7 +115,7 @@ export const KIND_POLICY: Readonly<Record<SuggestionKind, KindPolicy>> = {
 };
 
 /** Kinds where a Party invites person (pipeline/circles/preferences.ts) ranks higher: SELECTION.partyBoost. */
-export const PARTY_BOOST_KINDS: ReadonlySet<SuggestionKind> = new Set<SuggestionKind>(['pre_event_brief', 'event_followup', 'intro']);
+export const PARTY_BOOST_KINDS: ReadonlySet<SuggestionKind> = new Set<SuggestionKind>(['pre_event_brief', 'event_followup', 'party_invite', 'intro']);
 
 /** Selection rules (intelligence §5, PLAN): */
 export const SELECTION = {
@@ -131,7 +132,7 @@ export const SELECTION = {
   fatigueFactor: 0.5,
   fatigueDays: 3,
   priorityBoost: 0.3,
-  /** ×1.3 for a party / event / intro item about someone in the Party invites circle (set by text). */
+  /** ×1.3 for a party / event / invite / intro item about someone in the Party invites circle (set by text). */
   partyBoost: 0.3,
   /** Forced in: pre-event within 36 h, travel within 48 h. */
   preEventForceMs: 36 * H,
