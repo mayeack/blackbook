@@ -382,7 +382,7 @@ describe('commands: gating keeps notes-to-self private', () => {
     await w.run({ now: at(62 + 12 * 60 + 7) });
     expect(askMock.askForImessage.mock.calls.map((c) => c[0])).toEqual(['who do I know in Austin', 'who do I know in Denver']);
     expect(w.command(late.commandId).status).toBe('ignored');
-    // Without the LLM, plain notes in the window stay silent (only explicitly addressed text gets "Didn't get that").
+    // Without the LLM, plain notes in the window stay silent (only explicitly addressed text gets "Sorry, I didn't get that").
     expect(w.command(notes.commandId)).toMatchObject({ status: 'ignored', response_outbound_id: null });
   });
 
@@ -641,8 +641,26 @@ describe('commands: log', () => {
     const note = w.say('remember to water plants', at(1));
     w.say('anyone around Austin', at(2));
     await w.run({ now: at(3) });
+    expect(llm.calls[0]!.userText).toContain('### ADDRESSED\nno');
     expect(w.command(note.commandId)).toMatchObject({ status: 'ignored', response_outbound_id: null });
     expect(askMock.askForImessage.mock.calls[0]![0]).toBe('Who lives in Austin?');
+  });
+
+  it('text addressed to the bot is never dropped as a note: yb and inline replies get "Sorry, I didn\'t get that"', async () => {
+    const llm = new FakeLlmClient().on('intent', { json: { intent: 'note', command: null, log: null, question: null } });
+    const w = commandsWorld({ llm });
+    const bot = w.botSays('✓ done', at(-13 * 60)); // outside the 12 h window: only yb or an inline reply reaches the bot
+    const yb = w.say('Yb prioritize inviting this person to parties, is a great DJ', at(0));
+    const inline = w.say('put them on the party list', at(1), { replyTo: bot });
+    await w.run({ now: at(2) });
+    expect(llm.calls).toHaveLength(2);
+    for (const call of llm.calls) expect(call.userText).toContain('### ADDRESSED\nyes');
+    for (const c of [yb, inline]) {
+      const row = w.command(c.commandId);
+      expect(row).toMatchObject({ status: 'handled', intent: 'note' });
+      expect(row.response_outbound_id).not.toBeNull();
+    }
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Sorry, I didn't get that. Text "help" to see what I can do.`);
   });
 
   it('people excluded from the AI are never sent: the text is logged deterministically', async () => {

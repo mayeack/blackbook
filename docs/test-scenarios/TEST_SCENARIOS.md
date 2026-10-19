@@ -737,3 +737,65 @@ just "done", "skip", "snooze 2w", "why" or "draft" acts on that item; `more` sen
 open items asks "Which one? Reply "done 1", or reply to that suggestion's text with just "done"."; "why?" as an
 inline reply explains that item.
 **Platforms**: server + web; the inline-reply binding needs a real iPhone/Mac Messages reply to verify end to end.
+
+---
+
+## Ask works again + "who do I know in …" answers with people only (2026-10-18)
+
+**What changed**: every Ask request (web and iMessage `yb …?`) failed with HTTP 400 because the six strict tool schemas
+had 24 nullable (anyOf) parameters and the API allows at most 16 (it also caps optional parameters at 24). Filters are
+now optional properties and only the result caps stay required + nullable (4 union, 20 optional). The LLM client
+refuses an over-limit tool set locally (`bad_request_shape`). The Ask system prompt now says "who" questions are
+answered with people, never events, reservations, flights or venues. The plain-search fallback (no Claude) lists only
+people for "who …" questions and no longer repeats a city that equals the person's top fact ("London · London¹").
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/llm/models.test.ts`: the old 24-union shape is flagged; the Ask tools fit both limits.
+3. `test/ask/tools.test.ts`: omitted filters are accepted. `test/ask/engine.test.ts`: the "who" fallback lists no events or
+   message quotes, no "Austin · Austin" over iMessage; non-"who" questions still show events.
+4. Claude ran the real engine against a copy of the production DB with the live API: "who do I know in London" →
+   2 tool calls, $0.0007, an answer naming only the two people who live in London.
+
+### Scenario B — iMessage (owner, after deploy)
+1. Text yourself `yb who do I know in London`.
+2. **Expected**: within ~30 s a reply that names people (no "Claude isn't reachable" lead), with at most 3 footnotes and a
+   yeackbot.com/ask link. No flights, restaurant reservations or event titles.
+
+### Scenario C — Web Ask (owner, after deploy)
+1. On yeackbot.com → Ask, ask "Who do I know in Austin?" (or any city you have friends in).
+2. **Expected**: a streamed answer listing people with citations; the footer shows lookups and a cost under a cent.
+3. Ask "What did we do in London?". **Expected**: events can appear here (only "who" questions are people-only).
+
+**Edge cases**: with Claude off or the budget spent, "who do I know in X" shows "Here’s who a plain search found:" and
+only people; nobody found → "A plain search found nobody for that." A future tool parameter that pushes the schemas
+over 16 union / 24 optional parameters fails `test/llm/models.test.ts` instead of 400-ing in production.
+**Platforms**: server (iMessage + web). Not yet deployed: production still runs the old code until merge + restart.
+
+---
+
+## Two-way texting — addressed texts are never silently dropped (2026-10-18)
+
+**What changed**: a self-thread text addressed to the bot ("yb …", or an inline reply to a yeackbot text) that the
+intent parser classified as `note` used to be ignored with no reply. The parser now gets an `ADDRESSED: yes|no`
+section supplied by the app (kept separate from the untrusted note) and is told never to pick `note` when it's yes;
+if it still does, the executor replies "Didn't get that · try help" instead of staying silent. Plain notes to self
+(not addressed, outside the window rules) stay silent as before.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/commands/executor.test.ts`: "text addressed to the bot is never dropped as a note" (yb + inline reply, both
+   get a reply, packet carries `### ADDRESSED\nyes`); the existing window test asserts `### ADDRESSED\nno` and silence.
+
+### Scenario B — Live text (owner)
+1. In the note-to-self thread, text `yb prioritize inviting this person to parties, is a great DJ` (no screenshot needed).
+2. **Expected**: within ~20 s a 🅨 reply arrives, either "Didn't get that · try help" or, if the parser reads it as
+   a fact, "Couldn't find this person · …". Never silence. The `inbound_commands` row is `handled` with a non-null
+   `response_outbound_id`.
+3. Text `pick up dry cleaning` with no yb and no bot text in the last 12 h.
+4. **Expected**: no reply (status `ignored`, reason `not_addressed`).
+
+**Edge cases**: an inline reply to an old bot text (>12 h) that reads like a note still gets a reply; `log:` texts
+are always sent with ADDRESSED yes.
+**Platforms**: server. Real classification needs the owner's AI key; actually acting on screenshots and party
+preferences is separate work (its own session).
