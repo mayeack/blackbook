@@ -2,7 +2,8 @@
  * Implicit reward attribution (job 'rewards', hourly; PLAN "Rewards"):
  *   - acted = 1: an outbound message from me (1:1, or a small group ≤7 with them), a call, an occasion/meeting
  *     together, or a `log:` entry with one of the item's people, after delivery and within the kind's window
- *     (72 h for reply debt / commitments / pre-event, 7 days otherwise);
+ *     (72 h for reply debt / commitments / pre-event, 7 days otherwise); for a party invite, also one of its people
+ *     joining the hosted event's guest list (a Partiful invite never shows up as a message);
  *   - counterfactual guard: if I was already messaging them in the 24 h before delivery, the action gets no credit
  *     (the item still closes as done, the learner learns nothing);
  *   - ignored = 0 at weight 0.5 when the window ends with no action and no other outcome (an opened item keeps its
@@ -18,6 +19,7 @@ import { tx } from '../../db/tx';
 import { nullLogger, type Logger } from '../../ops/logger';
 import { readSetting } from '../../settings/registry';
 import { uuidv7 } from '@yb/shared';
+import { occasionChain } from '../occasions/build';
 import { ATTENDING } from './gen/common';
 import { armsFor, effectiveOutcome, recordIgnore, recordOutcome, resetIgnores, type ArmRef } from './learner';
 import { PeopleCache } from './people';
@@ -30,7 +32,7 @@ const SMALL_GROUP = 7;
 
 export interface Action {
   at: number;
-  via: 'message' | 'interaction' | 'attendance';
+  via: 'message' | 'interaction' | 'attendance' | 'guest_list';
 }
 
 /** Conversations where a message from me reaches the person: 1:1, or a small group they're in. */
@@ -90,6 +92,21 @@ export function firstAction(db: DB, persons: readonly string[], from: number, to
     .get(json, from, to) as number | null;
   if (occ !== null) options.push({ at: occ, via: 'attendance' });
   return options.sort((a, b) => a.at - b.at)[0] ?? null;
+}
+
+/** party_invite: the first time one of `persons` joined the hosted event's guest list (any live status) in (from, to]. */
+export function guestListAction(db: DB, r: Pick<SuggestionRow, 'occasion_id' | 'event_id'>, persons: readonly string[], from: number, to: number): Action | null {
+  if (!persons.length || to <= from || (!r.occasion_id && !r.event_id)) return null;
+  const at = db
+    .prepare(
+      `SELECT min(a.created_at) FROM event_attendees a JOIN person_canon pc ON pc.person_id = a.person_id
+       WHERE pc.canonical_id IN (SELECT value FROM json_each(@persons))
+         AND (a.occasion_id IN (SELECT value FROM json_each(@chain)) OR (@event IS NOT NULL AND a.event_id = @event))
+         AND a.status NOT IN ('rejected','withdrawn') AND a.created_at > @from AND a.created_at <= @to`,
+    )
+    .pluck()
+    .get({ persons: JSON.stringify(persons), chain: JSON.stringify(r.occasion_id ? occasionChain(db, r.occasion_id) : []), event: r.event_id, from, to }) as number | null;
+  return at === null ? null : { at, via: 'guest_list' };
 }
 
 /** Counterfactual guard: I was already messaging them in [from, to). */
@@ -217,7 +234,10 @@ export async function attributeRewards(db: DB, o: { now?: number; log?: Logger; 
     if (start > now) continue;
     const end = start + KIND_POLICY[r.kind].actWindowMs;
     const persons = personIdsOf(r).length ? personIdsOf(r) : r.circle_id ? circleMembers(db, r.circle_id) : [];
-    const act = firstAction(db, persons, start, Math.min(now, end));
+    const act =
+      [firstAction(db, persons, start, Math.min(now, end)), r.kind === 'party_invite' ? guestListAction(db, r, persons, start, Math.min(now, end)) : null]
+        .filter((a): a is Action => a !== null)
+        .sort((a, b) => a.at - b.at)[0] ?? null;
     if (act) {
       const guarded = wasActive(db, persons, start - LEARNER.counterfactualMs, start);
       tx(db, () => {

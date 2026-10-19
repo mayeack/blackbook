@@ -999,6 +999,90 @@ with no last name stays the first name alone; the push notification body (first 
 changed; Ask answers and log/note command acks are not changed by this work.
 **Platforms**: server only. Not checked against a live brief or live Haiku output.
 
+## 2026-10-18 — "Who to invite" suggestions for parties you host (party_invite)
+
+New suggestion kind `party_invite` (generator `intel/invites.ts`, migration **023 party_invite** rebuilds
+`suggestions` to widen its kind CHECK). For a party or event the owner hosts 2–14 days out — a Partiful event where
+he is host / co-host, or a social calendar occasion he organizes (his own calendar copy, not "Kit's …"; a hosting title
+like "at mine" / "my birthday" / "housewarming", or calendar invites he sent: ≥1 for a party-like title, ≥3 for
+anything social) — one item suggests up to 5 people not yet on the guest list: **Party invites** circle members
+first (strongest tie first), then strong ties (T ≥ 40) who came to ≥ 2 of his social happenings in the last year or
+to one he hosted. Anyone with a guest-list row in any status (going, maybe, invited, declined, waitlist, rejected), a
+calendar invite or an occasion-candidate match is left out, as are hidden, roster-only and service people, people
+muted for the kind, and people resting after ignored suggestions. Items about Party invites people score ×1.3.
+Acting = texting one of them, or one of them joining the guest list, within 7 days.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1397 tests pass, 905 files clean.
+2. `packages/server/test/intel/invites.test.ts` (hosted-event detection, ordering, every exclusion, the stage storing
+   boosted items, guest-list reward, copy), `test/pipeline/suggestions/migration.test.ts` (023 keeps rows, columns,
+   indexes and foreign keys; new kind accepted, unknown kinds refused), `test/delivery/template.test.ts` (brief copy).
+
+### Scenario B — A Partiful party you host (owner, after deploy)
+**Setup**: deploy (migration 023 runs on start), at least one person in Circles → Party invites, and a Partiful event
+you host 2–14 days out that has synced.
+1. Next morning's brief (or yeackbot.com/today after the nightly run). **Expected**: a text like
+   `Who to invite to <event title>` / `You're hosting on Sat. Sam R., Priya S. and Lee K. aren't on the guest list
+   yet. Sam is on your Party invites list.`
+2. Check the people: Party invites members come first; nobody already on the Partiful guest list (including people
+   who declined or were only invited) is named.
+3. Reply `why` to that text. **Expected**: "You're hosting in N days and … aren't on the guest list yet. …" plus up
+   to four reasons (e.g. "Starts in", "Going so far"); the web's "Why this?" lists all of them, including
+   "From Party invites" and "In Party invites ×1.3".
+4. Invite one of them on Partiful. **Expected**: after the next Partiful sync + hourly rewards job, the item is done
+   (actedVia `guest_list`) and the learner credits the kind.
+
+### Scenario C — A calendar event you organize
+1. Create a calendar event "Game night at mine" 5 days out on your own Google calendar (no invites needed), or
+   "BBQ" with one invitee. **Expected** after the nightly run: a "Who to invite" item for it; the invitee is not named.
+2. Create "Dinner w/ <one friend>" with only that friend invited, or put "<Friend>'s birthday party" on your calendar.
+   **Expected**: no invite suggestion for either.
+
+**Edge cases**: event 0–1 days or ≥15 days out → nothing; everyone eligible already on the list → no item; a
+cancelled Partiful event → nothing; muting the kind (Settings → learner muted kinds) stops it; a Party invites member
+who is **roster-only** (e.g. added from a screenshot of someone you've never texted) is not suggested until they
+become an active contact; shown once per event.
+**Platforms**: server + web label ("Invite"). Not deployed; not checked against the live database.
+
+---
+
+## Owner's own records never become suggestions; owner-confirmed merge into me (2026-10-18)
+
+**What changed**: a user merge (`method: 'user'`) may fold a person record into the `me` person (agents still can't;
+`me` never merges into anyone). `identity/self.ts` defines "my records": `me`, everyone merged into it, and any
+person still holding one of my handles (`settings.self_handles` plus the phones/emails on me; Gmail aliases by
+dots/`+tag` count). Tie stats, the suggestion chokepoint (`normalizeCandidate`), memories, circle activity and
+detection, intel attendees, intro candidates and trip/location matching all skip them. The nightly matcher first
+runs a self-link pass (`identity/selfLink.ts`): an agent-made duplicate of me moves to me whole and is retired; on an
+established record only my handle moves. An unseen handle of mine from any source attaches to me, and a Contacts
+card counts Gmail aliases toward "two of my handles".
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii`.
+2. `test/identity/self.test.ts` (self set incl. aliases, shared and unlinked handles; self-link absorb vs. handle-only
+   move; undo blocks the handle from me; new keys of mine; Contacts card), `test/pipeline/selfExclusion.test.ts`
+   (ties, suggestions stage, memories, circle activity, intel), `test/merge.test.ts` (user-only merge into me, undo),
+   `test/pipeline/circles/circles.test.ts` (no circle membership or suggested additions for a record of mine).
+
+### Scenario B — Undo an owner merge into me
+**Setup**: a person record that was merged into you (Activity shows "Merged … into you").
+1. Activity → that batch → Undo.
+2. **Expected**: the record is back as its own person in People, and a do-not-merge pair is written so it isn't
+   folded in again automatically.
+
+### Scenario C — A stray handle of mine (after deploy, owner)
+1. Have a contact record carry a Gmail `+tag` alias of your own address (any established record).
+2. Wait for the nightly `identity-match` run (or `npm run yb -- run-job identity-match`).
+3. **Expected**: Activity shows "Linked o•••@… to you"; the alias is on you, the rest of the record stays put, and the
+   record gets no tie stats or digest items while it still holds a handle of yours. Undoing that batch moves the
+   alias back and it stays there on later nights.
+
+**Edge cases**: a handle marked shared, or one you unlinked from yourself (undo), is never treated as yours; `+tag`
+aliases outside Gmail are not assumed to be yours; an agent (deterministic/probabilistic/LLM) merge into me is
+refused with `me_mismatch`.
+**Platforms**: server only. Verified against a read-only snapshot of the live DB: 3 records of mine, 0 stray
+handles, self detection ~10 ms. The production merge was done with the journaled path; the code itself is not deployed yet.
+
 ## 2026-10-18 — Unambiguous names in Ask answers over iMessage and in log/note/screenshot acks
 
 **What changed**: two more places switch "First L." to first name + full last name when the short form reads the same

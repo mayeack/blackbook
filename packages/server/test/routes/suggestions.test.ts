@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { LearnerState, SuggestionFeedbackResult, SuggestionList, WhyThis } from '@yb/shared';
+import { LearnerState, SUGGESTION_KINDS, SuggestionFeedbackResult, SuggestionList, WhyThis } from '@yb/shared';
 import { createApp } from '../../src/http/app';
 import { generators as defaultGenerators } from '../../src/pipeline/suggestions/generators';
 import { recordIgnore } from '../../src/pipeline/suggestions/learner';
@@ -88,7 +88,7 @@ describe('learner routes', () => {
     const s = LearnerState.parse(res.body);
     const debt = s.kinds.find((k) => k.kind === 'reply_debt')!;
     expect(debt).toMatchObject({ alpha: 3, beta: 2, propensity: 0.6, shown30d: 1, acted30d: 1, trend: 'flat', muted: false });
-    expect(s.kinds).toHaveLength(12);
+    expect(s.kinds.map((k) => k.kind)).toEqual([...SUGGESTION_KINDS]);
     expect(s.wildcard).toMatchObject({ epsilon: 0.2, shown: 0, hitRate: null });
     expect(s.mutedPeople).toEqual([{ person: expect.objectContaining({ id: fading.id }), kinds: ['fading'], since: expect.any(Number) }]);
     expect(s.cooledPeople.map((c) => c.person.id)).toEqual([sam.id]);

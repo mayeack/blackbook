@@ -91,4 +91,35 @@ describe('template copy', () => {
       if (x.body) expect(x.body).not.toMatch(BROKEN);
     }
   });
+
+  it('party invites: whom to invite to the event you host, naming who is on the Party invites list', () => {
+    const invite = (people: string[], signals: Record<string, unknown>, occasionId?: string) => {
+      const id = seedSuggestion(w.db, { kind: 'party_invite', personId: people[0], occasionId, signals });
+      w.db.prepare('UPDATE suggestions SET person_ids = ? WHERE id = ?').run(JSON.stringify(people), id);
+      return id;
+    };
+    const game = occasion('Game night!', zoned('2026-10-17', '19:00')); // Sat
+    w.db.prepare(`INSERT INTO circles (id, name, kind, signature, status, created_at, updated_at) VALUES ('pi', 'Party invites', 'user', 'pref:party_invites', 'active', ?, ?)`).run(NOW, NOW);
+    w.db.prepare(`INSERT INTO circle_members (circle_id, person_id, origin, excluded, created_at, updated_at) VALUES ('pi', ?, 'user', 0, ?, ?)`).run(w.ava, NOW, NOW);
+    const three = copyOf(invite([w.ava, w.ben, w.cleo], { daysOut: 3, partyInvites: 1 }, game));
+    expect(three).toEqual({
+      headline: 'Who to invite to Game night',
+      body: "You're hosting on Sat. Ava Q., Ben O. and Cleo M. aren't on the guest list yet. Ava is on your Party invites list.",
+      openers: [],
+    });
+    expect(copyOf(invite([w.ava], { daysOut: 3, partyInvites: 1 }, game)).body).toBe("You're hosting on Sat. Ava Q. isn't on the guest list yet. They're on your Party invites list.");
+    expect(copyOf(invite([w.ben, w.cleo], { startsAt: zoned('2026-10-24', '20:00') }))).toMatchObject({
+      headline: 'Who to invite on Oct 24',
+      body: "You're hosting on Oct 24. Ben O. and Cleo M. aren't on the guest list yet.",
+    });
+    // Two Avas in one item: the Party invites one is named in full, not as a bare "Ava".
+    const ava2 = seedPerson(w.db, { display_name: 'Ava Lindqvist', first_name: 'Ava', last_name: 'Lindqvist' });
+    expect(copyOf(invite([w.ava, ava2], { daysOut: 3, partyInvites: 1 }, game)).body).toBe(
+      "You're hosting on Sat. Ava Q. and Ava L. aren't on the guest list yet. Ava Q. is on your Party invites list.",
+    );
+    for (const x of [three]) {
+      expect(x.headline).not.toMatch(BROKEN);
+      expect(x.body).not.toMatch(BROKEN);
+    }
+  });
 });
