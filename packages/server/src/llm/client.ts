@@ -33,6 +33,7 @@
  */
 import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
+import type { z } from 'zod';
 import { tx } from '../db/tx';
 import type { DB } from '../db/connection';
 import { nullLogger, type Logger } from '../ops/logger';
@@ -324,9 +325,118 @@ export function requestParams(p: RouteParams, i: RequestShapeInput): Record<stri
 
 const SAMPLING_KEYS = ['temperature', 'top_p', 'top_k'] as const;
 
+/** Strict tool schemas, summed over all tools in a request (above either the API answers 400). */
+export const STRICT_MAX_UNION_PARAMS = 16;
+export const STRICT_MAX_OPTIONAL_PARAMS = 24;
+
+/**
+ * The size of the grammar the API compiles from a request's strict schemas (output_config.format plus every strict
+ * tool), in schema nodes: one per object, per property and per array, local $refs inlined. Above an unpublished
+ * size the API answers 400 "The compiled grammar is too large…", even within the documented union/optional limits.
+ * Measured on Haiku 5.5 on 2026-10-18 (all-required schemas): a flat object passed with 70 string properties
+ * and failed with 80; nested shapes passed at up to 71 nodes and failed from 72; nullable (string|null) fields and
+ * enums cost well under a node each. The one-request extraction schema had 86 nodes, so every extraction request
+ * was refused. The budget keeps a margin under the smallest failing size; scripts/llm-schema-smoke.mjs re-measures.
+ */
+export const GRAMMAR_MAX_NODES = 64;
+
+interface StrictSchema {
+  type?: unknown;
+  properties?: Record<string, unknown>;
+  required?: string[];
+  items?: unknown;
+  anyOf?: unknown[];
+  $ref?: string;
+  $defs?: Record<string, unknown>;
+}
+
+/** Visits each schema with its local $refs ("#/$defs/…") resolved; false = a reference cycle (never bounded). */
+function walkStrict(
+  schemas: readonly unknown[],
+  on: { object?: () => void; property?: (name: string, p: StrictSchema, parent: StrictSchema) => void; array?: () => void },
+): boolean {
+  for (const root of schemas) {
+    const defs = (root as StrictSchema | null)?.$defs ?? {};
+    const resolve = (s: unknown): StrictSchema => {
+      const o = (s && typeof s === 'object' ? s : {}) as StrictSchema;
+      const m = typeof o.$ref === 'string' ? /^#\/\$defs\/(.+)$/.exec(o.$ref) : null;
+      return m ? ((defs[m[1]!] as StrictSchema | undefined) ?? {}) : o;
+    };
+    const visit = (s: unknown, depth: number): boolean => {
+      if (depth > 32) return false;
+      const o = resolve(s);
+      for (const a of o.anyOf ?? []) if (!visit(a, depth + 1)) return false;
+      if (o.type === 'object' || o.properties) {
+        on.object?.();
+        for (const [k, p] of Object.entries(o.properties ?? {})) {
+          on.property?.(k, resolve(p), o);
+          if (!visit(p, depth + 1)) return false;
+        }
+      }
+      if (o.type === 'array' || o.items) {
+        on.array?.();
+        if (o.items !== undefined && !visit(o.items, depth + 1)) return false;
+      }
+      return true;
+    };
+    if (!visit(root, 0)) return false;
+  }
+  return true;
+}
+
+/** grammar nodes (see GRAMMAR_MAX_NODES) of a set of strict schemas; Infinity for a recursive schema. */
+export function grammarNodes(schemas: readonly unknown[]): number {
+  let n = 0;
+  const bump = () => void n++;
+  return walkStrict(schemas, { object: bump, property: bump, array: bump }) ? n : Number.POSITIVE_INFINITY;
+}
+
+/** Parameters with a union type (anyOf / a type array) and optional ones (not in `required`), at any depth. */
+export function strictParamCounts(schemas: readonly unknown[]): { union: number; optional: number } {
+  const n = { union: 0, optional: 0 };
+  walkStrict(schemas, {
+    property: (k, p, parent) => {
+      if (p.anyOf || Array.isArray(p.type)) n.union++;
+      if (!(parent.required ?? []).includes(k)) n.optional++;
+    },
+  });
+  return n;
+}
+
+/** Why a set of strict tools would be refused by the API's schema compiler; [] = fine. */
+export function strictSchemaIssues(tools: readonly { input_schema?: unknown; strict?: boolean }[]): string[] {
+  const n = strictParamCounts(tools.filter((t) => t.strict).map((t) => t.input_schema));
+  const issues: string[] = [];
+  if (n.union > STRICT_MAX_UNION_PARAMS) issues.push(`${n.union} union-typed tool parameters (max ${STRICT_MAX_UNION_PARAMS})`);
+  if (n.optional > STRICT_MAX_OPTIONAL_PARAMS) issues.push(`${n.optional} optional tool parameters (max ${STRICT_MAX_OPTIONAL_PARAMS})`);
+  return issues;
+}
+
+/**
+ * Why a body's strict schemas (output format + strict tools, which the API compiles into one grammar) would be
+ * refused: over GRAMMAR_MAX_NODES, or, with an output format, over the union/optional limits counted across both
+ * (without one, strictSchemaIssues reports the tools alone). [] = fine.
+ */
+export function grammarIssues(body: Record<string, unknown>): string[] {
+  const tools = Array.isArray(body.tools) ? (body.tools as { input_schema?: unknown; strict?: boolean }[]) : [];
+  const format = (body.output_config as { format?: { schema?: unknown } } | undefined)?.format?.schema;
+  const strict = tools.filter((t) => t.strict).map((t) => t.input_schema);
+  const issues = format === undefined ? strictSchemaIssues(tools) : [];
+  const schemas = format === undefined ? strict : [format, ...strict];
+  const nodes = grammarNodes(schemas);
+  if (nodes > GRAMMAR_MAX_NODES) issues.push(`${nodes} schema nodes in the strict schemas (max ${GRAMMAR_MAX_NODES}: the compiled grammar would be too large)`);
+  if (format !== undefined) {
+    const n = strictParamCounts(schemas);
+    if (n.union > STRICT_MAX_UNION_PARAMS) issues.push(`${n.union} union-typed parameters in the strict schemas (max ${STRICT_MAX_UNION_PARAMS})`);
+    if (n.optional > STRICT_MAX_OPTIONAL_PARAMS) issues.push(`${n.optional} optional parameters in the strict schemas (max ${STRICT_MAX_OPTIONAL_PARAMS})`);
+  }
+  return issues;
+}
+
 /** Why a body must not be sent (each would be a 400 or a policy breach on Haiku 5.5); [] = fine. */
 export function requestIssues(body: Record<string, unknown>): string[] {
   const issues: string[] = [];
+  issues.push(...grammarIssues(body));
   for (const k of SAMPLING_KEYS) if (k in body) issues.push(`sampling parameter ${k}`);
   if (!isAllowedModel(body.model)) issues.push('model not in the allowlist');
   const messages = (body.messages ?? []) as { role?: string }[];
@@ -359,6 +469,93 @@ function shapeGate(body: Record<string, unknown>, log: Logger, job: string): Llm
 
 // ---------------------------------------------------------------------------------------------- the client
 
+/** THE SDK instance: built on egressFetch and nothing else (test/llm/entryPoint.test.ts). */
+function buildSdk(o: { apiKey: string; fetch?: typeof fetch; maxRetries?: number; log: Logger }): Anthropic {
+  return new Anthropic({
+    apiKey: o.apiKey,
+    baseURL: 'https://api.anthropic.com',
+    fetch: egressFetch({
+      fetch: o.fetch ?? globalThis.fetch,
+      onBlocked: (e) => o.log.warn('llm_egress_blocked', { counts: Object.fromEntries(e.findings.map((f) => [f.kind, f.count])) }),
+    }),
+    maxRetries: o.maxRetries ?? 2,
+    logLevel: 'off',
+  });
+}
+
+export interface SchemaSmokeCase {
+  name: string;
+  route: LlmRoute;
+  /** A structured-output schema (output_config.format) … */
+  schema?: z.ZodType;
+  /** … and/or strict tools, compiled into the same grammar. */
+  tools?: readonly LlmTool[];
+}
+
+export interface SchemaSmokeResult {
+  name: string;
+  model: string;
+  nodes: number;
+  /** HTTP status; 'local' when requestIssues refused the body; 'not_sent' without an API key (counts only). */
+  status: number | 'local' | 'not_sent';
+  /** stop_reason on 200; the API's error text otherwise (or the local issues). */
+  detail: string;
+}
+
+export const SMOKE_SYSTEM = 'You return JSON that matches the given schema.';
+export const SMOKE_USER = 'Return an empty result.';
+
+/**
+ * Check of the API's schema compiler (`yb llm-smoke`): each case's body is built like a real request on its route
+ * (requestParams, then requestIssues); with an API key (opt-in: --live) one tiny synchronous request per case is
+ * sent with fixed literal system and user text, so the API compiles exactly the grammar production would send. The
+ * request carries no data, so the API's error text is returned as is. No ledger rows, no budget gate: a handful of
+ * Haiku calls cost far under a cent. Without a key nothing is sent (node counts and local issues only).
+ */
+export async function smokeSchemas(o: {
+  apiKey: string | null;
+  cases: readonly SchemaSmokeCase[];
+  overrides?: RouteOverrides | null;
+  fetch?: typeof fetch;
+  log?: Logger;
+}): Promise<SchemaSmokeResult[]> {
+  const sdk = o.apiKey ? buildSdk({ apiKey: o.apiKey, fetch: o.fetch, maxRetries: 0, log: o.log ?? nullLogger }) : null;
+  const out: SchemaSmokeResult[] = [];
+  for (const c of o.cases) {
+    const rp = resolveRoute(c.route, o.overrides);
+    const body = requestParams(rp, {
+      system: SMOKE_SYSTEM,
+      messages: [{ role: 'user', content: SMOKE_USER }],
+      maxTokens: 2000,
+      ...(c.schema ? { format: outputFormat(c.schema) } : {}),
+      ...(c.tools ? { tools: c.tools } : {}),
+      mode: 'sync',
+    });
+    const format = (body.output_config as { format?: JsonOutputFormat }).format;
+    const strict = ((body.tools ?? []) as { input_schema: unknown }[]).map((t) => t.input_schema);
+    const base = { name: c.name, model: rp.model, nodes: grammarNodes(format ? [format.schema, ...strict] : strict) };
+    const issues = requestIssues(body);
+    if (issues.length) {
+      out.push({ ...base, status: 'local', detail: issues.join('; ') });
+      continue;
+    }
+    if (!sdk) {
+      out.push({ ...base, status: 'not_sent', detail: '' });
+      continue;
+    }
+    try {
+      const msg = await sdk.beta.messages.create(body as unknown as BetaParams);
+      out.push({ ...base, status: 200, detail: String(msg.stop_reason) });
+    } catch (e) {
+      if (e instanceof Anthropic.APIError) {
+        const apiText = (e.error as { error?: { message?: unknown } } | undefined)?.error?.message;
+        out.push({ ...base, status: e.status ?? 0, detail: typeof apiText === 'string' ? apiText : e.constructor.name });
+      } else out.push({ ...base, status: 0, detail: e instanceof Error ? e.constructor.name : 'unknown' });
+    }
+  }
+  return out;
+}
+
 type BetaMessage = Anthropic.Beta.Messages.BetaMessage;
 type BetaParams = Anthropic.Beta.Messages.MessageCreateParamsNonStreaming;
 type BetaStreamParams = Parameters<Anthropic['beta']['messages']['stream']>[0];
@@ -375,16 +572,7 @@ class AnthropicLlmClient implements LlmClient {
     this.db = o.db;
     this.log = o.log ?? nullLogger;
     this.now = o.now ?? Date.now;
-    this.sdk = new Anthropic({
-      apiKey: o.apiKey,
-      baseURL: 'https://api.anthropic.com',
-      fetch: egressFetch({
-        fetch: o.fetch ?? globalThis.fetch,
-        onBlocked: (e) => this.log.warn('llm_egress_blocked', { counts: Object.fromEntries(e.findings.map((f) => [f.kind, f.count])) }),
-      }),
-      maxRetries: o.maxRetries ?? 2,
-      logLevel: 'off',
-    });
+    this.sdk = buildSdk({ apiKey: o.apiKey, fetch: o.fetch, maxRetries: o.maxRetries, log: this.log });
   }
 
   params(route: LlmRoute): RouteParams {

@@ -75,10 +75,22 @@ export class FakeOutboundSender implements OutboundSender {
     if (this.o.db) {
       this.o.db
         .prepare(
-          `INSERT INTO outbound_messages (id, client_ref, purpose, to_handle, text_hash, status, message_guids, digest_id, created_at, sent_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO outbound_messages (id, client_ref, purpose, to_handle, text_hash, status, message_guids, digest_id, digest_ordinal, created_at, sent_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(outboundId, clientRef, purpose, this.o.selfHandle ?? 'self@example.com', outboundTextHash(text), status, JSON.stringify(guids), options.digestId ?? null, now, now);
+        .run(
+          outboundId,
+          clientRef,
+          purpose,
+          this.o.selfHandle ?? 'self@example.com',
+          outboundTextHash(text),
+          status,
+          JSON.stringify(guids),
+          options.digestId ?? null,
+          options.digestOrdinal ?? null,
+          now,
+          now,
+        );
       for (const g of guids) this.o.db.prepare('INSERT INTO outbound_guids (guid, outbound_id) VALUES (?, ?)').run(g, outboundId);
     }
     this.sent.push({ text, purpose, clientRef, options, outboundId, at: now });

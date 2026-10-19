@@ -10,6 +10,7 @@
  *   yb backfill-extract  the one-time historical LLM extraction backfill (its own budget; --estimate = dry run)
  *   yb eval              the evaluation harness (report / status / sample / shadow; also npm run eval)
  *   yb llm-usage         the API-efficiency report over the LLM ledger (read-only; llm/efficiency.ts)
+ *   yb llm-smoke         every LLM schema against the API's grammar limit (--live sends one empty request each)
  */
 import fs from 'node:fs';
 import { adminRequest, AdminUnavailableError, serverStatus, type AdminRequest, type AdminResponse } from './admin/socket';
@@ -19,6 +20,7 @@ import { closeDatabase, openDatabase } from './db/connection';
 import { acquireLock, lockOwner, releaseLock } from './db/lock';
 import { currentVersion, LATEST_VERSION } from './db/migrate';
 import { evalCommand } from './eval/cli';
+import { llmSmokeCommand } from './llmSchemaSmoke';
 import { backfillExtractCommand } from './extraction/cli';
 import { llmUsageCommand } from './llm/usageCli';
 import { migrateLegacyCommand } from './migration/cli';
@@ -44,6 +46,9 @@ const USAGE = `usage: yb <command>
                     the evaluation harness: golden-set metrics, shadow runs of a new prompt (counts and rates only)
   llm-usage [--days 7] [--json]
                     API efficiency: tokens, cost, cache-read share and findings per kind (read-only; nothing is sent)
+  llm-smoke [--live] [--model <id>] [--only <name,…>]
+                    every LLM output schema / strict tool set against the API's grammar limit; --live sends one
+                    empty request per schema and prints only HTTP status and error text
   setup-self [--file <path>]
                     read your own phone/email handles (one per line; default ./${SELF_HANDLES_FILE}, git-ignored),
                     write settings.self_handles and collector/Generated/SelfHandles.generated.swift`;
@@ -162,6 +167,8 @@ async function main(argv: string[]): Promise<number> {
       return llmUsageCommand(args, paths, { out, err });
     case 'setup-self':
       return setupSelf(paths, args);
+    case 'llm-smoke':
+      return llmSmokeCommand(args, { out, err });
     case undefined:
     case 'help':
     case '--help':

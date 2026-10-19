@@ -8,7 +8,7 @@ import { outboundTextHash } from '../../src/adapters/imessage/mapping';
 import { composeDigest } from '../../src/delivery/compose';
 import { upsertSubscription } from '../../src/delivery/push';
 import { deliveryTick, emptyStreak, type DeliveryDeps } from '../../src/delivery/send';
-import { BOT_MARKER, checkOutboundText } from '../../src/delivery/types';
+import { BOT_MARKER, checkOutboundText, type OutboundSender } from '../../src/delivery/types';
 import { FakeOutboundSender, FakePushSender } from '../fakes/delivery';
 import { FakeEgress, FakeLlmClient } from '../fakes/llm';
 import { seedPerson } from '../helpers';
@@ -45,29 +45,132 @@ describe('digest delivery', () => {
     expect((await tickAt('08:00')).imessage).toBe('disabled');
     expect(outbound.sent).toHaveLength(0);
     expect(digestRow()).toMatchObject({ status: 'ready', imessage_status: 'disabled', skip_reason: 'disabled', push_status: 'disabled' });
-    expect(digestRow().imessage_text).toMatch(/^\u{1F168} Wed Oct 14 · 4 for today/u);
+    expect(digestRow().imessage_text).toMatch(/^\u{1F168} Good morning! 4 things for today\./u);
     await tickAt('11:00');
     expect(digestRow()).toMatchObject({ status: 'skipped', skip_reason: 'disabled' });
     expect(outbound.sent).toHaveLength(0);
   });
 
-  it('enabled: waits for digest.time, sends once to self, records the outbound row and marks items delivered', async () => {
+  it('enabled: waits for digest.time, sends one text per suggestion to self, in order, once; records each and marks items delivered', async () => {
     const { ids } = typicalDay(w);
     setSettings(w.db, { 'digest.enabled': true });
     expect((await tickAt('07:59')).action).toBe('before_time');
     const r = await tickAt('08:00');
     expect(r).toMatchObject({ action: 'delivered', imessage: 'sent' });
-    expect(outbound.sent).toHaveLength(1);
-    const sent = outbound.sent[0]!;
-    expect(sent).toMatchObject({ purpose: 'digest' });
-    expect(sent.text.startsWith(BOT_MARKER)).toBe(true);
-    expect(checkOutboundText(sent.text)).toEqual([]);
-    expect(sent.options.digestId).toBe(digestRow().id);
-    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: now, outbound_id: sent.outboundId, imessage_status: 'sent', skip_reason: null });
-    expect(w.db.prepare('SELECT text_hash FROM outbound_messages WHERE id = ?').pluck().get(sent.outboundId)).toBe(outboundTextHash(sent.text));
+    expect(outbound.sent).toHaveLength(ids.length);
+    outbound.sent.forEach((sent, k) => {
+      expect(sent).toMatchObject({ purpose: 'digest', options: { digestId: digestRow().id, digestOrdinal: k + 1 } });
+      expect(sent.text.startsWith(`${BOT_MARKER} ${k === 0 ? 'Good morning! 4 things for today.\n\n1.' : `${k + 1}.`}`)).toBe(true);
+      expect(checkOutboundText(sent.text)).toEqual([]);
+      expect(w.db.prepare('SELECT text_hash, digest_ordinal FROM outbound_messages WHERE id = ?').get(sent.outboundId)).toEqual({ text_hash: outboundTextHash(sent.text), digest_ordinal: k + 1 });
+    });
+    expect(new Set(outbound.sent.map((x) => x.clientRef)).size).toBe(ids.length);
+    expect(outbound.sent.at(-1)!.text).toContain("That's it!");
+    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: now, outbound_id: outbound.sent[0]!.outboundId, imessage_status: 'sent', skip_reason: null });
     expect(w.db.prepare(`SELECT count(*) FROM suggestions WHERE status = 'delivered' AND delivered_at = ?`).pluck().get(now)).toBe(ids.length);
     for (const t of ['08:01', '09:00', '10:59']) expect((await tickAt(t)).action).toBe('final');
-    expect(outbound.sent).toHaveLength(1);
+    expect(outbound.sent).toHaveLength(ids.length);
+  });
+
+  /** Sends the 08:00 brief with the collector failing on the third text: two texts out, the rest pending. */
+  async function cutAfterTwo() {
+    let calls = 0;
+    const flaky: OutboundSender = {
+      configured: true,
+      sendToSelf: (text, purpose, ref, opts) =>
+        ++calls === 3 ? Promise.resolve({ status: 'failed', outboundId: null, guids: [], reason: 'collector_unavailable' }) : outbound.sendToSelf(text, purpose, ref, opts),
+    };
+    return tickAt('08:00', DAY_DATE, { services: { llm: new FakeLlmClient({ configured: false }), egress: new FakeEgress(), outbound: flaky } });
+  }
+
+  it('a brief cut off midway counts as sent from its first text, then resumes where it stopped without repeats', async () => {
+    const { ids } = typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    const cut = await cutAfterTwo();
+    expect(cut).toMatchObject({ action: 'waiting', imessage: 'pending', reason: 'partial' });
+    expect(outbound.sent).toHaveLength(2);
+    // Replies bind to it right away: it is sent (from the first text), part-way out.
+    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: now, outbound_id: outbound.sent[0]!.outboundId, imessage_status: 'pending', skip_reason: 'partial' });
+    expect(w.db.prepare(`SELECT count(*) FROM suggestions WHERE delivered_at IS NOT NULL`).pluck().get()).toBe(2);
+    const sentAt = now;
+    expect(await tickAt('08:01')).toMatchObject({ action: 'delivered', imessage: 'sent' });
+    expect(outbound.sent.map((x) => x.options.digestOrdinal)).toEqual(ids.map((_, k) => k + 1));
+    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: sentAt, imessage_status: 'sent', skip_reason: null });
+    expect((await tickAt('08:02')).action).toBe('final');
+    expect(outbound.sent).toHaveLength(ids.length);
+  });
+
+  it('a part-way brief stops for a pause, the brief being turned off, or catch-up passing: what went out counts', async () => {
+    for (const stop of [{ 'digest.paused_until': zoned('2026-10-20', '08:00') }, { 'digest.enabled': false }, null]) {
+      w = buildWorld();
+      outbound = new FakeOutboundSender({ db: w.db, now: () => now });
+      typicalDay(w);
+      setSettings(w.db, { 'digest.enabled': true });
+      await cutAfterTwo();
+      if (stop) setSettings(w.db, stop);
+      const r = await tickAt(stop ? '08:05' : '11:30');
+      expect(r).toMatchObject({ imessage: 'sent' });
+      expect(outbound.sent).toHaveLength(2);
+      expect(digestRow()).toMatchObject({ status: 'sent', imessage_status: 'sent', skip_reason: null });
+    }
+  });
+
+  it('texts never move under their refs: a part about someone hidden since is dropped, the rest keep their numbers', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    await cutAfterTwo();
+    w.db.prepare('UPDATE people SET is_hidden = 1 WHERE id = ?').run(w.cleo); // item 3 is the Cleo ↔ Dora intro
+    await tickAt('08:01');
+    expect(outbound.sent.map((x) => x.options.digestOrdinal)).toEqual([1, 2, 4]);
+    expect(outbound.sent[2]!.text).toMatch(/^\u{1F168} 4\. Something personal\n/u);
+    expect(outbound.sent.map((x) => x.text).join('\n')).not.toMatch(/Cleo|Dora/);
+    expect(digestRow()).toMatchObject({ imessage_status: 'sent', skip_reason: null });
+  });
+
+  it('a brief whose first text was handed to the collector (answer lost) is never recomposed by the 07:30 compose job', async () => {
+    const { digestId } = typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true, 'digest.time': '07:20' });
+    // The collector took text 1 but its answer never came back: retryable, nothing marked sent.
+    const lost: OutboundSender = {
+      configured: true,
+      sendToSelf: async (text, purpose, ref, opts) => {
+        await outbound.sendToSelf(text, purpose, ref, opts);
+        w.db.prepare(`UPDATE outbound_messages SET status = 'failed', collector_result = '{"retryable":true}' WHERE client_ref = ?`).run(ref);
+        return { status: 'failed', outboundId: null, guids: [], reason: 'collector_unavailable' };
+      },
+    };
+    await tickAt('07:20', DAY_DATE, { services: { llm: new FakeLlmClient({ configured: false }), egress: new FakeEgress(), outbound: lost } });
+    const before = w.db.prepare('SELECT web_body FROM digests WHERE id = ?').pluck().get(digestId);
+    w.db.prepare('UPDATE people SET is_hidden = 1 WHERE id = ?').run(w.ava); // the picks change after the first text went out
+    now = zoned(DAY_DATE, '07:30');
+    await composeDigest(w.db, { llm: new FakeLlmClient({ configured: false }), egress: new FakeEgress() }, { localDate: DAY_DATE, now });
+    expect(w.db.prepare('SELECT web_body FROM digests WHERE id = ?').pluck().get(digestId)).toBe(before);
+  });
+
+  it('closing a part-way brief early leaves the items that never went out undelivered', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    await cutAfterTwo();
+    setSettings(w.db, { 'digest.enabled': false });
+    await tickAt('08:05');
+    expect(w.db.prepare(`SELECT count(*) FROM suggestions WHERE delivered_at IS NOT NULL`).pluck().get()).toBe(2);
+  });
+
+  it('Today shows a part-way brief as pending, not delivered', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    await cutAfterTwo();
+    const { todayDigest } = await import('../../src/delivery/preview');
+    expect(todayDigest(w.db, DAY_DATE)).toMatchObject({ status: 'sent', imessage: 'pending', skipReason: 'partial' });
+  });
+
+  it('a brief still part-way out when its day ends is closed the next morning, without sending stale texts', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    await cutAfterTwo();
+    expect((await tickAt('06:00', '2026-10-15')).action).toBe('before_time');
+    expect(digestRow()).toMatchObject({ status: 'sent', imessage_status: 'sent', skip_reason: null });
+    expect(outbound.sent).toHaveLength(2);
   });
 
   it('sends the composed text (07:30 compose), recomposing if the ranker’s picks changed', async () => {
@@ -78,15 +181,16 @@ describe('digest delivery', () => {
     const extra = seedSuggestion(w.db, { kind: 'dormant', personId: w.dora });
     w.db.prepare('INSERT INTO digest_items (digest_id, ordinal, suggestion_id) VALUES (?, 5, ?)').run(digestId, extra);
     await tickAt('08:00');
-    expect(outbound.sent[0]!.text).toContain('· 5 for today');
-    expect(outbound.sent[0]!.text).toMatch(/^5 Dora V\. · /m);
+    expect(outbound.sent).toHaveLength(5);
+    expect(outbound.sent[0]!.text).toContain('Good morning! 5 things for today.');
+    expect(outbound.sent[4]!.text).toMatch(/^\u{1F168} 5\. Reconnect with Dora V\.\?\n/u);
   });
 
   it('catch-up: a Mac that was down sends late until digest.catch_up_until, then Today only', async () => {
     typicalDay(w);
     setSettings(w.db, { 'digest.enabled': true });
     await tickAt('10:45');
-    expect(outbound.sent).toHaveLength(1);
+    expect(outbound.sent).toHaveLength(4);
 
     const w2 = buildWorld({ enabled: true });
     w = w2;
@@ -104,7 +208,7 @@ describe('digest delivery', () => {
     expect(await tickAt('10:15')).toMatchObject({ action: 'waiting', imessage: 'pending', reason: 'quiet_hours' });
     setSettings(w.db, { quiet_hours: { start: '22:00', end: '07:00' } });
     expect(await tickAt('10:20')).toMatchObject({ action: 'delivered' });
-    expect(outbound.sent).toHaveLength(1);
+    expect(outbound.sent).toHaveLength(4);
   });
 
   it('no collector / self handle: retried each tick, then skipped with that reason', async () => {
@@ -122,8 +226,10 @@ describe('digest delivery', () => {
     outbound = new FakeOutboundSender({ db: w.db, now: () => now, status: 'ghost' });
     expect(await tickAt('08:00')).toMatchObject({ action: 'failed', imessage: 'failed' });
     expect(digestRow()).toMatchObject({ status: 'failed', skip_reason: 'ghost' });
+    // each text was tried once; none is ever retried
+    expect(outbound.sent).toHaveLength(4);
     await tickAt('08:01');
-    expect(outbound.sent).toHaveLength(1);
+    expect(outbound.sent).toHaveLength(4);
   });
 });
 
@@ -163,7 +269,9 @@ describe('empty days, heartbeat and failure notices', () => {
     expect(outbound.sent).toHaveLength(0);
     expect(emptyStreak(w.db, '2026-10-14')).toBe(3);
     expect(await tickAt('08:30', '2026-10-14')).toMatchObject({ action: 'heartbeat_sent' });
-    expect(outbound.sent.map((s) => [s.purpose, s.text])).toEqual([['heartbeat', `${BOT_MARKER} All quiet 3 days · 1 person added, nothing urgent.`]]);
+    expect(outbound.sent.map((s) => [s.purpose, s.text])).toEqual([
+      ['heartbeat', `${BOT_MARKER} All quiet for 3 days. Nothing needs you right now.\nI added 1 new person to your contacts.`],
+    ]);
     expect(digestRow('2026-10-14').notice_outbound_id).toBe(outbound.sent[0]!.outboundId);
     await tickAt('08:30', '2026-10-15');
     await tickAt('08:30', '2026-10-16');
@@ -179,15 +287,18 @@ describe('empty days, heartbeat and failure notices', () => {
     w.db.prepare(`INSERT INTO job_state (job, last_run_at, consecutive_failures) VALUES ('ties', ?, 1)`).run(failAt);
     seedDigest(w.db, DAY_DATE, []);
     expect(await tickAt('08:00')).toMatchObject({ action: 'notice_sent' });
-    expect(outbound.sent[0]).toMatchObject({ purpose: 'alert', text: `${BOT_MARKER} Last night's run failed at ties · yeackbot.com/sources` });
+    expect(outbound.sent[0]).toMatchObject({ purpose: 'alert', text: `${BOT_MARKER} Heads up: last night's run failed at ties.\nDetails at yeackbot.com/sources` });
     expect(digestRow()).toMatchObject({ status: 'skipped', skip_reason: 'pipeline_failed' });
     expect(checkOutboundText(outbound.sent[0]!.text)).toEqual([]);
 
     typicalDay(w, '2026-10-15');
     w.db.prepare(`UPDATE job_runs SET started_at = ? WHERE job = 'ties'`).run(zoned('2026-10-15', '06:55'));
     await tickAt('08:00', '2026-10-15');
-    expect(outbound.sent[1]!.text).toContain("⚠ Last night's run failed at ties · see Sources");
-    expect(outbound.sent[1]!.text.match(/yeackbot\.com/g)).toHaveLength(1);
+    // four suggestion texts, then the health text on its own
+    expect(outbound.sent).toHaveLength(6);
+    expect(outbound.sent[5]).toMatchObject({ purpose: 'digest', text: `${BOT_MARKER} Heads up: last night's run failed at ties. Details at yeackbot.com/sources` });
+    expect(outbound.sent[5]!.options.digestOrdinal).toBeNull();
+    expect(outbound.sent.slice(1, 5).map((x) => x.text).join('\n').match(/yeackbot\.com/g)).toHaveLength(1);
   });
 });
 

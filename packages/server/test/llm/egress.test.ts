@@ -91,6 +91,22 @@ describe('pseudonymize', () => {
     expect(() => egress.pseudonymize({ purpose: 'ask', sections: [] })).toThrow(EgressBlocked);
   });
 
+  it('scrubs handles written back to back and handles a later step exposes; its output always passes the scanner', () => {
+    const { egress, avery } = world();
+    const scrub = (text: string) => egress.pseudonymize({ purpose: 'extract', sections: [{ name: 'm', text }] });
+    // "@a@b": the second handle follows a letter in the original text, so one pass skipped it (the 2026-10-16 block).
+    expect(scrub('follow @trail_mix_42@summit_crew for the route').sections[0]!.text).toBe('follow <handle><handle> for the route');
+    expect(scrub('ping @avery.q@someone_new').sections[0]!.text).toBe(`ping <ig:${egress.tokenFor(avery)}><handle>`);
+    expect(scrub('@one_a@two.b@three_c / @x_@yz').sections[0]!.text).toBe('<handle><handle><handle> / <handle><handle>');
+    // A digit run replaced after the handle pass leaves "<num>@…" behind: caught by the last pass.
+    expect(scrub('code 7316402@someone_new').sections[0]!.text).toBe('code <num><handle>');
+    const p = scrub('a @trail.mix@summit_crew b @trail_mix_42@summit_crew');
+    expect(p.replaced.handle).toBe(4);
+    expect(findRawIdentifiers(p.text)).toEqual([]);
+    expect(scanFindings(p.text)).toEqual([]);
+    expect(() => egress.scan(p.text)).not.toThrow();
+  });
+
   it('without a database nothing can be pseudonymized (fails closed); the scanner still works', () => {
     const closed = createEgress(null);
     expect(() => closed.pseudonymize({ purpose: 'extract', sections: [{ name: 'x', text: 'hi' }] })).toThrow(EgressBlocked);
