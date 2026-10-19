@@ -17,8 +17,15 @@ export const COMMAND_STALE_MS = 6 * HOUR;
 /** Clock skew between the digest's recorded send time and the rows chat.db stamps. */
 const SKEW_MS = 5 * 60_000;
 
-const SENT = `('sent','fallback_sent')`;
 const LIVE_OUTBOUND = `('queued','sending','delivered','sent','unverified')`;
+/**
+ * When a digest went out: its sent_at, or, while its texts are still going out (one per suggestion, seconds apart,
+ * longer if the collector hiccups), when its first text did. Replies bind to a brief from its first text on.
+ */
+const EFFECTIVE_SENT = `coalesce(d.sent_at, (SELECT min(coalesce(om.sent_at, om.created_at)) FROM outbound_messages om
+  WHERE om.digest_id = d.id AND om.purpose = 'digest' AND om.status IN ('sending','delivered','sent','unverified')))`;
+/** Digests replies can bind to: sent, or part-way out (still 'composing'/'ready' with a text already gone). */
+const BINDABLE = `(SELECT d.id, d.local_date, ${EFFECTIVE_SENT} AS eff FROM digests d WHERE d.status IN ('sent','fallback_sent','composing','ready'))`;
 
 export interface MessageInfo {
   id: number;
@@ -36,8 +43,11 @@ export interface DigestRef {
 
 export interface CommandContext {
   msg: MessageInfo;
-  /** Inline reply (thread originator) to a bot row, and the digest that row belongs to. */
-  inline: { toBot: boolean; digest: DigestRef | null };
+  /**
+   * Inline reply (thread originator) to a bot row, the digest that row belongs to, and the item it carries (the
+   * brief is one text per suggestion, so "done" as a reply to text 2 means done 2).
+   */
+  inline: { toBot: boolean; digest: DigestRef | null; ordinal: number | null };
   /** The most recent digest sent in the 36 h before the row. */
   latestDigest: DigestRef | null;
   lastBotAt: number | null;
@@ -58,56 +68,75 @@ export function loadMessage(db: DB, messageId: number): MessageInfo | null {
 
 const digestById = (db: DB, id: string | null | undefined): DigestRef | null => {
   if (!id) return null;
-  const r = db.prepare(`SELECT id, sent_at, local_date FROM digests WHERE id = ? AND status IN ${SENT} AND sent_at IS NOT NULL`).get(id) as
-    | { id: string; sent_at: number; local_date: string }
+  const r = db.prepare(`SELECT id, eff, local_date FROM ${BINDABLE} WHERE id = ? AND eff IS NOT NULL`).get(id) as
+    | { id: string; eff: number; local_date: string }
     | undefined;
-  return r ? { id: r.id, sentAt: r.sent_at, localDate: r.local_date } : null;
+  return r ? { id: r.id, sentAt: r.eff, localDate: r.local_date } : null;
 };
 
-/** The digest a bot row (a message the bot sent) belongs to: by its GUID, its text hash, or its send time. */
-export function digestForBotMessage(db: DB, messageId: number): DigestRef | null {
+export interface BotTarget {
+  digest: DigestRef | null;
+  /** The digest item the text carried (one text per suggestion), when known. */
+  ordinal: number | null;
+}
+
+/**
+ * The digest (and item) a bot row (a message the bot sent) belongs to: by its GUID, its text hash (the self-thread
+ * echo has its own GUID), or its send time.
+ */
+export function botMessageTarget(db: DB, messageId: number): BotTarget {
+  const none: BotTarget = { digest: null, ordinal: null };
   const m = db.prepare('SELECT source_msg_id, sent_at, text, is_bot FROM messages WHERE id = ?').get(messageId) as
     | { source_msg_id: string; sent_at: number; text: string | null; is_bot: number }
     | undefined;
-  if (!m) return null;
+  if (!m) return none;
   const guids = [...new Set([m.source_msg_id, stripPartPrefix(m.source_msg_id)])];
   for (const g of guids) {
     const viaGuid = db
       .prepare(
-        `SELECT coalesce(om.digest_id, (SELECT d.id FROM digests d WHERE d.outbound_id = om.id)) FROM outbound_guids og
-         JOIN outbound_messages om ON om.id = og.outbound_id WHERE og.guid = ?`,
+        `SELECT coalesce(om.digest_id, (SELECT d.id FROM digests d WHERE d.outbound_id = om.id)) AS digest_id, om.digest_ordinal
+         FROM outbound_guids og JOIN outbound_messages om ON om.id = og.outbound_id WHERE og.guid = ?`,
       )
-      .pluck()
-      .get(g) as string | null | undefined;
-    if (viaGuid) return digestById(db, viaGuid);
-    if (viaGuid === null) return null; // a known bot send that isn't a digest (an ack, an answer)
+      .get(g) as { digest_id: string | null; digest_ordinal: number | null } | undefined;
+    if (viaGuid?.digest_id) return { digest: digestById(db, viaGuid.digest_id), ordinal: viaGuid.digest_ordinal };
+    if (viaGuid) return none; // a known bot send that isn't a digest (an ack, an answer)
   }
   if (m.text) {
     const viaHash = db
       .prepare(
-        `SELECT digest_id FROM outbound_messages WHERE text_hash = ? AND digest_id IS NOT NULL AND created_at BETWEEN ? AND ?
+        `SELECT digest_id, digest_ordinal FROM outbound_messages WHERE text_hash = ? AND digest_id IS NOT NULL AND created_at BETWEEN ? AND ?
          ORDER BY abs(created_at - ?) LIMIT 1`,
       )
-      .pluck()
-      .get(outboundTextHash(m.text), m.sent_at - SKEW_MS, m.sent_at + SKEW_MS, m.sent_at) as string | undefined;
-    if (viaHash) return digestById(db, viaHash);
+      .get(outboundTextHash(m.text), m.sent_at - SKEW_MS, m.sent_at + SKEW_MS, m.sent_at) as { digest_id: string; digest_ordinal: number | null } | undefined;
+    if (viaHash) return { digest: digestById(db, viaHash.digest_id), ordinal: viaHash.digest_ordinal };
   }
-  if (!m.is_bot) return null;
+  if (!m.is_bot) return none;
+  // A bot text the ledger knows as something else (an ack, an answer, "Which Sam?") is never tied to a brief by
+  // its send time alone.
+  if (
+    m.text &&
+    db
+      .prepare(`SELECT 1 FROM outbound_messages WHERE text_hash = ? AND digest_id IS NULL AND created_at BETWEEN ? AND ? LIMIT 1`)
+      .get(outboundTextHash(m.text), m.sent_at - SKEW_MS, m.sent_at + SKEW_MS) !== undefined
+  ) {
+    return none;
+  }
   const near = db
-    .prepare(`SELECT id FROM digests WHERE status IN ${SENT} AND sent_at BETWEEN ? AND ? ORDER BY abs(sent_at - ?) LIMIT 1`)
+    .prepare(`SELECT id FROM ${BINDABLE} WHERE eff BETWEEN ? AND ? ORDER BY abs(eff - ?) LIMIT 1`)
     .pluck()
     .get(m.sent_at - SKEW_MS, m.sent_at + SKEW_MS, m.sent_at) as string | undefined;
-  return digestById(db, near);
+  return { digest: digestById(db, near), ordinal: null };
 }
 
-/** The most recent digest sent in the 36 h before `at`. */
+/** The digest a bot row belongs to (see botMessageTarget). */
+export const digestForBotMessage = (db: DB, messageId: number): DigestRef | null => botMessageTarget(db, messageId).digest;
+
+/** The most recent digest sent (or part-way out) in the 36 h before `at`. */
 export function latestDigestBefore(db: DB, at: number): DigestRef | null {
   const r = db
-    .prepare(
-      `SELECT id, sent_at, local_date FROM digests WHERE status IN ${SENT} AND sent_at BETWEEN ? AND ? ORDER BY sent_at DESC LIMIT 1`,
-    )
-    .get(at - DIGEST_BIND_MS, at + SKEW_MS) as { id: string; sent_at: number; local_date: string } | undefined;
-  return r ? { id: r.id, sentAt: r.sent_at, localDate: r.local_date } : null;
+    .prepare(`SELECT id, eff, local_date FROM ${BINDABLE} WHERE eff BETWEEN ? AND ? ORDER BY eff DESC LIMIT 1`)
+    .get(at - DIGEST_BIND_MS, at + SKEW_MS) as { id: string; eff: number; local_date: string } | undefined;
+  return r ? { id: r.id, sentAt: r.eff, localDate: r.local_date } : null;
 }
 
 /** When the bot last texted before `at` (outbound ledger or a recognized bot row in a self thread). */
@@ -129,7 +158,7 @@ export function lastBotMessageBefore(db: DB, at: number): number | null {
 
 export function loadContext(db: DB, msg: MessageInfo): CommandContext {
   let toBot = false;
-  let inlineDigest: DigestRef | null = null;
+  let inlineTarget: BotTarget = { digest: null, ordinal: null };
   const target =
     msg.replyToMsgId ??
     (msg.threadRootSourceId
@@ -142,12 +171,12 @@ export function loadContext(db: DB, msg: MessageInfo): CommandContext {
     const t = db.prepare('SELECT is_bot, source_msg_id FROM messages WHERE id = ?').get(target) as { is_bot: number; source_msg_id: string } | undefined;
     const known = t ? db.prepare('SELECT 1 FROM outbound_guids WHERE guid IN (?, ?)').get(t.source_msg_id, stripPartPrefix(t.source_msg_id)) : undefined;
     toBot = !!t && (t.is_bot === 1 || known !== undefined);
-    if (toBot) inlineDigest = digestForBotMessage(db, target);
+    if (toBot) inlineTarget = botMessageTarget(db, target);
   }
   const lastBotAt = lastBotMessageBefore(db, msg.sentAt);
   return {
     msg,
-    inline: { toBot, digest: inlineDigest },
+    inline: { toBot, digest: inlineTarget.digest, ordinal: inlineTarget.digest ? inlineTarget.ordinal : null },
     latestDigest: latestDigestBefore(db, msg.sentAt),
     lastBotAt,
     recentBot: lastBotAt !== null && msg.sentAt - lastBotAt <= FREE_TEXT_WINDOW_MS,

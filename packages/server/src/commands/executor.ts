@@ -9,7 +9,7 @@
  *   4. gating — `?…` and `log:` always; commands (and bare numbers) when a digest went out in the last 36 h, a
  *      bot message in the last 12 h, as an inline reply to a bot row, or with a "yb" prefix; other free text only
  *      within 12 h of a bot message, inline, or with "yb" (his own notes to self are never read as commands);
- *   5. limits: ≤30 commands/h (one "slow down" notice), outbound circuit breaker >20/h (effects still apply);
+ *   5. limits: ≤30 commands/h (one "slow down" notice), outbound circuit breaker ≥30/h (effects still apply);
  *   6. execute: deterministic grammar first; free text through the LLM intent parser (route 'intent', egress),
  *      deterministic fallback; item verbs through THE suggestion feedback entry point; `log:` writes a journaled
  *      note + interaction (+ facts from the parser); `?` asks the shared Ask engine; `undo` reverts the last
@@ -23,6 +23,10 @@ import { localParts, type SuggestionFeedback } from '@yb/shared';
 import { setImmediate as yieldLoop } from 'node:timers/promises';
 import { canonicalId } from '../db/canon';
 import type { DB } from '../db/connection';
+import { itemLines, mainLine } from '../delivery/compose';
+import { selectedItemById } from '../delivery/selection';
+import { templateCopy } from '../delivery/template';
+import { clockWords, endSentence } from '../delivery/text';
 import { MAX_ANSWER_CHARS, type OutboundSender } from '../delivery/types';
 import { finishRun, startRun } from '../journal/runs';
 import { nullLogger, type Logger } from '../ops/logger';
@@ -45,7 +49,7 @@ import {
 } from './context';
 import { draftOpeners } from './draft';
 import { safeWhy, sendFeedback, undoLastCommandEffect } from './feedback';
-import { ITEM_VERBS, parseCommand, selectionNums, type Clause, type Parsed } from './grammar';
+import { isImplicitItemClause, ITEM_VERBS, parseCommand, selectionNums, type Clause, type Parsed } from './grammar';
 import { parseIntent, type IntentResult, type LogKind } from './intent';
 import { applyLog, deterministicKind, logKindTitle, type LogFact } from './log';
 import { distinctLabels, findMentions, intentCandidates, labelOf, loadPeople, resolveSurface, type PersonLite } from './people';
@@ -81,7 +85,8 @@ import { finalizeReply, formatDay, HELP_TEXT, listJoin, relativeDay, scrub, stab
 import { logTimeFromDate, resolveLogTime, resolveUntil } from './time';
 
 const MAX_PER_PASS = 10;
-const MAX_MORE = 3;
+/** `more` texts the next suggestion only (one suggestion per text), looking this far for one that can be shown. */
+const MORE_LOOKAHEAD = 3;
 const CANCEL = new Set(['cancel', 'no', 'none', 'neither', 'nevermind', 'never mind', 'nvm', 'stop', 'no one', 'nobody', 'skip it']);
 
 export interface CommandsOptions {
@@ -206,15 +211,29 @@ async function onePass(db: DB, o: CommandsOptions): Promise<CommandsStats> {
 
 const SENT_OK = new Set(['delivered', 'sent', 'unverified', 'duplicate']);
 
-/** Hands a composed reply to the sender (self only, quiet hours bypassed: it answers his own command). */
-async function deliver(db: DB, outbound: OutboundSender, commandId: string, text: string, purpose: 'reply' | 'answer', now: number): Promise<boolean> {
+/**
+ * Hands a composed reply to the sender (self only, quiet hours bypassed: it answers the owner's own command).
+ * `item` binds the reply to a digest item (a `more` suggestion), so an inline "done" to it acts on that item.
+ */
+async function deliver(
+  db: DB,
+  outbound: OutboundSender,
+  commandId: string,
+  text: string,
+  purpose: 'reply' | 'answer',
+  now: number,
+  item: { digestId: string; ordinal: number } | null = null,
+): Promise<boolean> {
   if (outboundCircuitOpen(db, now)) {
     recordReply(db, commandId, null, 'circuit_open');
     return false;
   }
   let res: Awaited<ReturnType<OutboundSender['sendToSelf']>>;
   try {
-    res = await outbound.sendToSelf(text, purpose, stableRef('yb-command-reply', commandId), { bypassQuietHours: true });
+    res = await outbound.sendToSelf(text, purpose, stableRef('yb-command-reply', commandId), {
+      bypassQuietHours: true,
+      ...(item ? { digestId: item.digestId, digestOrdinal: item.ordinal } : {}),
+    });
   } catch {
     recordReply(db, commandId, null, 'error'); // never retried in a loop; the command itself is done
     return false;
@@ -232,7 +251,8 @@ async function deliver(db: DB, outbound: OutboundSender, commandId: string, text
 interface ItemAck {
   verb: 'done' | 'snooze' | 'skip' | 'wrong';
   ordinals: number[];
-  names: string[];
+  /** Per ordinal: the person's short name, or null (sensitive / no person). */
+  names: (string | null)[];
   until?: number;
 }
 
@@ -248,6 +268,8 @@ interface Exec {
   purpose: 'reply' | 'answer';
   digestId: string | null;
   clarificationId?: string;
+  /** The reply carries one digest item (`more`): inline replies to it act on that item. */
+  replyItem?: { digestId: string; ordinal: number };
 }
 
 class CommandRun {
@@ -259,6 +281,10 @@ class CommandRun {
   private readonly log: Logger;
   private readonly now: number;
   private people: PersonLite[] | null = null;
+  /** The digest item this command is an inline reply to (its own text), if any. */
+  private inlineOrdinal: number | null = null;
+  /** An inline reply to a bot text that carries no item (an answer, an ack, the "Heads up" text). */
+  private inlineNoItem = false;
   private parsedMeta: CommandParsed;
 
   constructor(
@@ -279,7 +305,7 @@ class CommandRun {
     const prior = effectState(db, cmd.id);
     if (prior) {
       // Interrupted mid-command (crash/restart): never re-run an effect that may have half-applied.
-      return this.finish('error', { reason: 'interrupted', reply: 'Something went wrong with a command · check yeackbot.com/today' });
+      return this.finish('error', { reason: 'interrupted', reply: 'Something went wrong with a command. You can check it at yeackbot.com/today' });
     }
     const msg = loadMessage(db, cmd.message_id);
     if (!msg) return this.finish('error', { reason: 'no_message' });
@@ -288,22 +314,25 @@ class CommandRun {
     const ctx = loadContext(db, msg);
 
     if (this.now - msg.sentAt > COMMAND_STALE_MS) {
-      const wasCommand = parsed.kind === 'commands' && this.accepted(parsed, ctx);
+      // A number-less skip/snooze/wrong/why/draft that doesn't reply to a suggestion's text is free text (execute()).
+      const asFreeText = parsed.kind === 'commands' && ctx.inline.ordinal === null && parsed.clauses.some(isImplicitItemClause);
+      const wasCommand = parsed.kind === 'commands' && !asFreeText && this.accepted(parsed, ctx);
       const at = new Intl.DateTimeFormat('en-US', { timeZone: this.tz, hour: 'numeric', minute: '2-digit' }).format(new Date(msg.sentAt));
       return this.finish(wasCommand ? 'seen_late' : 'ignored', {
         reason: 'stale',
-        reply: wasCommand ? `Seen late (sent ${at}) · didn't act on it · send it again if you still want it` : null,
+        reply: wasCommand ? `I only just saw your text from ${at}, so I didn't act on it.\nSend it again if you still want it.` : null,
       });
     }
 
     const clar = openClarification(db, msg.sentAt);
-    const answer = clar ? clarificationAnswer(parsed, clar) : null;
+    // A reply to one of the brief's suggestion texts is about that suggestion, never an answer to "Which Sam?".
+    const answer = clar && ctx.inline.ordinal === null ? clarificationAnswer(parsed, clar) : null;
     if (clar && answer) return this.guarded(() => this.answerClarification(clar, answer, msg));
 
     if (!this.accepted(parsed, ctx)) return this.finish('ignored', { reason: parsed.kind === 'empty' ? 'empty' : 'not_addressed' });
     if (commandLimitReached(db, this.now)) {
       this.rateLimited = true;
-      const notice = rateNoticeSent(db, this.now) ? null : "That's 30 commands this hour · I'll pick up again within the hour";
+      const notice = rateNoticeSent(db, this.now) ? null : "That's 30 commands this hour, so I'm taking a short break.\nI'll pick up again within the hour.";
       return this.finish('ignored', { reason: 'rate_limited', reply: notice });
     }
     return this.guarded(() => this.execute(parsed, ctx, msg));
@@ -313,7 +342,9 @@ class CommandRun {
   private accepted(p: Parsed, ctx: CommandContext): boolean {
     if (p.kind === 'empty') return false;
     if (p.alwaysAccepted || p.yb || ctx.inline.toBot) return true;
-    if (p.kind === 'commands') return ctx.latestDigest !== null || ctx.recentBot;
+    // "skip" / "wrong …" / "snooze …" with no number and not a reply to a suggestion: gated like free text, so a
+    // note-to-self such as "wrong number lol" is never run as a command.
+    if (p.kind === 'commands' && !p.clauses.some(isImplicitItemClause)) return ctx.latestDigest !== null || ctx.recentBot;
     return ctx.recentBot;
   }
 
@@ -326,7 +357,7 @@ class CommandRun {
       this.log.error('commands.failed', { error_class: e instanceof Error ? e.name : 'unknown', ids: [this.cmd.id] });
       if (this.runId) finishRun(this.db, this.runId, 'error', { now: this.now });
       finishEffect(this.db, this.cmd.id, { state: 'failed', effect: 'none', runId: this.runId, batchIds: [], suggestions: [], summary: null, now: this.now });
-      return this.finish('error', { reason: 'exception', reply: 'Something went wrong with that · check yeackbot.com/today' });
+      return this.finish('error', { reason: 'exception', reply: 'Something went wrong with that. You can check it at yeackbot.com/today' });
     }
     if (this.runId) finishRun(this.db, this.runId, 'ok', { now: this.now, summary: { batches: ex.batchIds.length } });
     const summary = ex.summaries.length ? truncate(ex.summaries.join(' · '), 160) : null;
@@ -346,12 +377,21 @@ class CommandRun {
       digestId: ex.digestId,
       batchId: ex.batchIds[0] ?? null,
       clarificationId: ex.clarificationId,
+      replyItem: ex.replyItem,
     });
   }
 
   private async finish(
     status: CommandStatus,
-    o: { reason?: string; reply?: string | null; purpose?: 'reply' | 'answer'; digestId?: string | null; batchId?: string | null; clarificationId?: string },
+    o: {
+      reason?: string;
+      reply?: string | null;
+      purpose?: 'reply' | 'answer';
+      digestId?: string | null;
+      batchId?: string | null;
+      clarificationId?: string;
+      replyItem?: { digestId: string; ordinal: number };
+    },
   ): Promise<CommandStatus> {
     const max = o.purpose === 'answer' ? MAX_ANSWER_CHARS : undefined;
     const text = o.reply ? finalizeReply(o.reply, max) : null;
@@ -373,7 +413,7 @@ class CommandRun {
       batchId: o.batchId ?? null,
     });
     if (text) {
-      const ok = await deliver(this.db, this.services.outbound, this.cmd.id, text, o.purpose ?? 'reply', this.now);
+      const ok = await deliver(this.db, this.services.outbound, this.cmd.id, text, o.purpose ?? 'reply', this.now, o.replyItem ?? null);
       this.replyOutcome = ok ? 'sent' : 'failed';
     }
     return status;
@@ -415,7 +455,13 @@ class CommandRun {
 
   private async execute(parsed: Parsed, ctx: CommandContext, msg: MessageInfo): Promise<Exec> {
     const digest = ctx.inline.digest ?? ctx.latestDigest;
-    if (parsed.kind === 'commands') return this.runClauses(parsed.clauses, digest, msg, parsed);
+    this.inlineOrdinal = ctx.inline.digest ? ctx.inline.ordinal : null;
+    this.inlineNoItem = ctx.inline.toBot && this.inlineOrdinal === null;
+    // An item verb without a number only names a suggestion when it replies to that suggestion's text; otherwise
+    // ("wrong, she moved to Denver" to an Ask answer, "why?" to an ack) it is free text: intent parser / Ask.
+    if (parsed.kind === 'commands' && !(this.inlineOrdinal === null && parsed.clauses.some(isImplicitItemClause))) {
+      return this.runClauses(parsed.clauses, digest, msg, parsed);
+    }
     return this.freeText(parsed, ctx, digest, msg);
   }
 
@@ -426,7 +472,7 @@ class CommandRun {
       if (this.o.signal?.aborted) break;
       if (ITEM_VERBS.has(c.verb)) {
         if (!digest) {
-          ex.lines.push('No brief in the last 36 h · numbers refer to the latest brief');
+          ex.lines.push("I haven't sent you a brief in the last day and a half, so there's nothing to match that to.");
           continue;
         }
         await this.itemClause(c, items, ex, msg);
@@ -488,17 +534,17 @@ class CommandRun {
         case 'unknown':
           break;
       }
-      if (addressed) ex.lines.push("Didn't get that · try help");
+      if (addressed) ex.lines.push('Sorry, I didn\'t get that. Text "help" to see what I can do.');
       else ex.status = 'ignored';
       return ex;
     }
     // No LLM: questions still go to Ask (retrieval-only); anything else only when explicitly addressed.
-    if (parsed.looksLikeQuestion) {
+    if (parsed.looksLikeQuestion || (parsed.kind === 'commands' && /\?\s*$/.test(parsed.body))) {
       this.parsedMeta.verbs = ['ask'];
       await this.ask(parsed.body, ex);
       return ex;
     }
-    if (addressed) ex.lines.push("Didn't get that · try help (without the AI key only commands, log: and ? work)");
+    if (addressed) ex.lines.push('Sorry, I didn\'t get that. Without the AI key I only understand commands, "log:" and "?" questions.');
     else ex.status = 'ignored';
     return ex;
   }
@@ -508,20 +554,29 @@ class CommandRun {
   private async itemClause(c: Clause, items: ItemRow[], ex: Exec, msg: MessageInfo): Promise<void> {
     const open = items.filter((i) => OPEN_STATUSES.has(i.status));
     const byOrd = new Map(items.map((i) => [i.ordinal, i]));
-    const range = items.length ? `1–${Math.max(...items.map((i) => i.ordinal))}` : null;
+    const max = items.length ? Math.max(...items.map((i) => i.ordinal)) : 0;
+    // No number: the item whose text this replies to; else (not a reply to some other bot text) the only open one.
+    const implicit = (): number | null => this.inlineOrdinal ?? (!this.inlineNoItem && open.length === 1 ? open[0]!.ordinal : null);
+    const askWhich = () =>
+      ex.lines.push(
+        open.length
+          ? `Which one? Reply "${c.verb} ${open[0]!.ordinal}", or reply to that suggestion's text with just "${c.verb}".`
+          : 'Everything in your latest brief is already taken care of.',
+      );
     let nums: number[];
-    if (c.verb === 'why' || c.verb === 'draft') nums = [c.n];
-    else if (c.verb === 'done' || c.verb === 'snooze' || c.verb === 'skip' || c.verb === 'wrong') {
+    if (c.verb === 'why' || c.verb === 'draft') {
+      const n = c.n ?? implicit();
+      if (n === null) return void askWhich();
+      nums = [n];
+    } else if (c.verb === 'done' || c.verb === 'snooze' || c.verb === 'skip' || c.verb === 'wrong') {
       if (c.sel === null) {
-        if (open.length !== 1) {
-          ex.lines.push(open.length ? `Which one? reply done ${range}` : 'Nothing open in the latest brief');
-          return;
-        }
-        nums = [open[0]!.ordinal];
+        const n = implicit();
+        if (n === null) return void askWhich();
+        nums = [n];
       } else nums = selectionNums(c.sel, open.map((i) => i.ordinal));
     } else return;
     const missing = nums.filter((n) => !byOrd.has(n));
-    if (missing.length) ex.lines.push(`No item ${listJoin(missing.map(String))} in that brief${range ? ` (${range})` : ''}`);
+    if (missing.length) ex.lines.push(`There's no ${listJoin(missing.map((n) => `#${n}`), 'or')} in that brief${max ? ` (it had 1–${max})` : ''}.`);
     const targets = nums.map((n) => byOrd.get(n)).filter((i): i is ItemRow => !!i);
     if (!targets.length) return;
 
@@ -532,7 +587,7 @@ class CommandRun {
     if (c.verb === 'snooze') {
       const u = resolveUntil(c.dur, msg.sentAt, this.tz);
       if (u === null) {
-        ex.lines.push(`Didn't get "${truncate(c.dur ?? '', 30)}" · try snooze ${targets[0]!.ordinal} 2w`);
+        ex.lines.push(`I didn't understand "${truncate(c.dur ?? '', 30)}". Try "snooze ${targets[0]!.ordinal} 2w" or "snooze ${targets[0]!.ordinal} friday".`);
         return;
       }
       until = u;
@@ -549,28 +604,30 @@ class CommandRun {
     const notes: string[] = [];
     for (const item of targets) {
       if (!OPEN_STATUSES.has(item.status) && !(c.verb === 'wrong' && item.status !== 'wrong')) {
-        notes.push(`${item.ordinal} is already ${item.status === 'dismissed' ? 'skipped' : item.status}`);
+        notes.push(`#${item.ordinal} was already ${item.status === 'dismissed' ? 'skipped' : item.status}.`);
         continue;
       }
       const before = snapshotSuggestion(this.db, item.suggestionId);
       const r = await sendFeedback(this.db, item.suggestionId, fb, this.feedbackCtx());
       if (!r.ok) {
         if (r.reason === 'not_available') {
-          notes.push('Feedback by text isn’t available yet · use yeackbot.com/today');
+          notes.push("Feedback by text isn't available yet. You can do it at yeackbot.com/today");
           break;
         }
-        notes.push(r.reason === 'conflict' ? `${item.ordinal} already changed` : r.reason === 'not_found' ? `${item.ordinal} is gone` : `Couldn't update ${item.ordinal}`);
+        notes.push(
+          r.reason === 'conflict' ? `#${item.ordinal} changed in the meantime.` : r.reason === 'not_found' ? `#${item.ordinal} isn't there anymore.` : `I couldn't update #${item.ordinal}.`,
+        );
         continue;
       }
       if (before) ex.snapshots.push({ ...before, after_status: r.result.status });
       if (r.result.batchId) ex.batchIds.push(r.result.batchId);
       ack.ordinals.push(item.ordinal);
-      if (!item.sensitive && item.personLabel) ack.names.push(item.personLabel);
+      ack.names.push(!item.sensitive && item.personLabel ? item.personLabel : null);
     }
     if (ack.ordinals.length) {
       ex.acks.push(ack);
       ex.effect = ex.effect === 'none' || ex.effect === 'feedback' ? 'feedback' : 'mixed';
-      ex.summaries.push(ackText(ack, this.tz));
+      ex.summaries.push(ackSummary(ack, this.tz));
     }
     ex.lines.push(...[...new Set(notes)]);
   }
@@ -582,13 +639,13 @@ class CommandRun {
 
   private async why(item: ItemRow, ex: Exec): Promise<void> {
     if (item.sensitive) {
-      ex.lines.push(`Why ${item.ordinal}: something personal · see yeackbot.com/today`);
+      ex.lines.push(`#${item.ordinal} is something personal, so the details are only in the app: yeackbot.com/today`);
       return;
     }
     const r = await sendFeedback(this.db, item.suggestionId, { action: 'why' }, this.feedbackCtx(false));
     const why = (r.ok ? r.result.why : null) ?? safeWhy(this.db, item.suggestionId);
     if (!why) {
-      ex.lines.push(`Why ${item.ordinal} · ${item.label}: ${kindLabel(item.kind)} · score ${item.score.toFixed(2)} · more at yeackbot.com/today`);
+      ex.lines.push(`${endSentence(`#${item.ordinal} is a "${kindLabel(item.kind)}" suggestion about ${item.label}`)}\nMore at yeackbot.com/today`);
       return;
     }
     const signals = why.signals.slice(0, 4).map((s) => `• ${s.label}: ${s.value}`);
@@ -598,26 +655,28 @@ class CommandRun {
       .map((f) => `${f.label} ×${f.value.toFixed(1)}`);
     ex.lines.push(
       [
-        `Why ${item.ordinal} · ${item.label}: ${truncate(why.summary, 140)}`,
-        ...signals,
-        ...(learned.length ? [`Learned: ${learned.join(', ')}`] : []),
-        'yeackbot.com/today',
+        `Why I suggested ${item.label}:`,
+        truncate(why.summary, 160),
+        ...(signals.length ? ['', ...signals] : []),
+        ...(learned.length ? ['', `What I've learned: ${learned.join(', ')}`] : []),
+        '',
+        'More at yeackbot.com/today',
       ].join('\n'),
     );
   }
 
   private async draft(item: ItemRow, ex: Exec): Promise<void> {
     if (item.sensitive) {
-      ex.lines.push(`Drafts for ${item.ordinal}: something personal · see yeackbot.com/today`);
+      ex.lines.push(`#${item.ordinal} is something personal, so drafts are only in the app: yeackbot.com/today`);
       return;
     }
     if (!this.services.llm.canSpend('steady').ok) {
-      ex.lines.push('Drafts need the AI key');
+      ex.lines.push('I need the AI key to write drafts.');
       return;
     }
     const excluded = new Set(this.settings['llm.excluded_person_ids']);
     if ([item.personId, item.relatedPersonId].some((id) => id && excluded.has(canonicalOf(this.db, id)))) {
-      ex.lines.push(`No drafts for ${item.label}: kept away from the AI in Privacy settings`);
+      ex.lines.push(`${endSentence(`I can't write drafts for ${item.label}`)} They're kept away from the AI in your Privacy settings.`);
       return;
     }
     const r = await sendFeedback(this.db, item.suggestionId, { action: 'draft' }, this.feedbackCtx(false));
@@ -649,8 +708,8 @@ class CommandRun {
     const clean = openers.map((x) => truncate(scrub(x), 160)).filter(Boolean).slice(0, 2);
     ex.lines.push(
       clean.length
-        ? [`Drafts for ${item.label} (copy them; nothing is sent):`, ...clean.map((x, i) => `${i + 1}) ${x}`)].join('\n')
-        : "Couldn't write drafts right now · try again later",
+        ? [`Something you could send ${item.label}:`, '', `“${clean[0]}”`, ...(clean[1] ? ['', 'Or:', '', `“${clean[1]}”`] : []), '', "Copy it over yourself. I never text anyone but you."].join('\n')
+        : "I couldn't write a draft right now. Try again in a bit.",
     );
   }
 
@@ -707,8 +766,8 @@ class CommandRun {
     if (!payload.resolved.length) {
       ex.lines.push(
         unresolved.length
-          ? `Couldn't find ${listJoin(unresolved.map((u) => truncate(u, 30)), 'or')} · try log: coffee with Sam R.`
-          : "Couldn't tell who that was with · try log: coffee with Sam R.",
+          ? `${endSentence(`I couldn't find ${listJoin(unresolved.map((u) => truncate(u, 30)), 'or')}`)} Try a last initial, like "log: coffee with Sam R."`
+          : 'Who was that with? Try "log: coffee with Sam R."',
       );
       return;
     }
@@ -718,8 +777,8 @@ class CommandRun {
   /** Opens a clarification owned by `owner` (the `log:` that named the people; it stays 'clarifying'). */
   private askWhich(surface: string, options: ClarifyOption[], payload: ClarifyPayload, ex: Exec, owner = this.cmd.id): void {
     const id = createClarification(this.db, owner, options, { ...payload, surface }, this.now);
-    const nums = options.length === 2 ? '1/2' : `1–${options.length}`;
-    ex.lines.push(`${listJoin(options.map((o) => o.label), 'or')}? reply ${nums}`);
+    const who = truncate(surface.trim(), 30);
+    ex.lines.push([`Which ${who || 'one'} did you mean?`, ...options.map((o, i) => `${i + 1}. ${o.label}`), `Reply ${options.length === 2 ? '1 or 2' : `1–${options.length}`}.`].join('\n'));
     ex.status = 'clarifying';
     ex.clarificationId = id;
   }
@@ -749,9 +808,10 @@ class CommandRun {
       .filter((f) => !f.sensitive)
       .slice(0, 2)
       .map((f) => `“${truncate(f.value, 40)}”`);
-    const missing = payload.unresolved.length ? [`couldn't find ${listJoin(payload.unresolved.map((u) => truncate(u, 30)), 'or')}`] : [];
-    const head = payload.interaction ? `✓ Logged for ${listJoin(names)}: ${what} ${day}` : `✓ Noted for ${listJoin(names)}`;
-    ex.lines.push([head, ...factBits, ...missing].join(' · '));
+    const missing = payload.unresolved.length ? [endSentence(`I couldn't find ${listJoin(payload.unresolved.map((u) => truncate(u, 30)), 'or')}`)] : [];
+    const when = day === 'today' || day === 'yesterday' ? day : `on ${day}`;
+    const head = payload.interaction ? `✓ Logged ${LOG_PHRASE[kind]} ${listJoin(names)} ${when}.` : endSentence(`✓ Noted for ${listJoin(names)}`);
+    ex.lines.push([head, ...(factBits.length ? [`Noted: ${factBits.join(', ')}`] : []), ...missing].join('\n'));
     ex.summaries.push(payload.interaction ? `log for ${listJoin(names)} (${what} ${day})` : `note for ${listJoin(names)}`);
   }
 
@@ -761,7 +821,7 @@ class CommandRun {
     if (answer.cancel) {
       closeClarification(this.db, clar.id, 'cancelled', this.now, this.cmd.id);
       setCommandStatus(this.db, clar.command_id, 'ignored', this.now, 'clarification_cancelled');
-      ex.lines.push('✓ Dropped that log');
+      ex.lines.push('✓ OK, I dropped that log.');
       return ex;
     }
     const chosen = clar.options[answer.choice!]!;
@@ -789,64 +849,70 @@ class CommandRun {
 
   private undo(target: string | null, msg: MessageInfo, ex: Exec): void {
     if (target) {
-      ex.lines.push('Only your last command can be undone by text · everything else at yeackbot.com/today');
+      ex.lines.push('I can only undo your last command by text. Everything else is at yeackbot.com/today');
       return;
     }
     const r = undoLastCommandEffect(this.db, { at: msg.sentAt, now: this.now, byCommandId: this.cmd.id });
-    if (r.status === 'undone') ex.lines.push(`✓ Undid${r.summary ? `: ${r.summary}` : ' your last command'}`);
-    else if (r.status === 'already') ex.lines.push('Already undone · nothing else to undo by text');
-    else if (r.status === 'nothing') ex.lines.push('Nothing to undo');
-    else ex.lines.push("Can't undo that by text (later changes depend on it) · use yeackbot.com/today");
+    if (r.status === 'undone') ex.lines.push(r.summary ? `✓ Undone: ${r.summary}` : '✓ Undid your last command.');
+    else if (r.status === 'already') ex.lines.push("That's already undone, and there's nothing else I can undo by text.");
+    else if (r.status === 'nothing') ex.lines.push("There's nothing to undo.");
+    else ex.lines.push("I can't undo that by text because later changes depend on it. You can at yeackbot.com/today");
   }
 
   private pause(dur: string | null, msg: MessageInfo, ex: Exec): void {
     const until = resolveUntil(dur, msg.sentAt, this.tz);
     if (until === null) {
-      ex.lines.push(`Didn't get "${truncate(dur ?? '', 30)}" · try pause 1w`);
+      ex.lines.push(`I didn't understand "${truncate(dur ?? '', 30)}". Try "pause 1w" or "pause until monday".`);
       return;
     }
     const r = writeSettings(this.db, { 'digest.paused_until': until }, { actor: 'user', runId: this.ensureRun(), title: 'Paused the brief (text)', now: this.now });
     if (r.batchId) ex.batchIds.push(r.batchId);
     ex.effect = ex.effect === 'none' || ex.effect === 'setting' ? 'setting' : 'mixed';
-    const off = this.settings['digest.enabled'] ? '' : ' (the brief is also off in Settings)';
-    ex.lines.push(`✓ Brief paused until ${formatDay(until, this.tz, true)}${off} · resume to restart`);
+    const off = this.settings['digest.enabled'] ? '' : " (It's also turned off in Settings.)";
+    ex.lines.push(`✓ Paused your brief until ${formatDay(until, this.tz, true)}.${off}\nText "resume" to start it again.`);
     ex.summaries.push(`pause until ${formatDay(until, this.tz)}`);
   }
 
   private resume(ex: Exec): void {
     const paused = this.settings['digest.paused_until'];
     if (paused === null || paused <= this.now) {
-      ex.lines.push(this.settings['digest.enabled'] ? "The brief isn't paused" : "The brief isn't paused (it's off in Settings)");
+      ex.lines.push(this.settings['digest.enabled'] ? "Your brief isn't paused." : "Your brief isn't paused, but it's turned off in Settings.");
       return;
     }
     const r = writeSettings(this.db, { 'digest.paused_until': null }, { actor: 'user', runId: this.ensureRun(), title: 'Resumed the brief (text)', now: this.now });
     if (r.batchId) ex.batchIds.push(r.batchId);
     ex.effect = ex.effect === 'none' || ex.effect === 'setting' ? 'setting' : 'mixed';
-    ex.lines.push(`✓ Brief resumed${this.settings['digest.enabled'] ? ` · next one at ${this.settings['digest.time']}` : ' (turn it on in Settings to get it)'}`);
+    ex.lines.push(
+      this.settings['digest.enabled']
+        ? `✓ Your brief is back on. The next one comes at ${clockWords(this.settings['digest.time'])}.`
+        : '✓ Unpaused. Turn the brief on in Settings to get it.',
+    );
     ex.summaries.push('resume');
   }
 
   private more(digest: DigestRef | null, items: ItemRow[], ex: Exec): void {
     if (!digest) {
-      ex.lines.push('No brief in the last 36 h · see yeackbot.com/today');
+      ex.lines.push("I haven't sent you a brief in the last day and a half. Everything's at yeackbot.com/today");
       return;
     }
-    const extra = moreCandidates(this.db, digest.id, this.now, MAX_MORE, this.settings['learner.muted_kinds']);
-    if (!extra.length) {
-      ex.lines.push("That's everything for now · yeackbot.com/today");
+    // The next suggestion that can still be shown (an intro whose other person is hidden since is passed over).
+    const next = Math.max(0, ...items.map((i) => i.ordinal)) + 1;
+    const candidates = moreCandidates(this.db, digest.id, this.now, MORE_LOOKAHEAD, this.settings['learner.muted_kinds']);
+    const item = candidates.map((c) => selectedItemById(this.db, c.suggestionId, next)).find((i) => i !== null) ?? null;
+    if (
+      !item ||
+      !this.db
+        .prepare(`INSERT OR IGNORE INTO command_more_items (digest_id, ordinal, suggestion_id, command_id, created_at) VALUES (?, ?, ?, ?, ?)`)
+        .run(digest.id, next, item.suggestionId, this.cmd.id, this.now).changes
+    ) {
+      ex.lines.push("That's all I've got for now. Everything's at yeackbot.com/today");
       return;
     }
-    let next = Math.max(0, ...items.map((i) => i.ordinal)) + 1;
-    const ins = this.db.prepare(
-      `INSERT OR IGNORE INTO command_more_items (digest_id, ordinal, suggestion_id, command_id, created_at) VALUES (?, ?, ?, ?, ?)`,
-    );
-    const lines: string[] = [];
-    for (const it of extra) {
-      if (!ins.run(digest.id, next, it.suggestionId, this.cmd.id, this.now).changes) continue;
-      lines.push(`${next} ${it.sensitive ? 'something personal · open the app' : `${it.label} · ${kindLabel(it.kind)}`}`);
-      next++;
-    }
-    ex.lines.push([...lines, `done ${next - lines.length} · skip ${next - 1} · yeackbot.com/today`].join('\n'));
+    // Written like a brief item: the numbered headline and its context, then how to act on it.
+    const copy = templateCopy(item, { db: this.db, now: this.now, timeZone: this.tz });
+    const lines = itemLines({ line: mainLine(next, copy.headline, item.sensitive), body: copy.body, openers: [], copy: 'template', sensitive: item.sensitive });
+    ex.lines.push([...lines, '', `Reply "done ${next}", "skip ${next}", or "more" for another.`].join('\n'));
+    ex.replyItem = { digestId: digest.id, ordinal: next };
   }
 
   private statusLine(): string {
@@ -854,9 +920,10 @@ class CommandRun {
     const paused = s['digest.paused_until'] !== null && s['digest.paused_until'] > this.now;
     const last = this.db.prepare(`SELECT max(sent_at) FROM digests WHERE status IN ('sent','fallback_sent')`).pluck().get() as number | null;
     return [
-      `Brief: ${s['digest.enabled'] ? `on at ${s['digest.time']}` : 'off'}${paused ? ` · paused until ${formatDay(s['digest.paused_until']!, this.tz)}` : ''}`,
-      `Last sent: ${last ? formatDay(last, this.tz) : 'never'}`,
-      `AI: ${this.services.llm.canSpend('steady').ok ? 'on' : 'off'} · commands: on`,
+      s['digest.enabled'] ? `Your brief is on, every day at ${clockWords(s['digest.time'])}.` : 'Your brief is off. You can turn it on in Settings.',
+      ...(paused ? [`It's paused until ${formatDay(s['digest.paused_until']!, this.tz, true)}.`] : []),
+      last ? `The last one went out ${formatDay(last, this.tz, true)}.` : "I haven't sent one yet.",
+      this.services.llm.canSpend('steady').ok ? 'AI features are on.' : 'AI features are off (no key or budget).',
     ].join('\n');
   }
 }
@@ -893,15 +960,16 @@ function clauseFromIntent(r: IntentResult): Clause | null {
   switch (c.verb) {
     case 'done':
       return { verb: 'done', sel };
+    // No number: the item the message replies to (or the only open one), resolved in itemClause.
     case 'snooze':
-      return sel ? { verb: 'snooze', sel, dur: c.dur } : null;
+      return { verb: 'snooze', sel, dur: c.dur };
     case 'skip':
-      return sel ? { verb: 'skip', sel } : null;
+      return { verb: 'skip', sel };
     case 'wrong':
-      return sel ? { verb: 'wrong', sel, note: null } : null;
+      return { verb: 'wrong', sel, note: null };
     case 'why':
     case 'draft':
-      return sel?.nums.length === 1 ? { verb: c.verb, n: sel.nums[0]! } : null;
+      return sel && sel.nums.length !== 1 ? null : { verb: c.verb, n: sel ? sel.nums[0]! : null };
     case 'undo':
       return { verb: 'undo', target: null };
     case 'pause':
@@ -911,22 +979,53 @@ function clauseFromIntent(r: IntentResult): Clause | null {
   }
 }
 
+/** "✓ Logged coffee with Sam R. today." */
+const LOG_PHRASE: Record<LogKind, string> = {
+  coffee: 'coffee with',
+  meal: 'a meal with',
+  drinks: 'drinks with',
+  call: 'a call with',
+  party: 'a party with',
+  met: 'time with',
+  other: 'a note for',
+};
+
 const PAST: Record<ItemAck['verb'], string> = { done: 'done', snooze: 'snoozed', skip: 'skipped', wrong: 'marked wrong' };
 
-function ackText(a: ItemAck, tz: string): string {
-  const names = a.names.length && a.names.length <= 2 ? ` (${[...new Set(a.names)].join(', ')})` : '';
+/** Short form for the journal and "Undone: …" ("2 done (Priya S.)", "1 snoozed → Oct 28"). */
+function ackSummary(a: ItemAck, tz: string): string {
+  const names = a.names.filter((n): n is string => !!n);
+  const who = names.length && names.length <= 2 ? ` (${[...new Set(names)].join(', ')})` : '';
   const until = a.verb === 'snooze' && a.until ? ` → ${formatDay(a.until, tz)}` : '';
-  return `${a.ordinals.join(', ')} ${PAST[a.verb]}${names}${until}`;
+  return `${a.ordinals.join(', ')} ${PAST[a.verb]}${who}${until}`;
 }
 
-/** One reply: grouped item acks first ("✓ 2 done (Priya S.) · 1 snoozed → Oct 28"), then other lines. */
+/** "Priya S." / "Priya S. and #3" / "#1 and #3" */
+function ackWho(a: ItemAck): string {
+  return listJoin(a.ordinals.map((n, k) => a.names[k] ?? `#${n}`));
+}
+
+/** One acknowledgement sentence: "✓ Nice, marked Priya S. done." */
+function ackText(a: ItemAck, tz: string): string {
+  const who = ackWho(a);
+  switch (a.verb) {
+    case 'done':
+      return `✓ Nice, marked ${who} done.`;
+    case 'snooze':
+      return endSentence(`✓ Snoozed ${who}${a.until ? ` until ${formatDay(a.until, tz, true)}` : ''}`);
+    case 'skip':
+      return `${endSentence(`✓ Skipped ${who}`)} I'll suggest things like that a bit less.`;
+    case 'wrong':
+      return `✓ Marked ${who} as wrong. Thanks, I'll learn from that.`;
+  }
+}
+
+/** One reply: the item acks first (one line each), then other lines, then how to take it back. */
 function composeReply(ex: Exec, tz: string, effectful: boolean): string | null {
-  const parts: string[] = [];
-  if (ex.acks.length) parts.push(`✓ ${ex.acks.map((a) => ackText(a, tz)).join(' · ')}`);
-  parts.push(...ex.lines);
+  const parts: string[] = [...ex.acks.map((a) => ackText(a, tz)), ...ex.lines];
   if (!parts.length) return null;
   const body = parts.join('\n');
-  return effectful && ex.purpose === 'reply' && ex.status === 'handled' ? `${body} · undo to revert` : body;
+  return effectful && ex.purpose === 'reply' && ex.status === 'handled' ? `${body}\n\n(Text "undo" to take that back.)` : body;
 }
 
 function canonicalOf(db: DB, personId: string): string {
