@@ -23,6 +23,7 @@
 import { uuidv7, type TripMatchReason } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { tx } from '../db/tx';
+import { selfPeople } from '../identity/self';
 import { occasionDays } from '../pipeline/occasions/build';
 import { readSetting } from '../settings/registry';
 import { DAY, addDays, dayStart, daysBetween, localDate, monthOf, shortDate, statsOf } from './common';
@@ -103,8 +104,9 @@ export interface LocationFact {
   place: Place;
 }
 
-/** Live, non-sensitive location-ish facts of visible people, with their parsed places. */
+/** Live, non-sensitive location-ish facts of visible people (never a record of mine), with their parsed places. */
 export function locationFacts(db: DB): LocationFact[] {
+  const self = selfPeople(db);
   const rows = db
     .prepare(
       `SELECT f.id, pv.id AS personId, f.type, f.value, f.confidence, f.valid_from AS validFrom, f.valid_to AS validTo, f.source,
@@ -117,6 +119,7 @@ export function locationFacts(db: DB): LocationFact[] {
     .all() as Omit<LocationFact, 'place'>[];
   const out: LocationFact[] = [];
   for (const r of rows) {
+    if (self.has(r.personId)) continue;
     const place = r.type === 'address' ? parsePlace(r.value, 'address') : r.type === 'travel_plan' ? placeOfTravelPlan(r.value) : placeOfFactValue(r.value);
     if (place) out.push({ ...r, place });
   }
@@ -307,6 +310,8 @@ export interface PeopleIndex {
 }
 
 export function peopleIndex(db: DB, now: number): PeopleIndex {
+  // Records of mine (identity/self.ts) are never "someone" at my destination: my own facts are the home base.
+  const self = selfPeople(db);
   const facts = factsByPerson(locationFacts(db));
   const partiful = new Map<string, { at: number; place: Place }[]>();
   const evRows = db
@@ -319,6 +324,7 @@ export function peopleIndex(db: DB, now: number): PeopleIndex {
     )
     .all(now - PARTIFUL_LOOKBACK_MS - TRIP_WINDOW.aheadDays * DAY) as { person_id: string; at: number; loc: string }[];
   for (const r of evRows) {
+    if (self.has(r.person_id)) continue;
     const place = parsePlace(r.loc, 'venue_address');
     if (place) partiful.set(r.person_id, [...(partiful.get(r.person_id) ?? []), { at: r.at, place }]);
   }
@@ -330,6 +336,7 @@ export function peopleIndex(db: DB, now: number): PeopleIndex {
     )
     .all() as { person_id: string; name: string }[];
   for (const r of locRows) {
+    if (self.has(r.person_id)) continue;
     const place = parsePlace(r.name, 'name');
     if (place) saved.set(r.person_id, [...(saved.get(r.person_id) ?? []), place]);
   }

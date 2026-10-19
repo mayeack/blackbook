@@ -100,7 +100,9 @@ export function mergePeople(db: DB, input: MergeInput): MergeResult {
     if (s.status === 'suppressed' || m.status === 'suppressed') {
       throw new MergeRefusedError('suppressed', 'A suppressed person cannot be merged.');
     }
-    if ((s.kind === 'me') !== (m.kind === 'me')) throw new MergeRefusedError('me_mismatch', 'Only your own records can merge into you.');
+    // Only the owner can say a record is them: a 'user' merge may fold a person into me, never the reverse.
+    const intoMe = s.kind === 'me' && m.kind === 'person' && input.method === 'user';
+    if ((s.kind === 'me') !== (m.kind === 'me') && !intoMe) throw new MergeRefusedError('me_mismatch', 'Only your own records can merge into you.');
     if (PROBABILISTIC.has(input.method) && (m.is_priority || m.is_hidden) && !(s.is_priority || s.is_hidden)) {
       throw new MergeRefusedError('priority_absorbed', 'A priority or hidden person is never absorbed probabilistically.');
     }

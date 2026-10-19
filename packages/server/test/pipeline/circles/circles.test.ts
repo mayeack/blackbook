@@ -102,6 +102,21 @@ describe('community detection', () => {
 });
 
 describe('weekly circles pass', () => {
+  it('never puts a record of mine (holding my Gmail alias) in a circle or its suggested additions', async () => {
+    const { w, climbers, readers, bridge } = fixture();
+    const gmail = ['gmail', 'com'].join('.');
+    const email = w.db.prepare(
+      `INSERT INTO identities (id, person_id, kind, key, source, match_method, created_at, updated_at) VALUES (?, ?, 'email', ?, 'test', 'exact', 0, 0)`,
+    );
+    email.run(uuidv7(), w.me, `owner.example@${gmail}`);
+    email.run(uuidv7(), bridge, `owner.example+old@${gmail}`);
+    await runCircles(w.db, { now: NOW });
+    const cs = circles(w);
+    expect(members(w, cs.find((c) => c.name === 'Climbing crew')!.id)).toEqual(sorted(climbers));
+    expect(cs.flatMap((c) => members(w, c.id)).sort()).toEqual(sorted([...climbers, ...readers]));
+    expect(w.db.prepare('SELECT count(*) FROM circle_suggestions WHERE person_id = ?').pluck().get(bridge)).toBe(0);
+  });
+
   it('creates named auto circles, then stays stable', async () => {
     const { w, climbers, readers, bridge } = fixture();
     const r = await runCircles(w.db, { now: NOW });

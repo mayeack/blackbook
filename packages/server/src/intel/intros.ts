@@ -15,6 +15,7 @@
  */
 import type { DB } from '../db/connection';
 import { tx } from '../db/tx';
+import { selfPeople } from '../identity/self';
 import type { Candidate } from '../pipeline/suggestions/types';
 import { factsByPerson, livesIn, locationFacts } from './trips';
 
@@ -72,16 +73,17 @@ export interface PairScore {
   shared: string[];
 }
 
-/** People eligible for intros (strong ties, visible, not opted out), with what scoring needs. */
+/** People eligible for intros (strong ties, visible, never a record of mine, not opted out), with what scoring needs. */
 export function introPeople(db: DB, now: number): IntroPerson[] {
   const rows = db
     .prepare(
       `SELECT pv.id, coalesce(ps.tie_strength, 0) AS tie, coalesce(ps.historical_strength, 0) AS historical, pv.custom, pv.company, pv.job_title
        FROM person_visible pv JOIN person_stats ps ON ps.person_id = pv.id
-       WHERE coalesce(ps.tie_strength, 0) >= @tie OR coalesce(ps.historical_strength, 0) >= @hist
+       WHERE (coalesce(ps.tie_strength, 0) >= @tie OR coalesce(ps.historical_strength, 0) >= @hist)
+         AND pv.id NOT IN (SELECT value FROM json_each(@self))
        ORDER BY coalesce(ps.tie_strength, 0) DESC, pv.id LIMIT @limit`,
     )
-    .all({ tie: INTRO.minTie, hist: INTRO.minHistorical, limit: INTRO.maxPeople }) as {
+    .all({ tie: INTRO.minTie, hist: INTRO.minHistorical, limit: INTRO.maxPeople, self: JSON.stringify([...selfPeople(db)]) }) as {
     id: string;
     tie: number;
     historical: number;
