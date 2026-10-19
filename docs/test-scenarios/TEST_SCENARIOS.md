@@ -703,3 +703,35 @@ The Ask footer shows sub-cent costs with four decimals.
 100K tokens (status `tool_limit` or an answer built from the kept results); a Sonnet-override `general_harms` batch
 refusal is recorded `refused` with no synchronous re-run.
 **Platforms**: server + web. Real-API behavior (fallback blocks, cache usage) needs the owner's key.
+
+## 2026-10-18 — LLM efficiency check (`yb llm-usage`, weekly llm-efficiency job) + Sonnet 5.5 cache-read price
+
+**What changed**: a read-only, measured API-efficiency report over the LLM ledger (`packages/server/src/llm/efficiency.ts`):
+per kind × mode it shows requests, uncached / cache-read / cache-write / output tokens, cost, cost per request,
+cache-read share, cost vs pre-flight estimate, and what caching saved. Findings: `cache_unpaid`, `long_context` (>100K
+prompt → Haiku 5× card), `wasted_spend`, `estimate_low` (warnings), and `off_default_model`, `sync_on_batch_route`,
+`failed_requests` (info). A new weekly job `llm-efficiency` (Mondays 04:40) logs the findings and opens the one `llm`
+alert (info) when any warning exists. Pricing fix: Sonnet 5.5 cache reads are 0.05× input ($0.10/MTok, pricing page
+2026-10-18), not 0.1×; cache-read multipliers are now per model (`ModelSpec.cacheRead`).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` (1,283 tests).
+2. `test/llm/efficiency.test.ts` (profile sums, window, cacheSaved arithmetic, every finding's trigger and threshold,
+   report formatting, the job's alert, the CLI incl. `--json` and `--days` validation), `test/llm/models.test.ts`
+   (Sonnet cache read $0.10; Sonnet/Haiku estimate ratio), `test/llm/jobs.test.ts` (job registration).
+
+### Scenario B — Report on real data (Claude verified, read-only)
+1. `npm run yb -- llm-usage` (or `--days 30`, `--json`).
+2. **Expected**: header with the local date range; totals with cache-read share and "caching saved"; one row per kind
+   (calendar batch at ~49% cache share and cost/est ≈ 0.6 on 2026-10-18's data); findings or "findings: none".
+   Nothing is sent to the API; no names, ids or text are printed.
+
+### Scenario C — Weekly job (owner)
+1. `npm run yb -- run-job llm-efficiency` with the server running.
+2. **Expected**: JSON stats `{requests, billed, cost_micro_usd, cache_read_pct, warnings, infos}`; with a warning
+   finding an info-severity `llm` alert appears pointing at `yb llm-usage` (no alert when only info findings exist, or
+   when another `llm` alert is already open).
+
+**Edge cases**: Ask rows (whole tool loops, usage summed over turns) never trigger `long_context`; `rejected` batch
+items (valid output the gates declined) are not counted as waste; unbilled 400s count as `failed`, not spend.
+**Platforms**: server CLI + scheduler. The alert's appearance in the web alert list was not checked in a browser.

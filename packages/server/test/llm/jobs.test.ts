@@ -23,11 +23,12 @@ const row = (db: ReturnType<typeof memDb>, id: string, createdAt: number) =>
     .run(id, LLM_MODEL, createdAt);
 
 describe('llm jobs', () => {
-  it('registers llm-collect (every 5 min) and llm-purge (daily)', () => {
+  it('registers llm-collect (every 5 min), llm-purge (daily) and llm-efficiency (Mondays)', () => {
     const jobs = llmJobs({});
     expect(jobs.map((j) => [j.name, j.schedule])).toEqual([
       ['llm-collect', { kind: 'interval', everyMs: AGENT_TIMES.llmCollectEveryMs }],
       ['llm-purge', { kind: 'daily', at: AGENT_TIMES.llmPurge }],
+      ['llm-efficiency', { kind: 'weekly', dow: 1, at: AGENT_TIMES.llmEfficiency.at }],
     ]);
   });
 

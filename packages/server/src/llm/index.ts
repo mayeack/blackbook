@@ -47,3 +47,4 @@ export {
   type StoredBatchItem,
 } from './batches';
 export { BudgetExceeded, getRequest, llmExclusions, markRequest, requireBudget, type LedgerStatus } from './ledger';
+export { efficiencyReport, formatEfficiencyReport, type EfficiencyFinding, type EfficiencyReport, type KindProfile } from './efficiency';
