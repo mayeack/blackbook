@@ -1002,9 +1002,9 @@ changed; Ask answers and log/note command acks are not changed by this work.
 **Platforms**: server only. Not checked against a live brief or live Haiku output.
 
 ## 2026-10-18 — Extraction enums: enforced by the grammar, and an out-of-set value costs one item, not the window
-Three backfill windows were dead-lettered (`schema_invalid`) because one commitment had owner `"P66"` / `"P22"` or
+Three backfill windows failed validation (`schema_invalid`) because one commitment had owner `"P66"` / `"P22"` or
 kind `"text"`: the SDK's `zodOutputFormat` moved every `enum` into a description, and one bad value failed the whole
-window. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar, and `parseExtraction`
+window. Each was re-sent whole (a paid retry) and applied on attempt 1; a second miss would have dead-lettered it. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar, and `parseExtraction`
 (extraction/schema.ts) drops only the item holding an out-of-set string (`dropped_<item>_bad_enum`).
 
 ### Scenario A — Automated (Claude verified)
@@ -1029,5 +1029,6 @@ window. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar
 
 **Edge cases**: a missing key or a wrong type (number / null in an enum field) still fails the window (retry, then
 dead letter); a bad `needs_reply` enum drops only the verdict (no verdict, not `n_a`); two bad fields in one
-commitment count as one dropped item. The 3 windows already dead-lettered on 2026-10-18 are NOT revived by this change.
+commitment count as one dropped item. The 3 windows hit on 2026-10-18 were retried and applied (live DB, attempt 1):
+nothing to recover.
 **Platforms**: server only. Not deployed.

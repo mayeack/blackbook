@@ -82,9 +82,9 @@ function restoreEnums(strict: unknown, source: unknown): void {
 /**
  * `output_config.format` for a zod 4 schema: the SDK's zodOutputFormat, which moves constraints the API can't
  * enforce into descriptions, with every `enum` put back. The API does enforce enums, but the SDK (0.134) moves them
- * too, so nothing kept a value inside its set: on 2026-10-18 three backfill windows were dead-lettered for a
- * commitment owner "P66" and a kind "text". Enums cost well under a grammar node each (llm/client.ts
- * GRAMMAR_MAX_NODES). Plain JSON only: the parse function is dropped, the client validates itself.
+ * too, so nothing kept a value inside its set: on 2026-10-18 three backfill windows failed validation over a
+ * commitment owner "P66" and a kind "text" (each re-sent whole). Enums cost well under a grammar node each
+ * (llm/client.ts GRAMMAR_MAX_NODES). Plain JSON only: the parse function is dropped, the client validates itself.
  */
 export function outputFormat(schema: z.ZodType): JsonOutputFormat {
   const hit = formats.get(schema);
