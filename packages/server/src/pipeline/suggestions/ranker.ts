@@ -1,6 +1,6 @@
 /**
  * Digest selection (intelligence §5 "Selection", PLAN "Suggestions, self-learning and wildcards"). Pure: the stage
- * scores candidates (base × w_kind × θ factors × priority × fatigue) and applies cooldowns/mutes first; this picks.
+ * scores candidates (base × w_kind × θ factors × priority × party invites × fatigue) and applies cooldowns/mutes first; this picks.
  *
  *   1. Time-critical items (pre-event within 36 h, travel within 48 h) are forced in, best first.
  *   2. Greedy by score with diversity: the 2nd item of a kind competes at ×0.6, never more than 2 of one kind.

@@ -48,14 +48,17 @@ struct TypedStreamDecoderTests {
         #expect(blank.source == .attributedBody)
     }
 
+    /// Typed once: the inline `[0x04, 0x0B] + Array(…) + …` literals timed out the type checker.
+    static let streamString: [UInt8] = [0x04, 0x0B] + Array("streamtyped".utf8) + Array("NSString".utf8)
+
     @Test("malformed input never crashes and yields nil", arguments: [
         Data(),
         Data([0x04, 0x0B]),
         Data("streamtyped".utf8),
-        Data([0x04, 0x0B] + Array("streamtyped".utf8) + Array("NSString".utf8) + [0x01, 0x94, 0x84, 0x01, 0x2B, 0x81, 0xFF]),
-        Data([0x04, 0x0B] + Array("streamtyped".utf8) + Array("NSString".utf8) + [0x01, 0x2B, 0x7F, 0x41]),
-        Data([0x04, 0x0B] + Array("streamtyped".utf8) + Array("NSString".utf8) + [0x01, 0x2B, 0x85]),
-    ])
+        Data(streamString + [0x01, 0x94, 0x84, 0x01, 0x2B, 0x81, 0xFF]),
+        Data(streamString + [0x01, 0x2B, 0x7F, 0x41]),
+        Data(streamString + [0x01, 0x2B, 0x85]),
+    ] as [Data])
     func malformed(_ data: Data) {
         #expect(TypedStreamDecoder.decodeText(data) == nil)
     }

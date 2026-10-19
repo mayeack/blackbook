@@ -16,10 +16,11 @@ import type { EvalMetric, EvalReport } from '@yb/shared';
 import type { DataPaths } from '../config';
 import { closeDatabase, openDatabase, type DB } from '../db/connection';
 import { acquireLock, lockOwner, releaseLock } from '../db/lock';
-import { currentVersion, LATEST_VERSION } from '../db/migrate';
+import { currentVersion, LATEST_VERSION, migrate } from '../db/migrate';
 import { formatUsd as fmtUsd } from '../llm/models';
 import type { LlmClient, LlmEffort } from '../llm/types';
 import { servicesFor } from '../services';
+import { runIntentEval } from './intent';
 import { buildReport, shadowSummary, type ShadowSummary } from './metrics';
 import { sampleSet } from './sample';
 import { planShadow, runShadow, type ShadowPlan } from './shadow';
@@ -38,6 +39,8 @@ export const EVAL_USAGE = `usage: yb eval <command> [options]        (also: npm 
                                          into shadow rows (nothing applied). --plan: estimate only, sends nothing
   shadow-report [<runId>] [--json]       the diff and promotion gate of a shadow run (latest by default)
   reset --set <set> --yes                delete a golden set and its labels
+  intent [--json]                        the intent parser's eval cases (synthetic notes + a synthetic profile
+                                         screenshot) through Claude on a scratch database (~$0.002; needs the key)
 sets: extraction, identity, reply_debt, ask ("golden" = all)`;
 
 export interface CliIO {
@@ -51,7 +54,7 @@ export interface EvalCliDeps {
   now?: () => number;
 }
 
-const COMMANDS = ['report', 'status', 'sample', 'shadow', 'shadow-report', 'reset'] as const;
+const COMMANDS = ['report', 'status', 'sample', 'shadow', 'shadow-report', 'reset', 'intent'] as const;
 type Command = (typeof COMMANDS)[number];
 
 function parseSet(v: string | undefined): SetName[] | 'bad' {
@@ -145,6 +148,30 @@ async function withReadDb<T>(paths: DataPaths, fn: (db: DB) => Promise<T> | T): 
   }
 }
 
+/** `yb eval intent`: the cases on a scratch in-memory database (its own ledger; the data DB is never opened). */
+async function intentEval(io: CliIO, json: boolean, llmFor: (db: DB) => LlmClient, now: number): Promise<number> {
+  const db = openDatabase(':memory:');
+  try {
+    migrate(db);
+    const llm = llmFor(db);
+    if (!llm.canSpend('steady').ok) {
+      io.err('no ANTHROPIC_API_KEY (or the AI is off): nothing was sent.');
+      return 1;
+    }
+    const results = await runIntentEval({ llm, egress: servicesFor(db).egress, timeZone: 'UTC' }, { now });
+    const cost = llm.spend().todayUsd;
+    const passed = results.filter((r) => r.pass).length;
+    if (json) io.out(JSON.stringify({ results, passed, total: results.length, costUsd: cost }));
+    else {
+      for (const r of results) io.out(`${r.pass ? '✓' : '✗'} ${r.id}${r.failures.length ? `: ${r.failures.join('; ')}` : ''}`);
+      io.out(`${passed}/${results.length} passed · ${fmtUsd(cost)}`);
+    }
+    return passed === results.length ? 0 : 1;
+  } finally {
+    closeDatabase(db);
+  }
+}
+
 export async function evalCommand(argv: string[], paths: DataPaths, io: CliIO, deps: EvalCliDeps = {}): Promise<number> {
   const first = argv[0];
   const cmd: Command = first && !first.startsWith('-') ? (first as Command) : 'report';
@@ -203,12 +230,13 @@ export async function evalCommand(argv: string[], paths: DataPaths, io: CliIO, d
     io.err(`--set must be one of ${SET_NAMES.join(', ')} or golden`);
     return 2;
   }
+  const now = deps.now ?? (() => Date.now());
+  const llmFor = deps.llm ?? ((db: DB) => servicesFor(db, { anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || null }).llm);
+  if (cmd === 'intent') return intentEval(io, json, llmFor, now());
   if (!fs.existsSync(paths.dbPath)) {
     io.err(`no database at ${paths.dbPath} yet (start the server once).`);
     return 2;
   }
-  const now = deps.now ?? (() => Date.now());
-  const llmFor = deps.llm ?? ((db: DB) => servicesFor(db, { anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || null }).llm);
 
   switch (cmd) {
     case 'report':

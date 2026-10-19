@@ -90,6 +90,8 @@ export class FakeCollector {
   token = 'synthetic-test-token';
   /** When set, GET /v1/imessage/messages with this after_rowid answers 503 chatdb_unavailable. */
   failMessagesAfter: number | null = null;
+  /** GET /v1/imessage/attachment answers, by `${message_guid}#${index}` (anything else: 403 attachment_not_allowed). */
+  readonly attachmentImages = new Map<string, { width: number; height: number; data_base64: string }>();
   private rowid = 0;
   private chatRowid = 0;
   private readonly cleanup: () => void;
@@ -236,6 +238,14 @@ export class FakeCollector {
         return { statusCode: 200, data: this.envelope(this.chats, 'chat_rowid', after, limit) };
       case '/v1/imessage/handles':
         return { statusCode: 200, data: { api: 'v1', generated_at: T0, items: this.handles } };
+      case '/v1/imessage/attachment': {
+        const img = this.attachmentImages.get(`${q.get('message_guid')}#${q.get('index') ?? 0}`);
+        if (!img) return { statusCode: 403, data: { error: { code: 'attachment_not_allowed', message: 'not in the note-to-self thread' } } };
+        return {
+          statusCode: 200,
+          data: { api: 'v1', generated_at: new Date(T0).toISOString(), mime: 'image/jpeg', bytes: Buffer.from(img.data_base64, 'base64').length, ...img },
+        };
+      }
       default:
         return { statusCode: 404, data: { error: { code: 'not_found', message: 'no route' } } };
     }

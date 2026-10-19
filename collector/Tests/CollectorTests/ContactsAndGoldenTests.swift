@@ -69,6 +69,10 @@ struct GoldenContractTests {
         let failed = SendResult(status: .failed, messageGUIDs: [], rowIDs: [], errorCode: "automation_denied")
         #expect(try checkGolden("imessage-send-failed", Self.wrap(failed.json)))
 
+        // Fixed bytes (a real encode differs across macOS versions); the route test covers the actual JPEG.
+        let image = AttachmentImage(data: Data([0xFF, 0xD8, 0xFF, 0xE0, 0xFF, 0xD9]), width: 4, height: 3)
+        #expect(try checkGolden("imessage-attachment", Self.wrap(.object(image.fields))))
+
         let dir = "/Users/owner/Library/Application Support/Yeackbot/snapshots/whatsapp/20261001T120000.000Z"
         let files: [String: String?] = ["chat": "\(dir)/ChatStorage.sqlite", "contacts": "\(dir)/ContactsV2.sqlite", "lid": nil]
         let snapshot = WhatsAppSnapshotResult(

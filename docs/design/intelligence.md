@@ -468,7 +468,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 | `circle_neglect` | 0.4 | 0.40 | 30 days |
 | `dormant` (S>365, H was ≥50) | 0.3 | 0.30 | 90 days |
 
-**Score:** `s = base · w_kind · fb_kind · (1 + 0.3·priority) · fatigue_p`, where `fatigue_p = 0.5` if the person appeared in any digest in the last 3 days.
+**Score:** `s = base · w_kind · fb_kind · (1 + 0.3·priority) · (1 + 0.3·party) · fatigue_p`, where `fatigue_p = 0.5` if the person appeared in any digest in the last 3 days and `party = 1` for a pre-event brief, event follow-up or intro about someone in the Party invites circle (the owner's standing "prioritize inviting X to parties" texts; the same people lead the event brief and follow-up lists).
 
 **Selection:**
 1. Time-critical items (pre-event within 36h, travel within 48h) are forced in.

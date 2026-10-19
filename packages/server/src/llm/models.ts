@@ -231,9 +231,20 @@ export interface RouteDefaults {
   mode: 'sync' | 'batch';
   /** Expected output tokens per request, for pre-flight estimates. */
   estOutputTokens: number;
+  /** Images one request may carry (0 = text only; the egress choke point refuses images on every other route). */
+  maxImages: number;
 }
 
-const r = (model: LlmModel, effort: LlmEffort, thinking: ThinkingMode, maxTokens: number, cacheTtl: CacheTtl | null, mode: 'sync' | 'batch', estOutputTokens: number): RouteDefaults => ({
+const r = (
+  model: LlmModel,
+  effort: LlmEffort,
+  thinking: ThinkingMode,
+  maxTokens: number,
+  cacheTtl: CacheTtl | null,
+  mode: 'sync' | 'batch',
+  estOutputTokens: number,
+  maxImages = 0,
+): RouteDefaults => ({
   model,
   effort,
   thinking,
@@ -241,7 +252,17 @@ const r = (model: LlmModel, effort: LlmEffort, thinking: ThinkingMode, maxTokens
   cacheTtl,
   mode,
   estOutputTokens,
+  maxImages,
 });
+
+/**
+ * Images cost about width × height / 750 tokens: a phone screenshot downscaled to 1568 px on the long side
+ * (~723 × 1568) is ~1.5k input tokens (≈ $0.00015 on Haiku 5.5). Size guards count every image at the
+ * high-resolution ceiling, so the ≤100K guard never under-counts.
+ */
+export const IMAGE_MAX_TOKENS = 4784;
+/** Base64 characters one image may have (the API's per-image limit is 5 MB). */
+export const IMAGE_MAX_BASE64_CHARS = 5_000_000;
 
 /**
  * Defaults per route. Max tokens: JSON-only routes get a few × their typical output (batch items that hit the cap
@@ -263,8 +284,8 @@ export const ROUTES: Readonly<Record<LlmRoute, RouteDefaults>> = {
   extract_consolidate: r(HAIKU_5_5, 'low', 'disabled', 4000, '1h', 'batch', 600),
   /** Identity tie-break: ≤10 sequential calls a night. */
   tiebreak: r(HAIKU_5_5, 'low', 'disabled', 1000, '5m', 'sync', 250),
-  /** Free-text command intent (iMessage self-thread). */
-  intent: r(HAIKU_5_5, 'low', 'disabled', 1000, null, 'sync', 200),
+  /** Free-text command intent (iMessage self-thread), with up to 2 attached screenshots (Haiku 5.5 reads images). */
+  intent: r(HAIKU_5_5, 'low', 'disabled', 1000, null, 'sync', 200, 2),
   /** Auto-circle names: a few sequential calls per run. */
   circle_name: r(HAIKU_5_5, 'low', 'disabled', 600, '5m', 'sync', 120),
   /** Calendar attendee adjudication, nightly Message Batch. */

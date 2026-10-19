@@ -15,6 +15,8 @@ final class APIHarness {
     let contacts = FakeContacts()
     let api: CollectorAPI
     let whatsappSource: URL
+    /// Stands in for ~/Library/Messages/Attachments.
+    let attachmentsRoot: URL
 
     init(port: UInt16 = APIHarness.port, compiledHandles: [String] = ["+15555550100"]) throws {
         world = try SyntheticWorld()
@@ -25,15 +27,18 @@ final class APIHarness {
         let clock = FakeClock()
         let whatsapp = WhatsAppSnapshotter(sourceDir: whatsappSource,
                                            destRoot: dataDir.appendingPathComponent("snapshots/whatsapp"), now: { refDate })
-        let send = SendService(allowlist: RecipientAllowlist(compiledHandles: compiledHandles,
-                                                             ownAddresses: { try reader.ownAccountAddresses() }),
+        let allowlist = RecipientAllowlist(compiledHandles: compiledHandles, ownAddresses: { try reader.ownAccountAddresses() })
+        let send = SendService(allowlist: allowlist,
                                ledger: SendLedger(fileURL: nil), sender: MessagesSender(runner: runner), rows: reader, clock: clock)
+        attachmentsRoot = dataDir.appendingPathComponent("attachments", isDirectory: true)
+        let attachments = AttachmentService(reader: reader, allowlist: allowlist, root: attachmentsRoot)
         let health = HealthReporter(reader: reader, whatsapp: whatsapp, probe: FakeProbe(),
                                     startedAt: refDate.addingTimeInterval(-3600),
                                     info: ["CFBundleShortVersionString": "2.0.0", "CFBundleVersion": "2"], macOSVersion: "26.0.0")
         let tok = token
         api = CollectorAPI(port: port, dependencies: .init(token: { tok }, reader: reader, contacts: contacts,
-                                                           whatsapp: whatsapp, send: send, health: health, now: { refDate }))
+                                                           whatsapp: whatsapp, send: send, attachments: attachments,
+                                                           health: health, now: { refDate }))
     }
 
     deinit { try? FileManager.default.removeItem(at: dataDir) }
@@ -258,6 +263,8 @@ struct CollectorAPITests {
             send: SendService(allowlist: RecipientAllowlist(compiledHandles: [], ownAddresses: { [] }),
                               ledger: SendLedger(fileURL: nil), sender: MessagesSender(runner: h.runner), rows: missing,
                               clock: FakeClock()),
+            attachments: AttachmentService(reader: missing, allowlist: RecipientAllowlist(compiledHandles: [], ownAddresses: { [] }),
+                                           root: h.attachmentsRoot),
             health: HealthReporter(reader: missing, whatsapp: WhatsAppSnapshotter(sourceDir: h.whatsappSource, destRoot: h.dataDir),
                                    probe: FakeProbe(), startedAt: refDate),
             now: { refDate }))

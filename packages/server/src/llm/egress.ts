@@ -16,14 +16,19 @@
  * Kept: first names, cities, companies, chat titles.
  *
  * The scanner FAILS CLOSED: a raw E.164/NANP number, email or @handle anywhere in an outgoing user turn blocks the
- * whole request (EgressBlocked). Logs carry counts only.
+ * whole request (EgressBlocked). Images can't be scanned or pseudonymized: an image block leaves only when the
+ * client approved its exact bytes (sha256) for this request on a route that allows images (llm/models.ts
+ * maxImages: the self-thread intent route); every other image, document or URL/file-sourced block is refused.
+ * Logs carry counts only.
  */
+import { createHash } from 'node:crypto';
 import { findPhoneNumbersInText } from 'libphonenumber-js';
 import { maskPhone } from '@yb/shared';
 import type { Statement } from 'better-sqlite3';
 import type { DB } from '../db/connection';
 import {
   EgressBlocked,
+  LLM_IMAGE_TYPES,
   type Egress,
   type EgressFindingKind,
   type EgressPacket,
@@ -91,7 +96,7 @@ export function scanText(text: string): void {
 
 /** A refusal that isn't an identifier finding (bad endpoint, empty packet, unreadable body). */
 export class EgressRefused extends EgressBlocked {
-  constructor(readonly why: 'empty_packet' | 'endpoint' | 'body' | 'no_database') {
+  constructor(readonly why: 'empty_packet' | 'endpoint' | 'body' | 'no_database' | 'media') {
     // 'not_implemented' is the contract's catch-all kind for "this can't go out".
     super([{ kind: 'not_implemented', count: 1 }]);
     this.message = `egress blocked: ${why}`;
@@ -124,29 +129,75 @@ function collectText(content: unknown, out: string[]): void {
     if (!b || typeof b !== 'object') continue;
     if (b.type === 'text' && typeof b.text === 'string') out.push(b.text);
     else if (b.type === 'tool_result') collectText(b.content, out);
-    // Anything else in a user turn (images, documents, …) is serialized and scanned as-is: we never send them.
+    // Media blocks are checked by checkMedia (approved bytes only), never read as text.
+    else if (MEDIA_BLOCKS.has(b.type as string)) continue;
+    // Anything else in a user turn is serialized and scanned as-is.
     else out.push(JSON.stringify(b));
   }
 }
 
+const MEDIA_BLOCKS = new Set(['image', 'document']);
+
+/** sha256 (hex) of an image's base64 payload: what the client approves and the fetch checks. */
+export const imageHash = (base64: string): string => createHash('sha256').update(base64, 'utf8').digest('hex');
+
+/** Approves an image block's bytes for the request being sent (llm/client.ts holds the set). */
+export type MediaApproval = (hash: string) => boolean;
+
+/** Every media block in the user turns (tool results included). */
+function mediaBlocks(content: unknown, out: Record<string, unknown>[]): void {
+  if (!Array.isArray(content)) return;
+  for (const b of content as Record<string, unknown>[]) {
+    if (!b || typeof b !== 'object') continue;
+    if (b.type === 'tool_result') mediaBlocks(b.content, out);
+    else if (MEDIA_BLOCKS.has(b.type as string)) out.push(b);
+  }
+}
+
+/**
+ * Throws EgressRefused('media') unless every media block is a base64 image of an accepted type whose bytes `approve`
+ * says the client approved. No approver (batches, any caller but the client's own parse) = no media at all.
+ */
+export function checkMedia(params: Json, approve?: MediaApproval): void {
+  const messages = (params as { messages?: unknown })?.messages;
+  if (!Array.isArray(messages)) return;
+  const found: Record<string, unknown>[] = [];
+  for (const m of messages as { role?: unknown; content?: unknown }[]) if (m?.role !== 'assistant') mediaBlocks(m?.content, found);
+  for (const b of found) {
+    const src = b.source as { type?: unknown; media_type?: unknown; data?: unknown } | undefined;
+    const ok =
+      b.type === 'image' &&
+      src?.type === 'base64' &&
+      (LLM_IMAGE_TYPES as readonly unknown[]).includes(src.media_type) &&
+      typeof src.data === 'string' &&
+      !!approve?.(imageHash(src.data));
+    if (!ok) throw new EgressRefused('media');
+  }
+}
+
 /** Scans every user turn of a Messages body or a Message Batches create body. Throws EgressBlocked. */
-export function scanRequestBody(body: Json): void {
+export function scanRequestBody(body: Json, approve?: MediaApproval): void {
   const requests = (body as { requests?: unknown })?.requests;
   if (Array.isArray(requests)) {
-    for (const r of requests as { params?: unknown }[]) scanText(userTextOfParams(r?.params));
+    for (const r of requests as { params?: unknown }[]) {
+      scanText(userTextOfParams(r?.params));
+      checkMedia(r?.params); // batches never carry images
+    }
     return;
   }
   scanText(userTextOfParams(body));
+  checkMedia(body, approve);
 }
 
 const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /** scanRequestBody for big batch bodies: yields the event loop every 50 requests (the iMessage tail keeps running). */
-export async function scanRequestBodyAsync(body: Json): Promise<void> {
+export async function scanRequestBodyAsync(body: Json, approve?: MediaApproval): Promise<void> {
   const requests = (body as { requests?: unknown })?.requests;
-  if (!Array.isArray(requests)) return scanRequestBody(body);
+  if (!Array.isArray(requests)) return scanRequestBody(body, approve);
   for (const [i, r] of (requests as { params?: unknown }[]).entries()) {
     scanText(userTextOfParams(r?.params));
+    checkMedia(r?.params);
     if (i % 50 === 49) await yieldLoop();
   }
 }
@@ -167,6 +218,8 @@ export interface EgressFetchOptions {
   /** Only this origin is reachable (default https://api.anthropic.com). */
   origin?: string;
   onBlocked?: (e: EgressBlocked) => void;
+  /** Image bytes the client approved for the request in flight (absent = every image is refused). */
+  approveMedia?: MediaApproval;
 }
 
 /**
@@ -202,7 +255,7 @@ export function egressFetch(o: EgressFetchOptions): typeof fetch {
         return blocked(new EgressRefused('body'));
       }
       try {
-        await scanRequestBodyAsync(body);
+        await scanRequestBodyAsync(body, o.approveMedia);
       } catch (e) {
         if (e instanceof EgressBlocked) return blocked(e);
         throw e;

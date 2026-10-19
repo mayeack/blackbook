@@ -21,6 +21,7 @@ export const COLLECTOR_ROUTES = {
   imessageChats: '/v1/imessage/chats',
   imessageHandles: '/v1/imessage/handles',
   imessageSend: '/v1/imessage/send',
+  imessageAttachment: '/v1/imessage/attachment',
   whatsappSnapshot: '/v1/whatsapp/snapshot',
   contacts: '/v1/contacts',
 } as const;
@@ -53,6 +54,9 @@ export const CollectorErrorCode = z.enum([
   'whatsapp_not_installed',
   'snapshot_inconsistent',
   'chatdb_unavailable',
+  'attachment_not_found',
+  'attachment_not_allowed',
+  'attachment_unreadable',
 ]);
 export type CollectorErrorCode = z.infer<typeof CollectorErrorCode>;
 
@@ -111,6 +115,29 @@ export const Attachment = z.object({
   bytes: opt(z.number().int().nonnegative()),
   is_sticker: optFlag,
 });
+
+/**
+ * GET /v1/imessage/attachment: one image attachment of a NOTE-TO-SELF message (the collector refuses any other
+ * chat, stickers and non-images) as a JPEG downscaled to `max_edge` on the long side. `index` is the position in
+ * Msg.attachments.
+ */
+export const AttachmentQuery = z.object({
+  message_guid: z.string().min(1).max(128),
+  index: z.coerce.number().int().min(0).max(9).default(0),
+  max_edge: z.coerce.number().int().min(256).max(2576).default(1568),
+});
+export type AttachmentQuery = z.input<typeof AttachmentQuery>;
+
+export const AttachmentImageResponse = z.object({
+  api: z.literal(COLLECTOR_API_VERSION),
+  generated_at: Timestamp,
+  mime: z.literal('image/jpeg'),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  bytes: z.number().int().positive(),
+  data_base64: z.string().min(1).regex(/^[A-Za-z0-9+/]+={0,2}$/),
+});
+export type AttachmentImageResponse = z.output<typeof AttachmentImageResponse>;
 
 /** Tapback / sticker association (chat.db associated_message_*). */
 export const Assoc = z.object({
