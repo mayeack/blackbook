@@ -19,6 +19,7 @@ import * as extraction from './migrations/017_extraction';
 import * as ask from './migrations/018_ask';
 import * as eventsTravel from './migrations/019_events_travel';
 import * as evalSets from './migrations/020_eval';
+import * as digestParts from './migrations/021_digest_parts';
 
 export interface Migration {
   version: number;
@@ -69,6 +70,7 @@ export const MIGRATIONS: Migration[] = [
   slot(18, 'ask', ask),
   slot(19, 'events_travel', eventsTravel),
   slot(20, 'eval', evalSets),
+  slot(21, 'digest_parts', digestParts),
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

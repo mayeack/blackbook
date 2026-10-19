@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { uuidv7 } from '@yb/shared';
-import { allClearText, composeDigest, digestText, mainLine, minimalText, pushBodyFor } from '../../src/delivery/compose';
+import { allClearText, composeDigest, digestTexts, joinTexts, mainLine, minimalText, pushBodyFor } from '../../src/delivery/compose';
 import { COMPOSER_SYSTEM } from '../../src/delivery/llmComposer';
 import { readDigestSelection } from '../../src/delivery/selection';
 import { checkOutboundText, BOT_MARKER } from '../../src/delivery/types';
@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 describe('template composer', () => {
-  it('writes the brief in the digest format: marker first, numbered, short names, ≤70-char lines, one link', async () => {
+  it('writes the brief one suggestion per text, like a person would: marker first, numbered, short names, one link', async () => {
     typicalDay(w);
     agentBatches('merge', 2, NOW - 5 * 3_600_000);
     agentBatches('attach_identity', 4, NOW - 5 * 3_600_000);
@@ -46,25 +46,30 @@ describe('template composer', () => {
     const c = (await composeDigest(w.db, { llm, egress: new FakeEgress() }, { localDate: DAY_DATE, now: NOW }))!;
     expect(c.composer).toBe('template');
     expect(llm.calls).toHaveLength(0);
-    expect(c.text.codePointAt(0)).toBe(0x1f168);
-    const lines = c.text.split('\n');
-    expect(lines[0]).toBe(`${BOT_MARKER} Wed Oct 14 · 4 for today`);
-    expect(lines).toContain('1 Ava Q. · quiet 41d (usually ~9d)');
-    expect(lines).toContain('2 Ben O. · waiting on your reply, 2d');
-    expect(lines).toContain('3 Intro Cleo M. ↔ Dora V.?');
-    expect(lines).toContain('4 Something personal — open the app');
-    expect(lines).toContain('Last night: 2 merges · 4 links · 11 facts');
-    expect(lines).toContain('⚠ WhatsApp quiet 4d · open WhatsApp on your phone');
-    expect(lines.filter((l) => /^\d /.test(l)).every((l) => l.length <= 70)).toBe(true);
+    expect(c.texts).toEqual([
+      `${BOT_MARKER} Good morning! 4 things for today.\n\n1. Check in with Ava Q.\nIt's been 6 weeks. You usually talk about once a week.`,
+      `${BOT_MARKER} 2. Reply to Ben O.\nBen has been waiting 2 days for an answer.`,
+      `${BOT_MARKER} 3. Introduce Cleo M. and Dora V.?\nThey might get along.`,
+      `${BOT_MARKER} 4. Something personal\nThe details are in the app.\n\nThat's it! Reply "done 2", "skip 2" or "snooze 2" anytime.\nyeackbot.com/today`,
+      `${BOT_MARKER} Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up.`,
+    ]);
+    for (const t of c.texts) {
+      expect(t.codePointAt(0)).toBe(0x1f168);
+      expect(checkOutboundText(t)).toEqual([]);
+      expect(t).not.toContain(' · ');
+    }
+    expect(c.items.every((i) => i.line.length <= 70)).toBe(true);
+    expect(c.text).toBe(joinTexts(c.texts));
     expect(c.text.match(/yeackbot\.com/g)).toHaveLength(1);
-    expect(c.text).toContain('yeackbot.com/today');
     expect(c.text).not.toMatch(/Quillfeather|Ostrander|Marsh|Vantwerp/);
-    expect(checkOutboundText(c.text)).toEqual([]);
+    // The overnight counts stay on the web.
+    expect(c.lastNight).toBe('Last night: 2 merges · 4 links · 11 facts');
+    expect(c.text).not.toContain('Last night');
     expect(c.pushBody).toBe('Your brief is ready · 4 things');
     // stored on the digest row and the suggestions
     const d = w.db.prepare('SELECT status, composer, imessage_text, composed_at FROM digests WHERE local_date = ?').get(DAY_DATE) as Record<string, unknown>;
     expect(d).toMatchObject({ status: 'ready', composer: 'template', imessage_text: c.text, composed_at: NOW });
-    expect(w.db.prepare('SELECT title FROM suggestions WHERE id = ?').pluck().get(c.items[0]!.suggestionId)).toBe('Ava Q. · quiet 41d (usually ~9d)');
+    expect(w.db.prepare('SELECT title FROM suggestions WHERE id = ?').pluck().get(c.items[0]!.suggestionId)).toBe('Check in with Ava Q.');
   });
 
   it('push bodies: generic by default, first names only when turned on (never for sensitive items)', () => {
@@ -93,11 +98,27 @@ describe('template composer', () => {
   });
 
   it('the fallback texts always pass the outbound rules', () => {
-    expect(checkOutboundText(minimalText(DAY_DATE, 3))).toEqual([]);
-    expect(checkOutboundText(allClearText(DAY_DATE))).toEqual([]);
+    expect(checkOutboundText(minimalText(3))).toEqual([]);
+    expect(checkOutboundText(allClearText())).toEqual([]);
     expect(mainLine(5, 'x'.repeat(120), false).length).toBeLessThanOrEqual(70);
-    const t = digestText({ localDate: DAY_DATE, items: [], lastNight: null, health: null, commandsEnabled: false });
-    expect(t.startsWith(BOT_MARKER)).toBe(true);
+    expect(digestTexts({ items: [], health: null, commandsEnabled: false })).toEqual([]);
+    const one = digestTexts({ items: [{ ordinal: 1, line: '1. Reply to Sam R.', copy: 'template', body: null, openers: [], sensitive: false }], health: null, commandsEnabled: true, digestTime: '18:00' });
+    expect(one).toEqual([`${BOT_MARKER} Evening! Just one thing today.\n\n1. Reply to Sam R.\n\nThat's it! Reply "done", "skip" or "snooze" anytime.\nyeackbot.com/today`]);
+  });
+
+  it('an item whose copy breaks an outbound rule falls back on its own; the rest of the brief still goes', async () => {
+    typicalDay(w);
+    const egress = new FakeEgress();
+    for (const id of [w.ava, w.ben, w.cleo, w.dora]) egress.tokenFor(id);
+    // An opener that would put a phone number in the text: the grounding validator lets openers through, the
+    // outbound rules don't, so item 1 falls back to its template copy.
+    const llm = new FakeLlmClient().on(`digest:${DAY_DATE}`, {
+      json: { items: [{ n: 1, headline: 'Check in with P1', body: null, openers: ['call me at 2025550199'], cites: ['c1'] }] },
+    });
+    const c = (await composeDigest(w.db, { llm, egress }, { localDate: DAY_DATE, now: NOW }))!;
+    expect(c.texts[0]).toContain('1. Check in with Ava Q.');
+    expect(c.texts[0]).not.toContain('555');
+    for (const t of c.texts) expect(checkOutboundText(t)).toEqual([]);
   });
 });
 
@@ -115,9 +136,9 @@ describe('LLM composer', () => {
     const egress = new FakeEgress();
     const llm = scripted(egress, {
       items: [
-        { n: 1, headline: 'P1 · quiet 41 days, usually every 9', body: 'P1 is in Lisbon now.', openers: ['Hey Ava! How is Lisbon treating you?'], cites: ['c1'] },
+        { n: 1, headline: 'Ask P1 how Lisbon is going', body: 'P1 is in Lisbon now.', openers: ['Hey Ava! How is Lisbon treating you?'], cites: ['c1'] },
         { n: 2, headline: 'Reply to Marcus about Saturday', body: null, openers: [], cites: [] },
-        { n: 3, headline: 'Intro P3 ↔ P4?', body: null, openers: [], cites: [] },
+        { n: 3, headline: 'Introduce P3 and P4?', body: null, openers: [], cites: [] },
       ],
     });
     const c = (await composeDigest(w.db, { llm, egress }, { localDate: DAY_DATE, now: NOW }))!;
@@ -134,13 +155,14 @@ describe('LLM composer', () => {
 
     expect(c.items.map((i) => i.copy)).toEqual(['llm', 'template', 'llm', 'template']);
     expect(c.composer).toBe('llm');
-    expect(c.items[0]).toMatchObject({ headline: 'Ava Q. · quiet 41 days, usually every 9', body: 'Ava Q. is in Lisbon now.', openers: ['Hey Ava! How is Lisbon treating you?'] });
-    expect(c.items[1]!.headline).toBe('Ben O. · waiting on your reply, 2d');
-    expect(c.items[2]!.headline).toBe('Intro Cleo M. ↔ Dora V.?');
-    expect(c.text).toContain('1 Ava Q. · quiet 41 days, usually every 9');
-    expect(c.text).toContain('  ↳ "Hey Ava! How is Lisbon treating you?"');
+    expect(c.items[0]).toMatchObject({ headline: 'Ask Ava Q. how Lisbon is going', body: 'Ava Q. is in Lisbon now.', openers: ['Hey Ava! How is Lisbon treating you?'] });
+    expect(c.items[1]!.headline).toBe('Reply to Ben O.');
+    expect(c.items[2]!.headline).toBe('Introduce Cleo M. and Dora V.?');
+    expect(c.texts[0]).toBe(
+      `${BOT_MARKER} Good morning! 4 things for today.\n\n1. Ask Ava Q. how Lisbon is going\nAva Q. is in Lisbon now.\n\nMaybe: “Hey Ava! How is Lisbon treating you?”`,
+    );
     expect(c.text).not.toContain('Marcus');
-    expect(checkOutboundText(c.text)).toEqual([]);
+    for (const t of c.texts) expect(checkOutboundText(t)).toEqual([]);
     const d = w.db.prepare('SELECT composer, llm_usage FROM digests WHERE local_date = ?').get(DAY_DATE) as { composer: string; llm_usage: string };
     expect(d.composer).toBe('llm');
     expect(JSON.parse(d.llm_usage)).toMatchObject({ status: 'ok', sent: 3, rejected: 1 });
@@ -176,8 +198,8 @@ describe('LLM composer', () => {
     const llm = new FakeLlmClient().on(`digest:${DAY_DATE}`, {
       json: {
         items: [
-          { n: 1, headline: `Check in with ${ta} — quiet 41 days`, body: null, openers: [], cites: [] },
-          { n: 3, headline: `Intro ${tc} ↔ ${td}?`, body: null, openers: [], cites: [] },
+          { n: 1, headline: `Check in with ${ta}`, body: null, openers: [], cites: [] },
+          { n: 3, headline: `Introduce ${tc} and ${td}?`, body: null, openers: [], cites: [] },
         ],
       },
     });
@@ -185,8 +207,8 @@ describe('LLM composer', () => {
     expect(llm.calls[0]!.userText).toContain(`person: ${ta}`);
     expect(llm.calls[0]!.userText).not.toMatch(/Quillfeather|Ostrander/);
     expect(c.items.map((i) => i.copy)).toEqual(['llm', 'template', 'llm', 'template']);
-    expect(c.items[0]!.headline).toBe('Check in with Ava Q. — quiet 41 days');
-    expect(c.items[2]!.headline).toBe('Intro Cleo M. ↔ Dora V.?');
+    expect(c.items[0]!.headline).toBe('Check in with Ava Q.');
+    expect(c.items[2]!.headline).toBe('Introduce Cleo M. and Dora V.?');
   });
 
   it('quotes come from the item’s evidence messages, scrubbed; extra attendees beyond a hidden one stay', async () => {
@@ -200,7 +222,7 @@ describe('LLM composer', () => {
     const llm = scripted(egress, { items: [] });
     const c = (await composeDigest(w.db, { llm, egress }, { localDate: DAY_DATE, now: NOW }))!;
     expect(c.items[0]!.people.map((p) => p.id)).toEqual([w.ava, w.ben]);
-    expect(c.items[0]!.headline).toBe('A year ago: a day together with Ava Q. & Ben O.');
+    expect(c.items[0]!.headline).toBe('A year ago today with Ava Q. and Ben O.');
     const packet = llm.calls[0]!.userText;
     expect(packet).toMatch(/\[c1\] message .*moving to Lisbon next month!/);
     expect(packet).not.toMatch(/555|example\.com|Dora/);
@@ -219,7 +241,7 @@ describe('LLM composer', () => {
     ins('send the trail map', 0);
     const egress = new FakeEgress();
     const llm = scripted(egress, {
-      items: [{ n: 1, headline: 'P1 · quiet 41 days', body: 'P1 is waiting on the trail map.', openers: [], cites: [] }],
+      items: [{ n: 1, headline: 'Check in with P1', body: 'P1 is waiting on the trail map.', openers: [], cites: [] }],
     });
     const c = (await composeDigest(w.db, { llm, egress }, { localDate: DAY_DATE, now: NOW }))!;
     expect(llm.calls[0]!.userText).toContain('send the trail map');

@@ -406,7 +406,8 @@ describe('agent-loop DTO round-trips', () => {
     });
     roundTrip(DigestPreview, {
       date: '2026-10-14',
-      text: '\u{1F168} Tue Oct 14 · 1 for today\n\n1 Avery Q. · asked about Sat brunch, 2d ago\n\nyeackbot.com/today',
+      texts: ['\u{1F168} Good morning! Just one thing today.\n\n1. Reply to Avery Q.\nAvery asked about Saturday brunch 2 days ago.\n\nyeackbot.com/today'],
+      text: '\u{1F168} Good morning! Just one thing today.\n\n1. Reply to Avery Q.\nAvery asked about Saturday brunch 2 days ago.\n\nyeackbot.com/today',
       pushBody: 'Your brief is ready · 1 thing',
       items: [item],
       composer: 'template',

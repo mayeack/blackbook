@@ -34,6 +34,7 @@ const SKIP_REASONS: Record<string, string> = {
   already_sent: 'already sent',
   no_self_handle: 'your own handle isn’t set up',
   collector_unavailable: 'the Mac helper isn’t running',
+  partial: 'some texts are still on the way',
 };
 export const skipReasonLabel = (r: string | null) => (r ? (SKIP_REASONS[r] ?? humanize(r).toLowerCase()) : 'not sent');
 
@@ -82,7 +83,8 @@ export function deliveryLine(d: TodayDigest | null, fmtTime: (ms: number) => str
       const tail = d.status === 'fallback_sent' ? ' · basic version' : '';
       const via = delivered.length ? ` via ${delivered.join(' · ')}` : '';
       const others = rest.length ? ` · ${rest.join(' · ')}` : '';
-      return { text: `${head}${via}${others}${tail}`, tone: failed ? 'warn' : 'ok' };
+      const partial = d.skipReason === 'partial' ? ` · ${skipReasonLabel('partial')}` : '';
+      return { text: `${head}${via}${others}${partial}${tail}`, tone: failed ? 'warn' : partial ? 'muted' : 'ok' };
     }
   }
 }
