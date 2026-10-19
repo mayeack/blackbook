@@ -703,3 +703,42 @@ The Ask footer shows sub-cent costs with four decimals.
 100K tokens (status `tool_limit` or an answer built from the kept results); a Sonnet-override `general_harms` batch
 refusal is recorded `refused` with no synchronous re-run.
 **Platforms**: server + web. Real-API behavior (fallback blocks, cache usage) needs the owner's key.
+
+---
+
+## Owner's own records never become suggestions; owner-confirmed merge into me (2026-10-18)
+
+**What changed**: a user merge (`method: 'user'`) may fold a person record into the `me` person (agents still can't;
+`me` never merges into anyone). `identity/self.ts` defines "my records": `me`, everyone merged into it, and any
+person still holding one of my handles (`settings.self_handles` plus the phones/emails on me; Gmail aliases by
+dots/`+tag` count). Tie stats, the suggestion chokepoint (`normalizeCandidate`), memories, circle activity and
+detection, intel attendees, intro candidates and trip/location matching all skip them. The nightly matcher first
+runs a self-link pass (`identity/selfLink.ts`): an agent-made duplicate of me moves to me whole and is retired; on an
+established record only my handle moves. An unseen handle of mine from any source attaches to me, and a Contacts
+card counts Gmail aliases toward "two of my handles".
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii`.
+2. `test/identity/self.test.ts` (self set incl. aliases, shared and unlinked handles; self-link absorb vs. handle-only
+   move; undo blocks the handle from me; new keys of mine; Contacts card), `test/pipeline/selfExclusion.test.ts`
+   (ties, suggestions stage, memories, circle activity, intel), `test/merge.test.ts` (user-only merge into me, undo),
+   `test/pipeline/circles/circles.test.ts` (no circle membership or suggested additions for a record of mine).
+
+### Scenario B — Undo an owner merge into me
+**Setup**: a person record that was merged into you (Activity shows "Merged … into you").
+1. Activity → that batch → Undo.
+2. **Expected**: the record is back as its own person in People, and a do-not-merge pair is written so it isn't
+   folded in again automatically.
+
+### Scenario C — A stray handle of mine (after deploy, owner)
+1. Have a contact record carry a Gmail `+tag` alias of your own address (any established record).
+2. Wait for the nightly `identity-match` run (or `npm run yb -- run-job identity-match`).
+3. **Expected**: Activity shows "Linked o•••@… to you"; the alias is on you, the rest of the record stays put, and the
+   record gets no tie stats or digest items while it still holds a handle of yours. Undoing that batch moves the
+   alias back and it stays there on later nights.
+
+**Edge cases**: a handle marked shared, or one you unlinked from yourself (undo), is never treated as yours; `+tag`
+aliases outside Gmail are not assumed to be yours; an agent (deterministic/probabilistic/LLM) merge into me is
+refused with `me_mismatch`.
+**Platforms**: server only. Verified against a read-only snapshot of the live DB: 3 records of mine, 0 stray
+handles, self detection ~10 ms. The production merge was done with the journaled path; the code itself is not deployed yet.

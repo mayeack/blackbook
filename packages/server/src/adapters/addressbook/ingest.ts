@@ -25,6 +25,7 @@ import { attachExternalIdentity, linkIdentityToPerson, normalizeExternalKey, per
 import { coPresentSets } from '../../identity/matcherGuards';
 import { namesCompatible, personName } from '../../identity/matcherNames';
 import { chooseSurvivor, mergePeople, MergeRefusedError } from '../../identity/merge';
+import { selfRefs, type SelfRefs } from '../../identity/self';
 import { touchIdentitySeen, type ResolveContext } from '../../identity/resolver';
 import { withBatch } from '../../journal/batch';
 import { sourceRun } from '../common/context';
@@ -169,12 +170,16 @@ class CardPass {
   readonly stats = emptyStats();
   /** Canonical people whose card fields need re-applying. */
   readonly affected = new Set<string>();
+  /** My handles, read once per pass. */
+  private readonly self: SelfRefs;
 
   constructor(
     private readonly ctx: ResolveContext,
     private readonly keyCards: Map<string, ParsedCard[]>,
     private readonly shared: Set<string>,
-  ) {}
+  ) {
+    this.self = selfRefs(ctx.db);
+  }
 
   private get db() {
     return this.ctx.db;
@@ -218,10 +223,15 @@ class CardPass {
     for (const k of card.keys) {
       const sig = keySig(k.norm);
       const ident = k.norm.confidence < 1 ? undefined : findIdent(this.db, k.norm);
+      // My own card carries at least two of my handles (even one also listed on a partner's card); a card with
+      // just one of them (a partner's "home" line) is theirs. A handle of mine not bound to me yet (a Gmail alias,
+      // my number first seen on a stray record) counts too: selfLink.ts moves it to me.
+      if (this.self.meId && k.norm.confidence === 1 && this.self.isMine(k.norm.kind, k.norm.key)) {
+        mine.set(this.self.meId, (mine.get(this.self.meId) ?? 0) + 1);
+        continue;
+      }
       if (!ident || ident.status !== 'active') continue;
       const owner = canonicalId(this.db, ident.person_id);
-      // My own card carries at least two of my handles (even one also listed on a partner's card); a card with
-      // just one of them (a partner's "home" line) is theirs.
       if (getPerson(this.db, owner)?.kind === 'me') {
         mine.set(owner, (mine.get(owner) ?? 0) + 1);
         continue;

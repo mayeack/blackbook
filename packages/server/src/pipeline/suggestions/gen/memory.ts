@@ -9,6 +9,7 @@
  */
 import { localDate } from '@yb/shared';
 import type { DB } from '../../../db/connection';
+import { selfPeople } from '../../../identity/self';
 import type { Candidate, CandidateGenerator, GeneratorContext, WildcardSource } from '../types';
 import { ATTENDING, localDayRange, sameDayYearsAgo } from './common';
 
@@ -16,7 +17,8 @@ const MIN_MESSAGES = 10;
 const MAX_PEOPLE = 3;
 const MAX_CONVERSATIONS = 2;
 
-function attendees(db: DB, column: 'occasion_id' | 'event_id', id: string): string[] {
+/** `self`: JSON array of my own records (identity/self.ts), never among the people. */
+function attendees(db: DB, column: 'occasion_id' | 'event_id', id: string, self: string): string[] {
   return db
     .prepare(
       `SELECT pv.id FROM event_attendees a
@@ -24,10 +26,11 @@ function attendees(db: DB, column: 'occasion_id' | 'event_id', id: string): stri
        JOIN person_visible pv ON pv.id = pc.canonical_id
        LEFT JOIN person_stats ps ON ps.person_id = pv.id
        WHERE a.${column} = ? AND a.status IN ${ATTENDING} AND a.confidence >= 0.75
+         AND pv.id NOT IN (SELECT value FROM json_each(?))
        GROUP BY pv.id ORDER BY max(coalesce(ps.tie_strength, 0)) DESC, pv.id LIMIT ${MAX_PEOPLE}`,
     )
     .pluck()
-    .all(id) as string[];
+    .all(id, self) as string[];
 }
 
 export function memoryCandidates(db: DB, now: number, timeZone: string): Candidate[] {
@@ -38,6 +41,7 @@ export function memoryCandidates(db: DB, now: number, timeZone: string): Candida
   const expiresAt = localDayRange(today, timeZone)[1];
   const out: Candidate[] = [];
   const seenEvents = new Set<string>();
+  const self = JSON.stringify([...selfPeople(db)]);
 
   const occasions = db
     .prepare(
@@ -47,7 +51,7 @@ export function memoryCandidates(db: DB, now: number, timeZone: string): Candida
     )
     .all(start, end) as { id: string; event_id: string | null }[];
   for (const o of occasions) {
-    const people = attendees(db, 'occasion_id', o.id);
+    const people = attendees(db, 'occasion_id', o.id, self);
     if (o.event_id) seenEvents.add(o.event_id);
     if (!people.length) continue;
     out.push({
@@ -71,7 +75,7 @@ export function memoryCandidates(db: DB, now: number, timeZone: string): Candida
     .all(start, end) as string[];
   for (const e of events) {
     if (seenEvents.has(e)) continue;
-    const people = attendees(db, 'event_id', e);
+    const people = attendees(db, 'event_id', e, self);
     if (!people.length) continue;
     out.push({
       kind: 'memory',
@@ -95,9 +99,10 @@ export function memoryCandidates(db: DB, now: number, timeZone: string): Candida
        LEFT JOIN sessions s ON s.id = i.session_id
        WHERE i.kind IN ('dm_session','group_session') AND i.retracted_at IS NULL AND i.started_at >= ? AND i.started_at < ?
          AND i.msgs_from_me > 0 AND i.msgs_from_them > 0 AND (i.msgs_from_me + i.msgs_from_them) >= ?
+         AND pv.id NOT IN (SELECT value FROM json_each(?))
        ORDER BY n DESC, pv.id`,
     )
-    .all(start, end, MIN_MESSAGES) as { person_id: string; conversation_id: string; session_id: string | null; first_msg: number | null; n: number }[];
+    .all(start, end, MIN_MESSAGES, self) as { person_id: string; conversation_id: string; session_id: string | null; first_msg: number | null; n: number }[];
   const seenPeople = new Set(out.flatMap((c) => c.personIds));
   let added = 0;
   for (const c of convs) {

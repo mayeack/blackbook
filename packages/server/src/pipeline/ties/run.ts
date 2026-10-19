@@ -1,8 +1,9 @@
 /**
  * The nightly ties pass (job 'ties', after the graph and the occasions/Partiful/LLM stages have applied what they
- * found): for every canonical person (kind person, active/provisional), rebuild person_touch_days from interactions
- * (all sources, incl. Partiful events and calendar occasions) and 1:1 tapbacks, then person_stats (E/S/F/H, momentum,
- * reciprocity, T, state, fading severity) and the trailing weekly tie_stats_snapshot rows (stats.ts, touch.ts).
+ * found): for every canonical person (kind person, active/provisional, never a record of mine: identity/self.ts),
+ * rebuild person_touch_days from interactions (all sources, incl. Partiful events and calendar occasions) and 1:1
+ * tapbacks, then person_stats (E/S/F/H, momentum, reciprocity, T, state, fading severity) and the trailing weekly
+ * tie_stats_snapshot rows (stats.ts, touch.ts).
  *
  * All three tables are derived (D): plain writes, never journaled, recomputed from history on every pass (an undo
  * of an interaction or merge is reflected the next night). Writes are diffed (unchanged touch days and snapshots
@@ -16,6 +17,7 @@
  */
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
+import { selfPeople } from '../../identity/self';
 import { settingsSnapshot, settingTimeZone, type SettingsSnapshot } from '../../settings/registry';
 import { dayConverter, dayString, weekStart } from './days';
 import { computeTie, decilePriors, gapSummary, weeklySeries, type GapSummary, type TieResult, type TieThresholds } from './stats';
@@ -215,12 +217,16 @@ export function* tiesPass(db: DB, o: TiesRunOptions = {}): Generator<void, TiesR
   const dayOf = dayConverter(timeZone);
   const today = dayOf(now);
 
-  const persons = db
-    .prepare(
-      `SELECT id, is_priority, created_at FROM people
-       WHERE kind = 'person' AND status IN ('active','provisional') AND merged_into_id IS NULL ORDER BY id`,
-    )
-    .all() as PersonRow[];
+  // Never the owner: not 'me', nobody merged into me, nobody still holding one of my handles (their stats rows go).
+  const self = selfPeople(db);
+  const persons = (
+    db
+      .prepare(
+        `SELECT id, is_priority, created_at FROM people
+         WHERE kind = 'person' AND status IN ('active','provisional') AND merged_into_id IS NULL ORDER BY id`,
+      )
+      .all() as PersonRow[]
+  ).filter((p) => !self.has(p.id));
   stats.people = persons.length;
   const sizes = groupSizes(db);
   const reactions = dmReactions(db);

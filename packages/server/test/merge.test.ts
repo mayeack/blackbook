@@ -92,11 +92,30 @@ describe('mergePeople', () => {
     const p = seedPerson(db);
     const vip = seedPerson(db, { is_priority: 1 });
     const gone = seedPerson(db, { status: 'suppressed' });
-    expect(refusal(() => merge(db, me, p))).toBe('me_mismatch');
+    expect(refusal(() => merge(db, me, p, 'probabilistic'))).toBe('me_mismatch');
+    expect(refusal(() => merge(db, p, me))).toBe('me_mismatch');
     expect(refusal(() => merge(db, p, gone))).toBe('suppressed');
     expect(refusal(() => merge(db, p, vip, 'probabilistic'))).toBe('priority_absorbed');
     expect(refusal(() => merge(db, p, 'nope'))).toBe('not_found');
     expect(merge(db, vip, p, 'probabilistic').survivorId).toBe(vip);
+  });
+
+  it('folds an owner-confirmed record into me (user only), undoably', () => {
+    const db = memDb();
+    const me = seedPerson(db, { kind: 'me', display_name: 'Me' });
+    const old = seedPerson(db, { display_name: 'Owner Alias', origin: 'legacy' });
+    const shop = seedPerson(db, { kind: 'business', status: 'service' });
+    for (const method of ['deterministic', 'probabilistic', 'llm_tiebreak'] as const) {
+      expect(refusal(() => mergePeople(db, { survivorId: me, mergedId: old, method, runId: newRun(db), actor: 'agent', now: T0 + 1000 }))).toBe('me_mismatch');
+    }
+    expect(refusal(() => merge(db, me, shop))).toBe('me_mismatch');
+    const r = merge(db, me, old);
+    expect(r.survivorId).toBe(me);
+    expect(canonicalId(db, old)).toBe(me);
+    expect(db.prepare('SELECT 1 FROM person_visible WHERE id = ?').get(old)).toBeUndefined();
+    undoBatch(db, r.batchId, { actor: 'user', now: T0 + 2000 });
+    expect(canonicalId(db, old)).toBe(old);
+    expect(doNotMergeApplies(db, me, old)).toBe(true);
   });
 
   it('undo clears the pointer, restores fields, writes do_not_merge; re-merge is refused; redo works', () => {

@@ -34,6 +34,7 @@ import {
   type Qualification,
   type ResolveContext,
 } from './resolver';
+import { selfRefs } from './self';
 import { classifyIdentity, serviceKind, type IdentityRef, type ServiceReason } from './service';
 
 export type ExternalKind =
@@ -405,8 +406,9 @@ function reclassify(ctx: ResolveContext, ident: IdentityFull, k: ExternalKey, s:
 }
 
 /**
- * The identity for a source key, created (on a new person, or on `personId`) when unseen. Returns null when the
- * key doesn't normalize (a WhatsApp group JID, a malformed username). Joins the caller's transaction.
+ * The identity for a source key, created when unseen (on `personId`, on me for a handle of mine, else on a new
+ * person). Returns null when the key doesn't normalize (a WhatsApp group JID, a malformed username). Joins the
+ * caller's transaction.
  */
 export function attachExternalIdentity(ctx: ResolveContext, input: ExternalIdentityInput): string | null {
   const k = normalizeExternalKey(input.kind, input.key);
@@ -433,11 +435,14 @@ export function attachExternalIdentity(ctx: ResolveContext, input: ExternalIdent
       if (displayName) refreshDisplayName(sctx, ident.person_id);
       return ident.id;
     }
-    const attached = input.personId ? attachToKnownPerson(sctx, k, input.personId, { identityId: input.identityId, raw, displayName, at }) : null;
+    // An unseen handle of mine (a Gmail alias, my number seen first on WhatsApp) goes to me, never to a new person.
+    const own = !input.personId && (k.kind === 'phone' || k.kind === 'email') ? selfRefs(ctx.db) : null;
+    const owner = input.personId ?? (own?.isMine(k.kind, k.key) ? own.meId : null);
+    const attached = owner ? attachToKnownPerson(sctx, k, owner, { identityId: input.identityId, raw, displayName, at }) : null;
     if (attached) {
       if (displayName) {
         recordAlias(ctx.db, attached, displayName, nameSource, at);
-        refreshDisplayName(sctx, input.personId!);
+        refreshDisplayName(sctx, owner!);
       }
       return attached;
     }
