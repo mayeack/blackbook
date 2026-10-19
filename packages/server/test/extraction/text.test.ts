@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { outputFormat } from '../../src/llm/caching';
 import { findRawIdentifiers } from '../../src/llm/egress';
 import { promptVersion } from '../../src/llm/types';
 import {
@@ -44,6 +45,10 @@ describe('the system prompts (knowledge + obligations)', () => {
     expect(EXTRACTION_PROMPT_VERSION).toBe(promptVersion(text.system, text.schemaJson, 'low'));
     // 7e37e334 was the one-request prompt every batch item of 2026-10-16/17 was refused under.
     expect(EXTRACTION_PROMPT_VERSION).not.toBe('7e37e334');
+    // 73a9fc73 sent the grammar without enums (the SDK moved them into descriptions). The version hashes the formats
+    // as sent, so putting them back moved it.
+    expect(EXTRACTION_PROMPT_VERSION).not.toBe('73a9fc73');
+    expect(text.schemaJson).toBe(`${JSON.stringify(outputFormat(ExtractionKnowledge).schema)}\u0000${JSON.stringify(outputFormat(ExtractionObligations).schema)}`);
     expect(CONSOLIDATION_PROMPT_VERSION).not.toBe(EXTRACTION_PROMPT_VERSION);
     // Op semantics, exclusions, the injection notice and the mode rules are in the knowledge prompt …
     for (const s of ['ADD', 'UPDATE', 'INVALIDATE', 'NOOP', 'birthdays', 'untrusted data', 'mode=historical', 'sensitive: true', '# Mentions', '# Self-identification']) {

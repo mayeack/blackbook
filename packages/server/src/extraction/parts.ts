@@ -12,7 +12,7 @@
  */
 import type { LlmBatchResult, LlmClient, LlmOutcome, LlmParseRequest, LlmUsage } from '../llm/types';
 import { extractionParts, type ExtractionPart } from './prompt';
-import { Extraction, mergeExtractionParts } from './schema';
+import { mergeExtractionParts, parseExtraction, type ParsedExtraction } from './schema';
 
 export const OBLIGATIONS_ID_SUFFIX = '_o';
 const OBLIGATIONS_ID_RE = /_o-(\d{1,2})$/;
@@ -85,10 +85,10 @@ export type WindowParseRequest = Omit<LlmParseRequest<unknown>, 'system' | 'sche
 
 /**
  * A window's requests, one after the other (the knowledge request first), as one outcome: the first request that
- * is not ok decides (its usage plus what was spent before it); otherwise the merged answer, validated as an
- * Extraction. Nothing is sent after a failed part.
+ * is not ok decides (its usage plus what was spent before it); otherwise the merged answer, parsed by
+ * parseExtraction. Nothing is sent after a failed part.
  */
-export async function parseWindowSync(llm: LlmClient, req: WindowParseRequest, obligations: boolean): Promise<LlmOutcome<Extraction>> {
+export async function parseWindowSync(llm: LlmClient, req: WindowParseRequest, obligations: boolean): Promise<LlmOutcome<ParsedExtraction>> {
   const { estimateUsd, systems, ...base } = req;
   const answers: Record<string, string> = {};
   let usage: LlmUsage | null = null;
@@ -108,7 +108,7 @@ export async function parseWindowSync(llm: LlmClient, req: WindowParseRequest, o
   } catch {
     return { status: 'invalid', issues: ['not JSON'], text, usage: usage!, requestId };
   }
-  const parsed = Extraction.safeParse(json);
+  const parsed = parseExtraction(json);
   if (!parsed.success) return { status: 'invalid', issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`), text, usage: usage!, requestId };
   return { status: 'ok', value: parsed.data, text, usage: usage!, requestId };
 }

@@ -19,7 +19,7 @@ import { uuidv7 } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { GATES, loadPacket, validateExtraction, type Packet } from '../extraction';
 import { mergedText, obligationsCustomId, parseWindowSync } from '../extraction/parts';
-import { Extraction } from '../extraction/schema';
+import { parseExtraction } from '../extraction/schema';
 import {
   EXTRACTION_PROMPT_VERSION,
   extractionParts,
@@ -225,7 +225,7 @@ function baselineOf(db: DB, t: Target, now: number, canon: (id: string) => strin
     try {
       const obligations = db.prepare('SELECT output FROM llm_requests WHERE custom_id = ? AND output IS NOT NULL').pluck().get(obligationsCustomId(row.custom_id)) as string | undefined;
       const merged = mergedText(row.output, needsObligations(packet) ? (obligations ?? row.output) : undefined);
-      const parsed = Extraction.safeParse(merged === null ? null : JSON.parse(merged));
+      const parsed = parseExtraction(merged === null ? null : JSON.parse(merged));
       if (parsed.success) {
         const v = validateExtraction(parsed.data, packet, { now });
         return { baseline: gatedClaims(keyedFromValidated(v, canon, factNormOf(packet))), baselineSource: 'output', baselineVersion: row.prompt_version };
