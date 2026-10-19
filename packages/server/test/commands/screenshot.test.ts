@@ -74,7 +74,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     expect(w.db.prepare(`SELECT name, kind, status FROM circles WHERE signature = 'pref:party_invites'`).get()).toEqual({ name: 'Party invites', kind: 'user', status: 'active' });
     expect(party(w.db)).toEqual([person]);
 
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted Rowan T. (new · from the screenshot): great DJ · prioritized for party invites · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Rowan T. (new, from your screenshot).\nNoted: “great DJ”\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
     expect(w.command(commandId)).toMatchObject({ status: 'handled', intent: 'set_preference' });
     expect(w.command(commandId).parsed).toMatchObject({ images: 1, llm: true });
     const batches = w.db.prepare(`SELECT kind, actor FROM change_batches ORDER BY rowid`).all();
@@ -86,7 +86,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
 
     w.say('undo', at(2));
     await w.run({ now: at(3) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undid: note for Rowan T. + prioritized for party invites`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undone: note for Rowan T. + prioritized for party invites`);
     expect(w.db.prepare('SELECT status FROM people WHERE id = ?').pluck().get(person)).toBe('suppressed');
     expect(w.db.prepare('SELECT status FROM facts WHERE person_id = ?').pluck().get(person)).toBe('rejected');
     expect(party(w.db)).toEqual([]);
@@ -107,7 +107,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     await w.run({ now: at(1) });
     expect(w.db.prepare('SELECT count(*) FROM people').pluck().get()).toBe(before);
     expect(party(w.db)).toEqual([rowan]);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted Rowan T.: great DJ · prioritized for party invites · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Rowan T.\nNoted: “great DJ”\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
 
     w.say(TEXT, at(10), { attachments: [SCREENSHOT] });
     await w.run({ now: at(11) });
@@ -137,16 +137,16 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     w.say('yb always invite Sam to my parties', at(0));
     await w.run({ now: at(1) });
     expect(party(w.db)).toEqual([sam]);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted Sam R.: prioritized for party invites · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Sam R.\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
 
     const samK = w.person('Sam', 'Kowalski');
     w.say('yb always invite Sam to my parties', at(10));
     await w.run({ now: at(11) });
-    expect(w.lastReply()).toMatch(/Sam R\. or Sam K\.\? reply 1\/2$/);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Which Sam did you mean?\n1. Sam R.\n2. Sam K.\nReply 1 or 2.`);
     w.say('2', at(12));
     await w.run({ now: at(13) });
     expect(party(w.db).sort()).toEqual([sam, samK].sort());
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted Sam K.: prioritized for party invites · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Sam K.\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
   });
 
   it('a preference about the screenshot person with no log at all: the person and the preference, no note of facts', async () => {
@@ -168,7 +168,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     const person = w.db.prepare(`SELECT person_id FROM identities WHERE key = 'yb.eval.rowan'`).pluck().get() as string;
     expect(party(w.db)).toEqual([person]);
     expect(w.db.prepare('SELECT count(*) FROM facts').pluck().get()).toBe(0);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted Rowan T. (new · from the screenshot): prioritized for party invites · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Rowan T. (new, from your screenshot).\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
   });
 
   it('screenshots off in Settings → nothing is fetched or sent, and the reply says why', async () => {
@@ -180,7 +180,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     await w.run({ now: at(1) });
     expect(attachments.calls).toEqual([]);
     expect(llm.calls[0]!.images).toBe(0);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Reading screenshots is off (Settings → Agent) · say who it is by name`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} Reading screenshots is off (Settings → Agent). Tell me who it is by name.`);
     expect(party(w.db)).toEqual([]);
   });
 
@@ -189,7 +189,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     const w = commandsWorld({ llm, attachments: fakeAttachments() });
     w.say(TEXT, at(0), { attachments: [SCREENSHOT] });
     await w.run({ now: at(1) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Couldn't read who that screenshot shows · send the profile with the @username visible`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} I couldn't tell who that screenshot shows. Send the profile with the @username visible.`);
     expect(w.db.prepare('SELECT count(*) FROM facts').pluck().get()).toBe(0);
   });
 });

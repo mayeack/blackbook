@@ -1,5 +1,5 @@
 /**
- * Read-side views of the digest: the preview (exact text that would be sent; never sends, never spends, never
+ * Read-side views of the digest: the preview (exact texts that would be sent; never sends, never spends, never
  * writes), the Today header state, the digest cards and the history list. Today's route module and the digest
  * routes both use these.
  */
@@ -7,7 +7,7 @@ import { localDate as toLocalDate, type ChannelDelivery, type DigestItem, type D
 import type { DB } from '../db/connection';
 import type { AgentServices } from '../services';
 import { settingsSnapshot } from '../settings/registry';
-import { allClearText, composeSelection, compositionCurrent, storedComposition, toDigestItems, type ComposedDigest } from './compose';
+import { allClearText, composeSelection, compositionCurrent, joinTexts, storedComposition, toDigestItems, type ComposedDigest } from './compose';
 import { readDigestSelection, getDigestRow, type DigestRow, type SelectDigestItems } from './selection';
 import { whyNotSent } from './send';
 
@@ -28,16 +28,17 @@ export async function digestPreview(db: DB, services: Pick<AgentServices, 'llm' 
   }
   const items = composed?.items ?? [];
   const reason = whyNotSent(db, services.outbound.configured, { localDate: date, now: o.now, itemCount: items.length, digest: sel?.digest ?? null });
-  const text = composed?.text ?? allClearText(date);
+  const texts = composed?.texts ?? [allClearText()];
   return {
     date,
-    text,
+    texts,
+    text: joinTexts(texts),
     pushBody: composed?.pushBody ?? 'Your brief is ready · 0 things',
     items: toDigestItems(db, items),
     composer: composed?.composer ?? 'template',
     wouldSend: reason === null,
     reasonNotSent: reason,
-    charCount: [...text].length,
+    charCount: texts.reduce((n, t) => n + [...t].length, 0),
   };
 }
 
@@ -55,7 +56,8 @@ export function todayDigestOf(d: DigestRow): TodayDigest {
     composedAt: d.composed_at,
     sentAt: d.sent_at,
     pushSentAt: d.push_sent_at,
-    imessage: d.sent_at ? 'sent' : channel(d.imessage_status, final ? 'skipped' : 'pending'),
+    // A brief part-way out (some texts still on their way) is 'pending' until its last text settles.
+    imessage: d.sent_at && d.skip_reason !== 'partial' ? 'sent' : channel(d.imessage_status, final ? 'skipped' : 'pending'),
     push: d.push_sent_at ? 'sent' : channel(d.push_status, final ? 'skipped' : 'pending'),
     skipReason: d.skip_reason,
   };

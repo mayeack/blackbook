@@ -704,6 +704,40 @@ The Ask footer shows sub-cent costs with four decimals.
 refusal is recorded `refused` with no synchronous re-run.
 **Platforms**: server + web. Real-API behavior (fallback blocks, cache usage) needs the owner's key.
 
+## Human-style texts: one suggestion per text (2026-10-17)
+
+The morning brief is now one iMessage per suggestion, written in plain sentences with line breaks (greeting on the
+first, "That's it! Reply…" + the one link on the last, a health issue as its own final text). Command replies (help,
+why, draft, log, pause, status, acks) are full sentences on separate lines. Replying to a suggestion's own text with
+just "done", "skip", "snooze 2w", "why" or "draft" acts on that item; `more` sends one more suggestion.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root (the root config installs the
+   network guard; running vitest inside `packages/server` skips it).
+2. `test/delivery/compose.test.ts` (exact texts, per-item fallback), `test/delivery/send.test.ts` (one text per item
+   in order, digest_ordinal recorded, a brief cut off after two texts resumes past catch-up with no repeats),
+   `test/commands/executor.test.ts` (inline "done" / "skip this one" / "snooze 2w" on the echo row, "why" with no
+   number), `test/commands/grammar.test.ts` (number-less item verbs).
+
+### Scenario B — Preview (web)
+1. yeackbot.com → Settings → Digest → **Preview today's text**.
+2. **Expected**: one bubble per suggestion (plus a "Heads up" bubble when a source is unhealthy); the caption says
+   "N texts · N items"; no "·" separators inside the bubbles.
+
+### Scenario C — Real brief (owner's phone)
+1. With the daily brief on (or Settings → Digest → **Send today's brief to me**), watch the self thread at 08:00.
+2. **Expected**: one text per suggestion (plus a "Heads up" text if a source is unhealthy), in order, each starting
+   with 🅨; the first greets, the last suggestion's text ends with
+   "That's it! Reply "done 2", "skip 2" or "snooze 2" anytime." and yeackbot.com/today.
+3. Long-press text 3 → Reply → "done". **Expected**: "✓ Nice, marked <name> done." on its own line, then
+   "(Text "undo" to take that back.)".
+4. Text "yb help". **Expected**: a bulleted list, one command per line.
+
+**Edge cases**: a reply to the brief's echo row (the grey copy) binds to the same item; a bare "done" with several
+open items asks "Which one? Reply "done 1", or reply to that suggestion's text with just "done"."; "why?" as an
+inline reply explains that item.
+**Platforms**: server + web; the inline-reply binding needs a real iPhone/Mac Messages reply to verify end to end.
+
 ---
 
 ## Ask works again + "who do I know in …" answers with people only (2026-10-18)
@@ -740,9 +774,37 @@ over 16 union / 24 optional parameters fails `test/llm/models.test.ts` instead o
 
 ---
 
+## Two-way texting — addressed texts are never silently dropped (2026-10-18)
+
+**What changed**: a self-thread text addressed to the bot ("yb …", or an inline reply to a yeackbot text) that the
+intent parser classified as `note` used to be ignored with no reply. The parser now gets an `ADDRESSED: yes|no`
+section supplied by the app (kept separate from the untrusted note) and is told never to pick `note` when it's yes;
+if it still does, the executor replies "Didn't get that · try help" instead of staying silent. Plain notes to self
+(not addressed, outside the window rules) stay silent as before.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/commands/executor.test.ts`: "text addressed to the bot is never dropped as a note" (yb + inline reply, both
+   get a reply, packet carries `### ADDRESSED\nyes`); the existing window test asserts `### ADDRESSED\nno` and silence.
+
+### Scenario B — Live text (owner)
+1. In the note-to-self thread, text `yb prioritize inviting this person to parties, is a great DJ` (no screenshot needed).
+2. **Expected**: within ~20 s a 🅨 reply arrives, either "Didn't get that · try help" or, if the parser reads it as
+   a fact, "Couldn't find this person · …". Never silence. The `inbound_commands` row is `handled` with a non-null
+   `response_outbound_id`.
+3. Text `pick up dry cleaning` with no yb and no bot text in the last 12 h.
+4. **Expected**: no reply (status `ignored`, reason `not_addressed`).
+
+**Edge cases**: an inline reply to an old bot text (>12 h) that reads like a note still gets a reply; `log:` texts
+are always sent with ADDRESSED yes.
+**Platforms**: server. Real classification needs the owner's AI key; actually acting on screenshots and party
+preferences is separate work (its own session).
+
+---
+
 ## Screenshots in self-thread commands + "prioritize inviting X to parties" (2026-10-18)
 
-**What changed**: a `yb …` text sent with a screenshot (or a screenshot sent up to 3 min before it) now carries the
+**What changed** (replies use the plain-sentence style from #60): a `yb …` text sent with a screenshot (or a screenshot sent up to 3 min before it) now carries the
 image to the intent step. The collector serves it from a new route, `GET /v1/imessage/attachment` (note-to-self thread
 only, images only, downscaled JPEG ≤1568 px), and the LLM client sends it on the `intent` route (Haiku 5.5, ≤2 images)
 through the egress choke point, which lets out only image bytes the client approved for that request. The model reads
@@ -765,27 +827,29 @@ pre-event / follow-up / intro suggestions about them score ×1.3 ("Why this?" sh
 **Setup**: rebuild + re-sign BlackbookServer.app (new route), restart yeackbot from `~/Blackbook` main.
 1. Screenshot the Instagram profile of someone yeackbot doesn't know. In your note-to-self thread send the screenshot
    with the text `Yb prioritize inviting this person to parties, is a great DJ`.
-2. **Expected** within ~30 s: `🅨 ✓ Noted <First L.> (new · from the screenshot): great DJ · prioritized for party invites · undo to revert`.
+2. **Expected** within ~30 s: `🅨 ✓ Noted for <First L.> (new, from your screenshot).` / `Noted: “great DJ”` /
+   `Prioritized for party invites.` / `(Text "undo" to take that back.)`
 3. yeackbot.com → Circles → **Party invites** lists them. (They are roster-only, so People and suggestions leave them
    out until they qualify, e.g. a DM; the circle membership stays and applies then.)
-4. Text `undo`. **Expected**: `✓ Undid: note for <First L.> + prioritized for party invites`; the circle no longer lists them.
+4. Text `undo`. **Expected**: `✓ Undone: note for <First L.> + prioritized for party invites`; the circle no longer lists them.
 
 ### Scenario C — Someone you already know
 1. Send a profile screenshot of a contact whose Instagram is already linked (Beeper) with `yb always invite this person to parties`.
-2. **Expected**: `✓ Noted Sam R.: prioritized for party invites · undo to revert`; no new person appears.
+2. **Expected**: `✓ Noted for Sam R.` / `Prioritized for party invites.`; no new person appears.
 
 ### Scenario D — By name, no screenshot
 1. `yb prioritize inviting Sam to parties` with two Sams in your contacts.
-2. **Expected**: `Sam R. or Sam K.? reply 1/2`; reply `2` → `✓ Noted Sam K.: prioritized for party invites · undo to revert`.
+2. **Expected**: `Which Sam did you mean?` with `1. Sam R.` / `2. Sam K.`; reply `2` → `✓ Noted for Sam K.` /
+   `Prioritized for party invites.`
 
 ### Scenario E — Ranking
 1. With a Party invites person at one of today's events, read the morning brief. **Expected**: they lead the
    pre-event item's people. The morning after, the follow-up lists them first in their group; "Why this?" on a
    pre-event / follow-up / intro item about them shows "In Party invites ×1.3".
 
-**Edge cases**: Settings toggle off → `Reading screenshots is off (Settings → Agent) · say who it is by name` and
-nothing is fetched or sent; the file not synced to the Mac yet → `Couldn't open the screenshot yet · send it again in a
-minute`; no username visible and no unique full-name match → `Couldn't read who that screenshot shows …`; a business /
+**Edge cases**: Settings toggle off → `Reading screenshots is off (Settings → Agent). Tell me who it is by name.` and
+nothing is fetched or sent; the file not synced to the Mac yet → `I couldn't open the screenshot yet. Send it again in
+a minute.`; no username visible and no unique full-name match → `I couldn't tell who that screenshot shows. …`; a business /
 service account → refused; sending the same screenshot again adds nothing twice; a DM photo can never be fetched (the
 collector refuses non-self chats); a screenshot sent alone with no `yb` text is never read.
 **Platforms**: server + collector (Swift) + web (one toggle). Not deployed: needs the collector rebuild + signing and a
