@@ -440,12 +440,22 @@ Each item's "Why this?" includes the learned factors.
 - Any item that fails validation falls back to a template.
 - Openers are drafts only; there is no code path that sends them.
 
-**Format**:
-- The first character is the marker **🅨** (U+1F168), checked on raw text.
-- Numbered items, first name + last initial, main line ≤70 characters.
+**Format** (revised 2026-10-17, owner feedback: "format texts like a human… one clear suggestion per text"):
+- **One text per suggestion**, written like a person texts: line breaks, plain sentences, no "·" separators.
+  The first text opens with a greeting ("Good morning! 4 things for today."), the last closes with how to reply and
+  the one `yeackbot.com/today` link; a health issue gets its own final text ("Heads up: WhatsApp hasn't synced in
+  4 days. Open WhatsApp on your phone to wake it up."). "Last night: …" counts stay on the web.
+- Every text starts with the marker **🅨** (U+1F168), checked on raw text.
+- Each item: `N. <short action>` (first name + last initial, ≤70 characters), then one or two sentences of context,
+  then (LLM copy only) `Maybe: "<opener draft>"`.
 - No phone numbers, emails or sensitive facts.
-- Default: no per-item links, just one `yeackbot.com/today` line (spike (a) checks whether link-preview rows break this).
-- Includes a "Last night: N merges · N links · N facts" line and one health line when relevant.
+- Texts go out in order, each with its own stable client_ref. Once any text is handed to the sender the brief's
+  texts are frozen (never recomposed); it counts as sent from its first delivered text (replies bind to it at once)
+  and resumes on the next tick if cut off; a pause, turning the brief off, catch-up passing or the day ending closes
+  it with what already went out. A text about someone hidden since is dropped.
+  Each outbound row records the item it carries (`digest_ordinal`), so a reply to a suggestion's own text with just
+  "done", "skip", "snooze 2w", "why" or "draft" acts on that item. Without a number and not replying to a suggestion,
+  those words are free text (a note-to-self like "wrong number lol" is never a command). `more` texts one suggestion.
 
 **When to send**:
 - Nothing worth sending → skip, and Today shows "All clear". After 3 empty days, send one heartbeat line.

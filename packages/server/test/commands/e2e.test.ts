@@ -52,7 +52,7 @@ describe('two-way texting end to end', () => {
        VALUES (?, 'fading', ?, 'fading:x', 0.6, '{}', 'delivered', ?, ?)`,
     ).run(suggestionId, person, T0, T0);
     db.prepare('INSERT INTO digest_items (digest_id, ordinal, suggestion_id) VALUES (?, 1, ?)').run(digestId, suggestionId);
-    const briefText = `${BOT_MARKER} Wed Oct 14 · 1 for today\n\n1 Rowan E. · quiet a while`;
+    const briefText = `${BOT_MARKER} Good morning! Just one thing today.\n\n1. Check in with Rowan E.\nIt's been 6 weeks.`;
     const briefGuid = newGuid();
     db.prepare(
       `INSERT INTO outbound_messages (id, client_ref, purpose, to_handle, text_hash, status, message_guids, digest_id, created_at, sent_at)
@@ -74,7 +74,7 @@ describe('two-way texting end to end', () => {
     const stats = await processCommands(db, { services, now: () => now });
     expect(stats).toMatchObject({ handled: 1, replies: 1 });
     expect(db.prepare('SELECT status FROM suggestions WHERE id = ?').pluck().get(suggestionId)).toBe('done');
-    expect(outbound.sent.map((x) => x.text)).toEqual([`${BOT_MARKER} ✓ 1 done (Rowan E.) · undo to revert`]);
+    expect(outbound.sent.map((x) => x.text)).toEqual([`${BOT_MARKER} ✓ Nice, marked Rowan E. done.\n\n(Text "undo" to take that back.)`]);
     // The grocery list is a note to self: within 12 h of the brief, but without the AI key it stays private.
     expect(db.prepare(`SELECT status, response_outbound_id FROM inbound_commands WHERE raw_text LIKE 'grocery%'`).get()).toEqual({
       status: 'ignored',

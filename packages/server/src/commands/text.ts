@@ -94,7 +94,23 @@ export function listJoin(items: string[], conj = 'and'): string {
   return `${items.slice(0, -1).join(', ')} ${conj} ${items[items.length - 1]}`;
 }
 
-/** Help text (the whole grammar on two short lines). */
-export const HELP_TEXT =
-  'After a brief: done 2 · snooze 1 2w · skip 3 · wrong 4 · why 2 · draft 2 · more · undo · pause · resume · status\n' +
-  'Anytime: log: coffee with Sam · ? who do I know in Austin · or start with yb';
+/** Help text: the whole grammar, one command per line. */
+export const HELP_TEXT = [
+  "Here's what you can text me:",
+  '',
+  'About a suggestion (use its number, or reply right to its text):',
+  '• done 2: you did it',
+  '• snooze 2 2w: bring it back in 2 weeks',
+  '• skip 2: not useful',
+  '• wrong 2: something in it is wrong',
+  '• why 2: why I suggested it',
+  '• draft 2: a message you could send',
+  '• more: one more suggestion',
+  '',
+  'Anytime:',
+  '• log: coffee with Sam, moving to Denver',
+  '• ? who do I know in Austin',
+  '• undo, pause 1w, resume, status',
+  '',
+  'If it’s been a while since my last text, start with "yb".',
+].join('\n');
