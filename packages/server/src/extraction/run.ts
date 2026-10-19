@@ -73,7 +73,7 @@ import {
   type ExtractionPart,
 } from './prompt';
 import { isObligationsCustomId, joinBatchParts, obligationsCustomId, parseWindowSync, windowCustomId } from './parts';
-import { Consolidation, Extraction } from './schema';
+import { Consolidation, parseExtraction, type ParsedExtraction } from './schema';
 import { HISTORICAL_OBLIGATION_MAX_AGE_MS, needsObligations, validateExtraction } from './validate';
 import {
   backfillThroughAt,
@@ -653,7 +653,7 @@ function parseJson(text: string | null): unknown {
   }
 }
 
-function applyParsed(c: CollectCtx, item: ItemRow, packet: Packet, value: Extraction, customIdValue: string | null): ApplyStats {
+function applyParsed(c: CollectCtx, item: ItemRow, packet: Packet, value: ParsedExtraction, customIdValue: string | null): ApplyStats {
   const v = validateExtraction(value, packet, { now: c.env.now });
   const stats = applyWindow({ env: c.env, egress: c.deps.egress, runId: c.runId, now: c.env.now, customId: customIdValue, promptVersion: item.prompt_version }, packet, v);
   for (const [k, n] of Object.entries(stats)) if (typeof n === 'number' && n) bump(c.counts, k, n);
@@ -782,7 +782,7 @@ async function handleWindowResult(c: CollectCtx, item: ItemRow, knowledge: LlmBa
     return retryLater(c, item, 'refusal_unavailable');
   }
 
-  const parsed = Extraction.safeParse(parseJson(r.text));
+  const parsed = parseExtraction(parseJson(r.text));
   if (!parsed.success) return schemaFailure(c, item, userText, obligations);
   try {
     applyParsed(c, item, packet, parsed.data, item.custom_id);

@@ -1,7 +1,7 @@
 /** validateExtraction on hand-built synthetic packets: refs, citations, quotes, plausibility, dates, mentions. */
 import { describe, expect, it } from 'vitest';
 import type { Packet } from '../../src/extraction/packet';
-import type { Extraction } from '../../src/extraction/schema';
+import { parseExtraction, type Extraction } from '../../src/extraction/schema';
 import { validateExtraction } from '../../src/extraction/validate';
 import { gateStatus } from '../../src/extraction/apply';
 import { extraction, fact } from './world';
@@ -216,6 +216,69 @@ describe('validateExtraction', () => {
     ]);
     expect(v.selfIds.map((s) => [s.personId, s.identityId])).toEqual([['lee', 'i-lee']]);
     expect(v.dropped).toMatchObject({ relation_low_conf: 2, self_id_no_identity: 1 });
+  });
+});
+
+describe('enums (parseExtraction): an out-of-set value costs its item, not the window', () => {
+  const commitment = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    owner: 'BOTH',
+    with: ['P1'],
+    kind: 'meet',
+    what: 'dinner Thursday',
+    due: { kind: 'vague', start: null, end: null },
+    status: 'open',
+    closes: null,
+    ev: [{ msg: 'm:4', quote: 'sure, dinner works' }],
+    conf: 0.9,
+    ...over,
+  });
+  const relation = (label: string) => ({ op: 'ADD', a: 'P2', b: 'P1', label, sensitive: false, ev: [{ msg: 'm:3', quote: 'Sam is the best cook I know' }], conf: 0.9 });
+
+  it('drops each item holding a string outside its set, counts it, and validates the rest', () => {
+    const parsed = parseExtraction(
+      extraction({
+        facts: [fact('P1', 'interest', 'pottery', [{ msg: 'm:2', quote: 'I also started pottery' }]), fact('P1', 'hobby', 'pottery', [{ msg: 'm:2', quote: 'I also started pottery' }])],
+        // A person token as owner and a kind "text" (seen in production 2026-10-18); two bad fields are one item.
+        commitments: [commitment(), commitment({ owner: 'P66' }), commitment({ kind: 'text', due: { kind: 'someday', start: null, end: null } })],
+        relations: [relation('friend'), relation('bestie')],
+        needs_reply: { state: 'needs_reply', msg: 'm:2', reason: 'invite', urgency: 'normal', conf: 0.9 },
+      }),
+    );
+    if (!parsed.success) throw parsed.error;
+    expect(parsed.data.dropped).toEqual({ fact_bad_enum: 1, commitment_bad_enum: 2, relation_bad_enum: 1, needs_reply_bad_enum: 1 });
+    expect(parsed.data.commitments.map((c) => [c.owner, c.kind])).toEqual([['BOTH', 'meet']]);
+    expect(parsed.data.needs_reply).toBeNull();
+    const v = validateExtraction(parsed.data, packet(), { now: AT });
+    expect(v.facts.map((f) => [f.personId, f.value])).toEqual([['sam', 'pottery']]);
+    expect(v.commitments.map((c) => [c.personId, c.owner, c.kind])).toEqual([['sam', 'both', 'meet']]);
+    expect(v.relations.map((r) => r.label)).toEqual(['friend']);
+    // The dropped verdict is no verdict (not n_a, which would be recorded).
+    expect(v.needsReply).toBeNull();
+    expect(v.dropped).toEqual({ fact_bad_enum: 1, commitment_bad_enum: 2, relation_bad_enum: 1, needs_reply_bad_enum: 1 });
+  });
+
+  it('a clean answer passes as is (nothing dropped)', () => {
+    const parsed = parseExtraction(extraction({ commitments: [commitment()] }));
+    if (!parsed.success) throw parsed.error;
+    expect(parsed.data.dropped).toBeUndefined();
+    expect(validateExtraction(parsed.data, packet(), { now: AT }).dropped).toEqual({});
+  });
+
+  it('structure stays strict: a missing key or a wrong type fails the window, also next to an enum mismatch', () => {
+    const { owner: _, ...ownerless } = commitment();
+    for (const bad of [
+      extraction({ commitments: [ownerless] }),
+      extraction({ commitments: [commitment({ owner: 3 })] }),
+      extraction({ commitments: [commitment({ owner: null })] }),
+      extraction({ commitments: [commitment({ owner: 'P66' }), commitment({ conf: 'high' })] }),
+      extraction({ facts: [fact('P1', 'hobby', 'pottery', [{ msg: 'm:2', quote: 'pottery' }], 0.9, { ev: 'm:2' })] }),
+      extraction({ needs_reply: { state: 'maybe' } }),
+      extraction({ facts: 'none' }),
+      { ...extraction(), topics: undefined },
+      null,
+    ]) {
+      expect(parseExtraction(bad).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 });
 

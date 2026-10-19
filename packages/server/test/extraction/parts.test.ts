@@ -81,8 +81,8 @@ function dmWorld() {
   const w = buildXWorld();
   const t0 = NOW - 6 * HOUR;
   const m1 = w.msg(w.dm, w.ids.sam, t0, 'big news, I took the job at Lumen Labs and I am moving to Denver on Nov 1');
-  w.msg(w.dm, null, t0 + 2 * MIN, 'whoa congrats!! we need to celebrate before you go');
-  return { w, m1 };
+  const m2 = w.msg(w.dm, null, t0 + 2 * MIN, 'whoa congrats!! we need to celebrate before you go');
+  return { w, m1, m2 };
 }
 
 async function submitted() {
@@ -117,6 +117,45 @@ describe('a window’s two requests in the pipeline', () => {
     expect(rep2.counts).toMatchObject({ applied: 1, factsAdded: 1 });
     expect(count(w.db, 'SELECT count(*) FROM extraction_items WHERE window_id = ?', win)).toBe(2); // attempts 0 and 1
     expect(count(w.db, `SELECT count(*) FROM change_batches WHERE kind = 'extraction'`)).toBe(1);
+  });
+});
+
+describe('an obligations answer with a value outside an enum', () => {
+  const commitment = (P: string, msg: string, over: Record<string, unknown> = {}) => ({
+    owner: 'BOTH',
+    with: [P],
+    kind: 'meet',
+    what: 'celebrate before the move',
+    due: { kind: 'vague', start: null, end: null },
+    status: 'open',
+    closes: null,
+    ev: [{ msg, quote: 'we need to celebrate before you go' }],
+    conf: 0.85,
+    ...over,
+  });
+
+  it('owner "P66" (a person token) drops that commitment only: the window applies its facts and its other commitment', async () => {
+    const { w, f, win, P, L, m1, m2 } = await submitted();
+    f.llm.on(`extract:${win}`, { json: extraction({ facts: [fact(P, 'employer', 'Lumen Labs', [{ msg: L(m1), quote: 'I took the job at Lumen Labs' }], 0.92)] }) });
+    f.llm.on(`obligations:${win}`, { json: extraction({ commitments: [commitment(P, L(m2), { owner: 'P66' }), commitment(P, L(m2))] }) });
+    const rep = await collect(deps(w, f, NOW + 10 * MIN));
+    expect(rep.counts).toMatchObject({ applied: 1, factsAdded: 1, commitments: 1, dropped_commitment_bad_enum: 1 });
+    expect(Object.keys(rep.counts).filter((k) => /schema_invalid|dead_letter|requeued/.test(k))).toEqual([]);
+    expect(w.db.prepare('SELECT type, value FROM facts').all()).toEqual([{ type: 'employer', value: 'Lumen Labs' }]);
+    expect(w.db.prepare('SELECT person_id, owner, kind FROM commitments').all()).toEqual([{ person_id: w.sam, owner: 'both', kind: 'meet' }]);
+    expect(windowsOf(w.db, w.dm)[0]!.status).toBe('applied');
+    expect(count(w.db, `SELECT count(*) FROM extraction_items WHERE window_id = ? AND outcome = 'ok'`, win)).toBe(1);
+  });
+
+  it('a structural error in the same answer still fails the whole window (schema_invalid, retried)', async () => {
+    const { w, f, win, P, L, m1, m2 } = await submitted();
+    f.llm.on(`extract:${win}`, { json: extraction({ facts: [fact(P, 'employer', 'Lumen Labs', [{ msg: L(m1), quote: 'I took the job at Lumen Labs' }], 0.92)] }) });
+    const { kind: _, ...kindless } = commitment(P, L(m2));
+    f.llm.on(`obligations:${win}`, { json: extraction({ commitments: [commitment(P, L(m2), { owner: 'P66' }), kindless] }) });
+    const rep = await collect(deps(w, f, NOW + 10 * MIN));
+    expect(rep.counts).toMatchObject({ requeued_schema_invalid: 1 });
+    expect(rep.counts.applied).toBeUndefined();
+    expect(count(w.db, 'SELECT count(*) FROM facts')).toBe(0);
   });
 });
 
