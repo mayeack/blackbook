@@ -190,6 +190,12 @@ const DEFS: { [K in AnySettingKey]: Def<K> } = {
     description: 'Reply to the brief from your self-thread ("done 2", "log: …", "? …").',
     default: v(true),
   },
+  'commands.read_images': {
+    group: 'features',
+    label: 'Read screenshots in commands',
+    description: 'A screenshot you send with a "yb …" command (e.g. an Instagram profile) goes to Claude, downscaled, so it can tell who you mean.',
+    default: v(true),
+  },
   'intros.enabled': { group: 'features', label: 'Intro suggestions', description: 'Suggest introducing two people (drafts only, never sent).', default: v(true) },
   'travel.home_city': {
     group: 'features',

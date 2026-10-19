@@ -41,11 +41,13 @@ import type { DB } from '../db/connection';
 import { nullLogger, type Logger } from '../ops/logger';
 import { readSetting } from '../settings/registry';
 import { outputFormat, systemBlocks, type CacheTtl, type JsonOutputFormat } from './caching';
-import { DeltaDetokenizer, EGRESS_BLOCKED_HEADER, egressFetch, personIdsIn, scanText, userTextOfParams } from './egress';
+import { DeltaDetokenizer, EGRESS_BLOCKED_HEADER, egressFetch, imageHash, personIdsIn, scanText, userTextOfParams, type MediaApproval } from './egress';
 import * as ledger from './ledger';
 import {
   estimatePromptTokens,
   FALLBACK_BETA,
+  IMAGE_MAX_BASE64_CHARS,
+  IMAGE_MAX_TOKENS,
   isAllowedModel,
   priceTokens,
   PROMPT_TOKEN_LIMIT,
@@ -62,6 +64,7 @@ import {
   ASK_MAX_INPUT_TOKENS,
   ASK_MAX_TOOL_CALLS,
   EgressBlocked,
+  LLM_IMAGE_TYPES,
   LLM_MODEL,
   parseCustomId,
   ZERO_USAGE,
@@ -73,6 +76,7 @@ import {
   type LlmBatchSubmit,
   type LlmClient,
   type LlmEffort,
+  type LlmImage,
   type LlmOutcome,
   type LlmParseRequest,
   type LlmSpend,
@@ -551,10 +555,43 @@ export function requestIssues(body: Record<string, unknown>): string[] {
   return issues;
 }
 
-/** Conservative prompt size of a body (tools + system + messages + output schema; llm/models.ts estimatePromptTokens). */
+/**
+ * Conservative prompt size of a body (tools + system + messages + output schema; llm/models.ts estimatePromptTokens).
+ * An image block counts IMAGE_MAX_TOKENS, not the length of its base64.
+ */
 export function promptTokens(body: Record<string, unknown>): number {
+  let images = 0;
+  const media = (_k: string, v: unknown): unknown => {
+    if (v && typeof v === 'object' && (v as { type?: unknown }).type === 'image') {
+      images++;
+      return { type: 'image' };
+    }
+    return v;
+  };
   const parts = [body.tools, body.system, body.messages, (body.output_config as { format?: unknown } | undefined)?.format];
-  return parts.reduce<number>((n, x) => n + (x === undefined ? 0 : estimatePromptTokens(JSON.stringify(x))), 0);
+  return parts.reduce<number>((n, x) => n + (x === undefined ? 0 : estimatePromptTokens(JSON.stringify(x, media))), 0) + images * IMAGE_MAX_TOKENS;
+}
+
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** Why `images` can't go out on this route (null = fine): the route's allowance, accepted types, sane base64. */
+export function imageIssue(images: readonly LlmImage[], maxImages: number): string | null {
+  if (images.length > maxImages) return maxImages ? `more than ${maxImages} images` : 'route takes no images';
+  for (const i of images) {
+    if (!(LLM_IMAGE_TYPES as readonly string[]).includes(i.mediaType)) return 'image type';
+    if (!i.data || i.data.length > IMAGE_MAX_BASE64_CHARS || !BASE64.test(i.data)) return 'image data';
+  }
+  return null;
+}
+
+/** The images go first in the last user turn (the API reads them best before the text). */
+export function withImages(messages: readonly Anthropic.MessageParam[], images: readonly LlmImage[]): Anthropic.MessageParam[] {
+  if (!images.length) return [...messages];
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user') return [...messages];
+  const blocks: Anthropic.ImageBlockParam[] = images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } }));
+  const rest = typeof last.content === 'string' ? [{ type: 'text' as const, text: last.content }] : last.content;
+  return [...messages.slice(0, -1), { role: 'user', content: [...blocks, ...rest] }];
 }
 
 /** requestIssues + the PROMPT_TOKEN_LIMIT guard → the 'unavailable' answer, or null when the body may go out. */
@@ -574,13 +611,14 @@ function shapeGate(body: Record<string, unknown>, log: Logger, job: string): Llm
 // ---------------------------------------------------------------------------------------------- the client
 
 /** THE SDK instance: built on egressFetch and nothing else (test/llm/entryPoint.test.ts). */
-function buildSdk(o: { apiKey: string; fetch?: typeof fetch; maxRetries?: number; log: Logger }): Anthropic {
+function buildSdk(o: { apiKey: string; fetch?: typeof fetch; maxRetries?: number; log: Logger; approveMedia?: MediaApproval }): Anthropic {
   return new Anthropic({
     apiKey: o.apiKey,
     baseURL: 'https://api.anthropic.com',
     fetch: egressFetch({
       fetch: o.fetch ?? globalThis.fetch,
       onBlocked: (e) => o.log.warn('llm_egress_blocked', { counts: Object.fromEntries(e.findings.map((f) => [f.kind, f.count])) }),
+      approveMedia: o.approveMedia,
     }),
     maxRetries: o.maxRetries ?? 2,
     logLevel: 'off',
@@ -671,12 +709,20 @@ class AnthropicLlmClient implements LlmClient {
   private readonly db: DB;
   private readonly log: Logger;
   private readonly now: () => number;
+  /** Image hashes approved for requests in flight (count per hash): the egress fetch lets exactly these out. */
+  private readonly approvedMedia = new Map<string, number>();
 
   constructor(private readonly o: LlmClientOptions & { apiKey: string }) {
     this.db = o.db;
     this.log = o.log ?? nullLogger;
     this.now = o.now ?? Date.now;
-    this.sdk = buildSdk({ apiKey: o.apiKey, fetch: o.fetch, maxRetries: o.maxRetries, log: this.log });
+    this.sdk = buildSdk({
+      apiKey: o.apiKey,
+      fetch: o.fetch,
+      maxRetries: o.maxRetries,
+      log: this.log,
+      approveMedia: (hash) => (this.approvedMedia.get(hash) ?? 0) > 0,
+    });
   }
 
   params(route: LlmRoute): RouteParams {
@@ -739,7 +785,14 @@ class AnthropicLlmClient implements LlmClient {
   async parse<T>(req: LlmParseRequest<T>): Promise<LlmOutcome<T>> {
     const pool = req.pool ?? 'steady';
     const rp = effectiveParams(this.params(req.route), req.effortOverride);
-    const params = requestParams(rp, { system: req.system, messages: req.messages, maxTokens: req.maxTokens, format: outputFormat(req.schema), mode: 'sync' });
+    const images = req.images ?? [];
+    const badImages = imageIssue(images, rp.maxImages);
+    if (badImages) {
+      this.log.warn('llm_images_refused', { job: req.kind, counts: { images: images.length } });
+      return unavailable('egress_blocked', badImages);
+    }
+    const messages = withImages(req.messages, images);
+    const params = requestParams(rp, { system: req.system, messages, maxTokens: req.maxTokens, format: outputFormat(req.schema), mode: 'sync' });
     const bad = shapeGate(params, this.log, req.kind);
     if (bad) return bad;
     const blocked = this.gate(pool, req.estimateUsd ?? 0, userTextOfParams(params as { messages: unknown[] }));
@@ -769,6 +822,8 @@ class AnthropicLlmClient implements LlmClient {
       started,
     );
     let msg: BetaMessage;
+    const hashes = images.map((i) => imageHash(i.data));
+    for (const h of hashes) this.approvedMedia.set(h, (this.approvedMedia.get(h) ?? 0) + 1);
     try {
       msg = await this.sdk.beta.messages.create(params as unknown as BetaParams, req.signal ? { signal: req.signal } : undefined);
     } catch (e) {
@@ -776,6 +831,12 @@ class AnthropicLlmClient implements LlmClient {
       ledger.recordOutcome(this.db, id, { status: 'errored', errorType: ledgerErrorType(u) }, this.now());
       this.log.warn('llm_call_failed', { job: req.kind, ...failureFields(u) });
       return u;
+    } finally {
+      for (const h of hashes) {
+        const n = (this.approvedMedia.get(h) ?? 1) - 1;
+        if (n > 0) this.approvedMedia.set(h, n);
+        else this.approvedMedia.delete(h);
+      }
     }
     return this.settleParse(msg, req, id, rp);
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { generators as defaultGenerators } from '../../../src/pipeline/suggestions/generators';
 import { mutePerson, recordIgnore } from '../../../src/pipeline/suggestions/learner';
 import { runSuggestionsStage, type StageOptions } from '../../../src/pipeline/suggestions/stage';
+import { buildWhy } from '../../../src/pipeline/suggestions/why';
 import { unseenKindWildcard } from '../../../src/pipeline/suggestions/gen/unseen';
 import type { Candidate, WildcardSource } from '../../../src/pipeline/suggestions/types';
 import type { DB } from '../../../src/db/connection';
@@ -118,6 +119,25 @@ describe('suggestions stage', () => {
     const id = db.prepare(`SELECT id FROM suggestions WHERE kind = 'cooling' AND person_id = ?`).pluck().get(fading.id) as string;
     expect(r.selectedIds).toContain(id);
     expect(JSON.parse(suggestionRow(db, id).rank_details as string)).toMatchObject({ fatigue: true });
+  });
+
+  it('Party invites (set by text) lifts party / event / intro items about that person ×1.3, nothing else', async () => {
+    const { db, fading, cooling } = world();
+    const circle = 'circle-party';
+    db.prepare(
+      `INSERT INTO circles (id, name, kind, signature, status, created_at, updated_at) VALUES (?, 'Party invites', 'user', 'pref:party_invites', 'active', ?, ?)`,
+    ).run(circle, T0, T0);
+    db.prepare(`INSERT INTO circle_members (circle_id, person_id, origin, excluded, created_at, updated_at) VALUES (?, ?, 'user', 0, ?, ?)`).run(circle, fading.id, T0, T0);
+    const followups = fixedGenerator('event_followup', () =>
+      [fading, cooling].map((p) => ({ kind: 'event_followup' as const, personIds: [p.id], subjectKey: `occ:x-${p.id}`, base: 0.5, evidenceIds: [], expiresAt: null, payload: {} })),
+    );
+    const r = await run(db, T0, { generators: [followups] });
+    const row = (pid: string) => db.prepare(`SELECT id, score, rank_details FROM suggestions WHERE kind = 'event_followup' AND person_id = ?`).get(pid) as { id: string; score: number; rank_details: string };
+    expect(r.selectedIds).toEqual([row(fading.id).id, row(cooling.id).id]);
+    expect(row(fading.id).score / row(cooling.id).score).toBeCloseTo(1.3);
+    expect(JSON.parse(row(fading.id).rank_details)).toMatchObject({ party: true });
+    expect(JSON.parse(row(cooling.id).rank_details)).toMatchObject({ party: false });
+    expect(buildWhy(db, row(fading.id).id, T0).adjustments).toContainEqual({ label: 'In Party invites', value: '×1.3' });
   });
 
   it('🎲 wildcard: stored only when picked, flagged, never two days in a row; the seed reproduces the digest', async () => {

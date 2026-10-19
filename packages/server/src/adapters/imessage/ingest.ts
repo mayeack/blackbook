@@ -958,8 +958,9 @@ export class ImessageIngestor {
 
   /**
    * Self-thread rows become pending inbound_commands unless they are bot rows, not plain text (links, balloons,
-   * attachments, reactions), older than COMMAND_MAX_AGE_MS, older than the cursor's creation, or a second copy of
-   * a command already staged.
+   * attachment-only rows, reactions), older than COMMAND_MAX_AGE_MS, older than the cursor's creation, or a second
+   * copy of a command already staged. A text sent with a screenshot is staged as text; the executor fetches the
+   * row's images (or attachment-only rows sent just before it) for the intent step (adapters/imessage/attachments.ts).
    */
   private maybeStageCommand(m: Msg, messageId: number, text: string | null, kind: MessageKind, isBot: boolean): void {
     if (isBot || kind !== 'text' || text === null || m.balloon_bundle_id || URL_ONLY.test(text)) return;

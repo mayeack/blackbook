@@ -376,7 +376,8 @@ describe('LLM seam and job', () => {
     expect(p.candidates).toEqual([
       expect.objectContaining({ ref: `p:${w.quillA.id}`, kind: 'person', label: 'Quill', evidence: expect.arrayContaining([expect.objectContaining({ type: 'logistics_dm', evidence_ids: [expect.stringMatching(/^m:\d+$/)] })]) }),
     ]);
-    expect(JSON.stringify(p)).not.toMatch(/omw|catching up|555/);
+    // ids are random UUIDs and may contain "555" by chance: blank them before looking for the phone number
+    expect(JSON.stringify(p).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')).not.toMatch(/omw|catching up|555/);
     expect(buildAdjudicationPacket(w.db, occ('maid').id)).toBeNull();
     expect(buildAdjudicationPacket(w.db, occ('dentist').id)).toBeNull();
     const waiting = occasionsAwaitingAdjudication(w.db);

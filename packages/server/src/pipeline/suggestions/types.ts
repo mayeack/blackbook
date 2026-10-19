@@ -113,6 +113,9 @@ export const KIND_POLICY: Readonly<Record<SuggestionKind, KindPolicy>> = {
   wildcard: { weight: 0.3, cooldownDays: 30, maxShowings: null, actWindowMs: 7 * D },
 };
 
+/** Kinds where a Party invites person (pipeline/circles/preferences.ts) ranks higher: SELECTION.partyBoost. */
+export const PARTY_BOOST_KINDS: ReadonlySet<SuggestionKind> = new Set<SuggestionKind>(['pre_event_brief', 'event_followup', 'intro']);
+
 /** Selection rules (intelligence §5, PLAN): */
 export const SELECTION = {
   /** Default cap is the digest.max_items setting (3–5); adaptive moves it within [min, max]. */
@@ -128,6 +131,8 @@ export const SELECTION = {
   fatigueFactor: 0.5,
   fatigueDays: 3,
   priorityBoost: 0.3,
+  /** ×1.3 for a party / event / intro item about someone in the Party invites circle (set by text). */
+  partyBoost: 0.3,
   /** Forced in: pre-event within 36 h, travel within 48 h. */
   preEventForceMs: 36 * H,
   travelForceMs: 48 * H,

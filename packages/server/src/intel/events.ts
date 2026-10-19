@@ -3,12 +3,14 @@
  * with a generic push 3 h before same-day events):
  *
  *   pre_event_brief  in the morning digest for a social occasion / Partiful event later today with ≥ 2 known
- *                    (counted) attendees: the top 5 attendees by tie strength. Time-critical (within 36 h).
+ *                    (counted) attendees: the top 5 attendees, Party invites people first, then by tie strength.
+ *                    Time-critical (within 36 h).
  *   pre-event push   (job 'pre-event-push', every 15 min) one push per event, 30 min – 3 h before a same-day event
  *                    with ≥ 2 known attendees: "Something on your calendar in about 3 hours · your brief is ready",
  *                    no names, no title, opening /e/<id>/brief. Only with push.enabled + push.pre_event, never in
  *                    quiet hours, once per event (push_log 'pre_event:<id>').
- *   event_followup   the morning after a social occasion / Partiful event the owner went to: up to 3 people —
+ *   event_followup   the morning after a social occasion / Partiful event the owner went to: up to 3 people
+ *                    (Party invites people first within each group) —
  *                      1. new people (first time together, no 1:1 history) → "say hi / save details",
  *                      2. known people who had gone quiet (silence before the event ≥ 2× their usual gap, or a
  *                         fading / cooling / dormant state) → "great seeing you",
@@ -23,6 +25,7 @@ import { nullLogger, type Logger } from '../ops/logger';
 import type { Candidate } from '../pipeline/suggestions/types';
 import { inLocalWindow, settingsSnapshot, type SettingsSnapshot } from '../settings/registry';
 import { DAY, HOUR, addDays, attendedEvents, dayStart, knownAttendees, localDate, statsOf, unknownGuestNames, type KnownAttendee, type SocialEvent } from './common';
+import { preferredPeople } from '../pipeline/circles/preferences';
 import { occasionChain } from '../pipeline/occasions/build';
 
 /** Known (counted) attendees an event needs for a brief or a push. */
@@ -35,10 +38,16 @@ const refOf = (e: SocialEvent) => ({ type: e.type, id: e.id, eventId: e.eventId 
 export const subjectOf = (e: Pick<SocialEvent, 'type' | 'id'>): string => `${e.type === 'occasion' ? 'occ' : 'event'}:${e.id}`;
 const linksOf = (e: SocialEvent) => (e.type === 'occasion' ? { occasionId: e.id, eventId: e.eventId } : { eventId: e.id });
 
-/** Counted attendees ordered by tie strength (T desc, then confidence). */
-export function byTie(db: DB, attendees: readonly KnownAttendee[]): KnownAttendee[] {
+/**
+ * Counted attendees ordered for briefs and follow-ups: people in the Party invites circle (the owner asked to put
+ * them first for parties and events) lead, then tie strength (T desc), then confidence.
+ */
+export function byTie(db: DB, attendees: readonly KnownAttendee[], first: ReadonlySet<string> = preferredPeople(db, 'party_invites')): KnownAttendee[] {
   const t = new Map(attendees.map((a) => [a.personId, statsOf(db, a.personId).tie ?? -1]));
-  return [...attendees].sort((a, b) => t.get(b.personId)! - t.get(a.personId)! || b.confidence - a.confidence || (a.personId < b.personId ? -1 : 1));
+  const lead = (a: KnownAttendee) => (first.has(a.personId) ? 1 : 0);
+  return [...attendees].sort(
+    (a, b) => lead(b) - lead(a) || t.get(b.personId)! - t.get(a.personId)! || b.confidence - a.confidence || (a.personId < b.personId ? -1 : 1),
+  );
 }
 
 // ---------------------------------------------------------------------------------------------- pre-event

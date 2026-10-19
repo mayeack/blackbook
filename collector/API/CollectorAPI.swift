@@ -17,6 +17,7 @@ final class CollectorAPI {
         var contacts: ContactsSource
         var whatsapp: WhatsAppSnapshotter
         var send: SendService
+        var attachments: AttachmentService
         var health: HealthReporter
         var now: () -> Date
     }
@@ -102,6 +103,9 @@ final class CollectorAPI {
         case "/v1/imessage/send":
             try expect("POST")
             return try send(r)
+        case "/v1/imessage/attachment":
+            try expect("GET")
+            return try attachment(r)
         case "/v1/contacts":
             try expect("GET")
             return try contacts()
@@ -169,6 +173,15 @@ final class CollectorAPI {
         let result = try deps.send.send(request)
         guard case let .object(fields) = result.json else { throw APIError.internalError("encode") }
         return envelope(fields)
+    }
+
+    /// One image attachment of a note-to-self message as a downscaled JPEG (AttachmentService has the guards).
+    private func attachment(_ r: LoopbackRequest) throws -> JSON {
+        guard let guid = r.query["message_guid"], !guid.isEmpty else { throw APIError.badRequest("`message_guid` is required") }
+        guard guid.count <= 128 else { throw APIError.badRequest("`message_guid` is too long") }
+        let index = try Params.int(r, "index", default: 0, min: 0, max: 9)!
+        let maxEdge = try Params.int(r, "max_edge", default: ImageTranscoder.defaultMaxEdge, min: 256, max: 2576)!
+        return envelope(try deps.attachments.image(messageGUID: guid, index: index, maxEdge: maxEdge).fields)
     }
 
     // MARK: Contacts and WhatsApp

@@ -218,7 +218,26 @@ export interface LlmRequestBase {
   runId?: string | null;
 }
 
+/** Media types the Messages API accepts for base64 image blocks. */
+export const LLM_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
+export type LlmImageType = (typeof LLM_IMAGE_TYPES)[number];
+
+/**
+ * An image for a vision route (route.maxImages > 0): base64, already downscaled by whoever produced it. Images can't
+ * be pseudonymized or scanned like text, so only a route that allows them may carry them, the client approves each
+ * one's hash for the egress fetch just before sending, and every other image block is refused at the choke point.
+ */
+export interface LlmImage {
+  mediaType: LlmImageType;
+  /** base64, no line breaks. */
+  data: string;
+  width?: number | null;
+  height?: number | null;
+}
+
 export interface LlmParseRequest<T> extends LlmRequestBase {
+  /** Images for the last user turn (placed before its text). Only routes with maxImages > 0 accept them. */
+  images?: LlmImage[];
   /** Structured output schema (zod 4 object). Every field required; use nullable instead of optional. */
   schema: z.ZodType<T>;
   /** Code-side checks the API can't enforce (bounds, lengths, ref sets). Problems → outcome 'invalid'. */
