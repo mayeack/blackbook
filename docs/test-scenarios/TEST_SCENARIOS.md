@@ -934,6 +934,40 @@ server restart; until then the route 404s and commands stay text-only.
 
 ---
 
+## LLM API errors are diagnosable without content (2026-10-18)
+
+**What changed**: the one Ask 400 in the ledger (2026-10-18 23:42 UTC) was traced to the pre-#57 tool set: its
+prompt_version `b99f5720` hashes to the #56 Ask tools, which had 24 nullable (anyOf) filters against the API's limit
+of 16 union-typed parameters across strict schemas. #57 had already fixed it; the next Ask after the redeploy
+succeeded. New here: a failed API call now records a content-free classification instead of a bare
+`BadRequestError:400`: `llm_call_failed` carries `error_code` (`{API error type}:{code from a fixed list of known
+messages}[:{field path from fixed words}]`, e.g. `invalid_request_error:strict_union_limit:tools.3.custom`),
+`request_id` (`req_…`) and, in the tool loop, `counts.turn`. The ledger's `error_type` for that row is
+`api_error:{error_code}`. `llm_batch_results` counts errored items per code. The API's message is never logged or stored.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/ask/request.test.ts`: real client, real Ask system prompt and tools, both routes (ask_imessage 2500 /
+   ask_web 4000 max_tokens), first request and the request after two tool results pass `requestIssues`; the
+   pre-#57 tool set (24 nullable filters) is refused locally and nothing reaches the API.
+3. `test/llm/client.test.ts`: a 400 whose message carries a marker word → outcome, log line and ledger row hold the
+   code and request id, never the marker; `errorBodyCode` table; a tool-loop failure logs `counts.turn = 1`;
+   batch errored items counted per code.
+
+### Scenario B — Live (owner, after deploy)
+1. `grep llm_call_failed ~/Library/Application\ Support/Yeackbot/logs/server-$(date +%F).jsonl` after any failure.
+2. **Expected**: `error_code` names the cause (e.g. `strict_union_limit`, `grammar_too_large`, `prompt_too_long`);
+   `request_id` can be looked up in the Claude Console logs for the full message. `unrecognized` = a message outside
+   the known list (look the request id up, then add a pattern to `API_ERROR_CODES`).
+3. `yb llm-usage` / the ledger: an errored sync row shows `error_type` like `api_error:invalid_request_error:…`.
+
+**Edge cases**: a mid-stream SSE error has no HTTP status (`error_class` `APIError`) but still gets a type/code;
+connection errors stay `APIConnectionError` with no code; an echoed prompt word can at worst pick the wrong code
+(fixed vocabulary), never leak text.
+**Platforms**: server. Not deployed; no live API call was made for this change.
+
+---
+
 ## Owner's own records never become suggestions; owner-confirmed merge into me (2026-10-18)
 
 **What changed**: a user merge (`method: 'user'`) may fold a person record into the `me` person (agents still can't;

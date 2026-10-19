@@ -72,6 +72,7 @@ export function askRoutes(deps: RouteDeps): Router {
           answer: out.answer,
           citations: out.citations,
           people: out.people,
+          list: out.list ?? null,
           degraded: out.degraded,
           usage: out.usage ?? null,
         });

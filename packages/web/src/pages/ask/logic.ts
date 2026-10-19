@@ -1,8 +1,8 @@
 /**
  * Ask: the live-turn reducer over SSE events and the answer renderer's parsing (citations → footnotes / person
- * chips, plain-text blocks). Pure and unit-tested.
+ * chips, plain-text blocks, people lists → table rows). Pure and unit-tested.
  */
-import type { AskCitation, AskEvent, AskToolName, AskTurn, AskUsage, PersonChip } from '@yb/shared';
+import type { AskCitation, AskEvent, AskPeopleList, AskPeopleRow, AskToolName, AskTurn, AskUsage, PersonChip } from '@yb/shared';
 
 export interface ToolStep {
   tool: AskToolName;
@@ -24,13 +24,15 @@ export interface LiveTurn {
   tools: ToolStep[];
   citations: AskCitation[];
   people: PersonChip[];
+  /** Set (on done) when the answer lists people: rendered as a table. */
+  list: AskPeopleList | null;
   usage: AskUsage | null;
   error: { code: string; message: string } | null;
   createdAt: number;
 }
 
 export function newTurn(key: string, question: string, conversationId: string | null, now = Date.now()): LiveTurn {
-  return { key, conversationId, turnId: null, question, text: '', status: 'pending', tools: [], citations: [], people: [], usage: null, error: null, createdAt: now };
+  return { key, conversationId, turnId: null, question, text: '', status: 'pending', tools: [], citations: [], people: [], list: null, usage: null, error: null, createdAt: now };
 }
 
 const addCitation = (list: AskCitation[], c: AskCitation) => (list.some((x) => x.ref === c.ref) ? list : [...list, c]);
@@ -65,6 +67,7 @@ export function applyEvent(t: LiveTurn, e: AskEvent): LiveTurn {
         text: e.answer,
         citations: e.citations,
         people: e.people,
+        list: e.list ?? null,
         usage: e.usage,
         status: e.degraded ? 'degraded' : 'done',
         tools: t.tools.map((s) => (s.status === 'running' ? { ...s, status: 'done' } : s)),
@@ -87,6 +90,7 @@ export function fromStored(t: AskTurn, conversationId: string): LiveTurn {
     tools: [],
     citations: t.citations,
     people: t.people,
+    list: t.list ?? null,
     usage: null,
     error: t.status === 'error' ? { code: 'error', message: t.answer || 'This answer didn’t finish.' } : null,
     createdAt: t.createdAt,
@@ -129,11 +133,13 @@ export interface ParsedAnswer {
   footnotes: { n: number; citation: AskCitation }[];
 }
 
-/**
- * Splits answer text into paragraphs / bullet lists with inline citations. Footnote numbers follow first
- * appearance. Ids with no known citation are dropped (while streaming they may resolve on a later event).
- */
-export function parseAnswer(text: string, citations: readonly AskCitation[]): ParsedAnswer {
+/** Turns lines into inline pieces; footnote numbers are shared by every line it parses, in order of first appearance. */
+interface InlineParser {
+  inlines: (line: string) => Inline[];
+  footnotes: { n: number; citation: AskCitation }[];
+}
+
+function inlineParser(citations: readonly AskCitation[]): InlineParser {
   const byRef = new Map(citations.map((c) => [c.ref, c]));
   const numbers = new Map<string, number>();
   const footnotes: { n: number; citation: AskCitation }[] = [];
@@ -177,7 +183,12 @@ export function parseAnswer(text: string, citations: readonly AskCitation[]): Pa
       return acc;
     }, []);
   };
+  return { inlines, footnotes };
+}
 
+/** Paragraphs and bullet lists of a text. */
+function blocksOf(text: string, p: InlineParser): Block[] {
+  const { inlines } = p;
   const blocks: Block[] = [];
   let para: string[] = [];
   let list: Inline[][] | null = null;
@@ -205,7 +216,32 @@ export function parseAnswer(text: string, citations: readonly AskCitation[]): Pa
   }
   flushPara();
   flushList();
-  return { blocks, footnotes };
+  return blocks;
+}
+
+/**
+ * Splits answer text into paragraphs / bullet lists with inline citations. Footnote numbers follow first
+ * appearance. Ids with no known citation are dropped (while streaming they may resolve on a later event).
+ */
+export function parseAnswer(text: string, citations: readonly AskCitation[]): ParsedAnswer {
+  const p = inlineParser(citations);
+  const blocks = blocksOf(text, p);
+  return { blocks, footnotes: p.footnotes };
+}
+
+export interface ParsedPeopleList {
+  intro: Block[];
+  /** One per person, with the detail's citations inline (numbered across the whole table). */
+  rows: { row: AskPeopleRow; detail: Inline[] }[];
+  note: Block[];
+}
+
+/** A people answer as table rows: the intro above, one row per person, any note below. */
+export function parsePeopleList(list: AskPeopleList, citations: readonly AskCitation[]): ParsedPeopleList {
+  const p = inlineParser(citations);
+  const intro = blocksOf(list.intro, p);
+  const rows = list.rows.map((row) => ({ row, detail: p.inlines(row.detail) }));
+  return { intro, rows, note: blocksOf(list.note, p) };
 }
 
 /** Superscript digits for footnote markers. */

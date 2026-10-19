@@ -1,18 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import type { AskCitation } from '@yb/shared';
+import type { AskCitation, AskPeopleList } from '@yb/shared';
 import { answerForImessage, askForImessage, formatImessageAnswer, IMESSAGE_ANSWER_CHARS, NEEDS_KEY_MESSAGE } from '../../src/ask';
+import { shortDate } from '../../src/ask/citations';
 import { allowlistLinks } from '../../src/ask/imessage';
 import { factRef } from '../../src/ask/refs';
 import { BOT_MARKER, checkOutboundText, MAX_ANSWER_CHARS } from '../../src/delivery/types';
 import type { AgentServices } from '../../src/services';
 import { FakeOutboundSender, FakePushSender } from '../fakes/delivery';
 import { FakeEgress, FakeLlmClient } from '../fakes/llm';
-import { buildAskWorld, NOW } from './world';
+import { T0 } from '../helpers';
+import { buildAskWorld, DAY, NOW } from './world';
 
 const CONV = '019a0000-0000-7000-8000-0000000000c1';
 const cit = (ref: string, kind: AskCitation['kind'], label: string): AskCitation => ({ ref, kind, label, href: null, at: null });
 
+const row = (id: string, displayName: string): AskPeopleList['rows'][number] => ({
+  person: { id, displayName, firstName: null, state: null },
+  detail: '',
+  city: null,
+  circles: [],
+  lastContactAt: null,
+});
+
 describe('formatImessageAnswer', () => {
+  it('a list of people: one line each with the details on it, no footnotes, whole lines cut with "+N more"', () => {
+    const list: AskPeopleList = { intro: '2 people in Austin:', rows: [row('p1', 'Sam R.'), row('p2', 'Jess K.')], note: '' };
+    const text = formatImessageAnswer({
+      conversationId: CONV,
+      answer: '2 people in Austin:\n- Sam R. — lives in Austin [F1] · Climbing crew circle · last contact Oct 14\n- Jess K. [P2] — East Austin [F3]; talked about Acme [m:2]',
+      citations: [cit('F1', 'fact', 'Sam — lives in Austin'), cit('P2', 'person', 'Jess Kim'), cit('F3', 'fact', 'Jess — lives in East Austin'), cit('m:2', 'message', 'Jess · iMessage Oct 3')],
+      list,
+    });
+    expect(text).toBe(
+      [
+        '2 people in Austin:',
+        '• Sam R. — lives in Austin · Climbing crew circle · last contact Oct 14',
+        '• Jess K. — East Austin; talked about Acme',
+        `Full answer: https://yeackbot.com/ask/${CONV}`,
+      ].join('\n'),
+    );
+
+    const many = Array.from({ length: 12 }, (_, i) => `- Person ${i + 1} — lives in Springfield · Board games circle · last contact Oct ${i + 1}`);
+    const long = formatImessageAnswer({ conversationId: CONV, answer: ['12 people:', ...many].join('\n'), citations: [], list: { ...list, rows: many.map((_, i) => row(`p${i}`, `Person ${i + 1}`)) } });
+    const lines = long.split('\n');
+    expect(long.length).toBeLessThanOrEqual(IMESSAGE_ANSWER_CHARS);
+    expect(lines.filter((l) => l.startsWith('• ')).every((l) => l.endsWith(`Oct ${l.match(/Person (\d+)/)![1]}`))).toBe(true); // whole lines only
+    const kept = lines.filter((l) => l.startsWith('• ')).length;
+    expect(lines).toContain(`+${12 - kept} more`);
+    expect(lines.at(-1)).toBe(`Full answer: https://yeackbot.com/ask/${CONV}`);
+    expect(checkOutboundText(`${BOT_MARKER} ${long}`)).toEqual([]);
+  });
+
   it('footnotes citations (≤ 3, no person footnotes), strips markdown, ends with the full-answer link', () => {
     const text = formatImessageAnswer({
       conversationId: CONV,
@@ -76,5 +114,28 @@ describe('answerForImessage', () => {
     expect(out.text).toContain('¹ Sam — lives in Austin');
     expect(out.degraded).toBe(false);
     expect(outbound.sent).toEqual([]);
+  });
+
+  it('"who do I know in …" with the model: one line per person, details on the line, no footnote list', async () => {
+    const w = buildAskWorld();
+    const egress = new FakeEgress();
+    const sam = egress.tokenFor(w.sam);
+    const jess = egress.tokenFor(w.jess);
+    const f = factRef(w.facts.samAustin);
+    const fj = factRef(w.facts.jessAustin);
+    const llm = new FakeLlmClient().on('ask', {
+      toolCalls: [{ name: 'search_people', input: { city: 'Austin', limit: null } }],
+      then: { text: `- ${sam} — lives in Austin [${f}]\n- ${jess} — East Austin [${fj}]` },
+    });
+    const out = await askForImessage('who do I know in Austin', { db: w.db, services: () => services(llm, egress), now: NOW });
+    const tz = 'America/Los_Angeles';
+    expect(out.text.split('\n').slice(0, 2)).toEqual([
+      `• Sam R. — lives in Austin · Climbing crew circle · last contact ${shortDate(T0, NOW, tz)}`,
+      `• Jess K. — East Austin · Climbing crew circle · last contact ${shortDate(T0 + DAY, NOW, tz)}`,
+    ]);
+    expect(out.text).not.toMatch(/[¹²³]/);
+    expect(out.text).not.toContain('Rivera');
+    expect(out.engine.list?.rows.map((r) => r.person.id)).toEqual([w.sam, w.jess]);
+    expect(checkOutboundText(`${BOT_MARKER} ${out.text}`)).toEqual([]);
   });
 });
