@@ -75,6 +75,7 @@ export interface RequestRow {
   params: string | null;
   estimate_usd: number | null;
   refusal_category: string | null;
+  /** Batch items: invalid_request | other | canceled | expired | submit_failed. Sync calls: the unavailable reason, for an API error `api_error:{apiErrorCode}` (llm/client.ts). */
   error_type: string | null;
   fallback_used: 0 | 1;
   retry_of: string | null;

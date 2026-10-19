@@ -29,7 +29,9 @@
  * cache multipliers, the batch discount and Haiku's >100K rate card (llm/models.ts priceTokens). A response whose
  * actual prompt went over PROMPT_TOKEN_LIMIT (the guard is an estimate) logs `llm_prompt_over_limit`.
  * Budget: every call checks key, llm.enabled and the caps first (ledger.checkSpend) and answers 'unavailable'
- * instead of spending. Nothing here throws for API, refusal, budget or egress outcomes. Logs carry counts only.
+ * instead of spending. Nothing here throws for API, refusal, budget or egress outcomes. Logs carry counts only; a
+ * failed API call adds its content-free apiErrorCode and request id (never the API's message), and the ledger row's
+ * error_type carries the same code.
  */
 import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -247,18 +249,120 @@ export function echoContent<T extends { type: string }>(content: readonly T[]): 
 
 const refusalCategory = (m: unknown): string | null => (m as { stop_details?: { category?: string | null } | null }).stop_details?.category ?? null;
 
-/** SDK error → 'unavailable' (never the error message: it may echo request content). */
+/** The API's error `type`s (SDK ErrorType + request_too_large); anything else is classified as 'other'. */
+const API_ERROR_TYPES: ReadonlySet<string> = new Set([
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'not_found_error',
+  'request_too_large',
+  'rate_limit_error',
+  'timeout_error',
+  'overloaded_error',
+  'api_error',
+  'billing_error',
+]);
+
+/**
+ * Known API error messages → a fixed code, first match wins (structured-outputs limits, the measured grammar cap,
+ * and the 400s this client's request shape can run into on Haiku 5.5 / Sonnet 5.5). Only the code is ever logged or
+ * stored, never the message (it can echo request content): words echoed from a prompt can at worst pick the
+ * wrong code, never leak. 'unrecognized' = a message outside the list (look the request id up in the Console).
+ */
+export const API_ERROR_CODES: readonly (readonly [RegExp, string])[] = [
+  [/too complex for compilation/i, 'schema_too_complex'],
+  [/grammar is too large/i, 'grammar_too_large'],
+  [/\bunion/i, 'strict_union_limit'],
+  [/optional param/i, 'strict_optional_limit'],
+  [/\bstrict\b/i, 'strict_tools'],
+  [/prompt is too long/i, 'prompt_too_long'],
+  [/tool_choice/i, 'tool_choice'],
+  [/prefill|must end with a user/i, 'prefill'],
+  [/expected `?(redacted_)?thinking/i, 'thinking_blocks'],
+  [/tool_use|tool_result/i, 'tool_pairing'],
+  [/signature/i, 'thinking_signature'],
+  [/thinking|effort/i, 'thinking_effort'],
+  [/cache_control/i, 'cache_control'],
+  [/temperature|top_p|top_k/i, 'sampling_param'],
+  [/max_tokens/i, 'max_tokens'],
+  [/input_schema|json schema|output_config|additionalProperties/i, 'schema_unsupported'],
+  [/fallback|anthropic-beta/i, 'fallbacks_beta'],
+  [/extra inputs|not permitted|unexpected/i, 'unknown_field'],
+  [/credit balance/i, 'credit_balance'],
+];
+
+/** Request fields an API error message may start with ("tools.3.custom.input_schema: …"). */
+const ERROR_PATH_ROOTS: ReadonlySet<string> = new Set(['model', 'messages', 'system', 'tools', 'tool_choice', 'thinking', 'output_config', 'max_tokens', 'cache_control', 'fallbacks', 'metadata', 'stop_sequences']);
+const ERROR_PATH_KEYS: ReadonlySet<string> = new Set(['content', 'custom', 'input_schema', 'cache_control', 'format', 'schema', 'effort', 'type', 'name', 'input', 'text', 'thinking', 'signature', 'source']);
+
+/**
+ * The leading field path of an API error message ("tools.3.custom.input_schema: …" → "tools.3.custom"): a root from
+ * ERROR_PATH_ROOTS, then up to two indices or ERROR_PATH_KEYS words (stopping at the first other segment); null if
+ * the message doesn't start with one.
+ */
+function apiErrorPath(message: string): string | null {
+  const segs = /^[a-z_]+(?:\.[a-z0-9_]{1,24}){0,2}(?=[.:\s])/.exec(message)?.[0].split('.') ?? [];
+  if (!ERROR_PATH_ROOTS.has(segs[0] ?? '')) return null;
+  const keep = [segs[0]!];
+  for (const s of segs.slice(1)) {
+    if (!/^\d{1,4}$/.test(s) && !ERROR_PATH_KEYS.has(s)) break;
+    keep.push(s);
+  }
+  return keep.join('.');
+}
+
+/**
+ * A content-free classification of an API error: `{type}:{code}[:{path}]`, e.g.
+ * `invalid_request_error:strict_union_limit:tools.3.custom`. Built only from fixed vocabularies (API_ERROR_TYPES,
+ * API_ERROR_CODES, apiErrorPath), so it is safe to log and store; ≤80 characters (the logger's token limit).
+ */
+export function apiErrorCode(e: InstanceType<typeof Anthropic.APIError>): string {
+  // HTTP errors carry the body in e.error; an SSE `error` event mid-stream has the same shape without a status.
+  return errorBodyCode(e.error, e.type);
+}
+
+/** apiErrorCode of an error body `{type:'error', error:{type, message}}` (also a batch item's `result.error`). */
+export function errorBodyCode(errorBody: unknown, typeHint?: string | null): string {
+  const body = (errorBody ?? {}) as { error?: { type?: unknown; message?: unknown } };
+  const rawType = typeHint ?? body.error?.type;
+  const type = typeof rawType === 'string' && API_ERROR_TYPES.has(rawType) ? rawType : 'other';
+  const message = typeof body.error?.message === 'string' ? body.error.message : '';
+  const code = message ? (API_ERROR_CODES.find(([re]) => re.test(message))?.[1] ?? 'unrecognized') : 'no_message';
+  const path = apiErrorPath(message);
+  const full = path ? `${type}:${code}:${path}` : `${type}:${code}`;
+  return full.length <= 80 ? full : `${type}:${code}`;
+}
+
+/**
+ * SDK error → 'unavailable'. Never the error message (it may echo request content): API errors carry the
+ * content-free apiErrorCode and the request id instead.
+ */
 export function unavailableFromError(e: unknown): LlmUnavailable {
   if (e instanceof EgressBlocked) return unavailable('egress_blocked');
   if (e instanceof Anthropic.APIUserAbortError) return unavailable('aborted');
   if (e instanceof Anthropic.APIError) {
     if (e.headers?.get(EGRESS_BLOCKED_HEADER)) return unavailable('egress_blocked');
     if (e instanceof Anthropic.RateLimitError) return unavailable('rate_limited');
-    return unavailable('api_error', `${e.constructor.name}${e.status ? `:${e.status}` : ''}`);
+    if (e instanceof Anthropic.APIConnectionError) return unavailable('api_error', e.constructor.name);
+    const out: LlmUnavailable = { ...unavailable('api_error', `${e.constructor.name}${e.status ? `:${e.status}` : ''}`), errorCode: apiErrorCode(e) };
+    if (typeof e.requestID === 'string' && REQUEST_ID_RE.test(e.requestID)) out.apiRequestId = e.requestID;
+    return out;
   }
   if (e instanceof Error && e.name === 'AbortError') return unavailable('aborted');
   return unavailable('api_error', e instanceof Error ? e.constructor.name : 'unknown');
 }
+
+const REQUEST_ID_RE = /^req_[A-Za-z0-9]{1,64}$/;
+
+/** The ledger's error_type for a failed sync call: the reason, plus the API error code when there is one. */
+const ledgerErrorType = (u: LlmUnavailable): string => (u.errorCode ? `${u.reason}:${u.errorCode}` : u.reason);
+
+/** llm_call_failed / llm_batch_submit_failed fields: class, content-free code, request id. */
+const failureFields = (u: LlmUnavailable) => ({
+  error_class: u.detail ?? u.reason,
+  ...(u.errorCode ? { error_code: u.errorCode } : {}),
+  ...(u.apiRequestId ? { request_id: u.apiRequestId } : {}),
+});
 
 const inputHash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 32);
 const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -514,8 +618,8 @@ class AnthropicLlmClient implements LlmClient {
       msg = await this.sdk.beta.messages.create(params as unknown as BetaParams, req.signal ? { signal: req.signal } : undefined);
     } catch (e) {
       const u = unavailableFromError(e);
-      ledger.recordOutcome(this.db, id, { status: 'errored', errorType: u.reason }, this.now());
-      this.log.warn('llm_call_failed', { job: req.kind, error_class: u.detail ?? u.reason });
+      ledger.recordOutcome(this.db, id, { status: 'errored', errorType: ledgerErrorType(u) }, this.now());
+      this.log.warn('llm_call_failed', { job: req.kind, ...failureFields(u) });
       return u;
     }
     return this.settleParse(msg, req, id, rp);
@@ -626,7 +730,7 @@ class AnthropicLlmClient implements LlmClient {
           servedByModel: usage.servedByModel,
           output: text || null,
           usage: usage.inputTokens + usage.outputTokens > 0 ? usage : null,
-          errorType: out.status === 'unavailable' ? out.reason : null,
+          errorType: out.status === 'unavailable' ? ledgerErrorType(out) : null,
         },
         this.now(),
       );
@@ -648,7 +752,7 @@ class AnthropicLlmClient implements LlmClient {
         msg = await stream.finalMessage();
       } catch (e) {
         const u = unavailableFromError(e);
-        this.log.warn('llm_call_failed', { job: req.kind, error_class: u.detail ?? u.reason });
+        this.log.warn('llm_call_failed', { job: req.kind, ...failureFields(u), counts: { turn } });
         return finish('errored', u);
       }
       if (bufferText && req.onTextDelta && msg.stop_reason !== 'refusal') emit(detok.push(finalText(msg.content) ?? ''));
@@ -823,7 +927,7 @@ class AnthropicLlmClient implements LlmClient {
       const u = unavailableFromError(e);
       const mark = this.db.prepare(`UPDATE llm_requests SET status = 'errored', error_type = 'submit_failed', completed_at = ? WHERE custom_id = ? AND batch_id IS NULL`);
       tx(this.db, () => items.forEach((it) => mark.run(this.now(), it.customId)));
-      this.log.warn('llm_batch_submit_failed', { error_class: u.detail ?? u.reason, counts: { items: items.length } });
+      this.log.warn('llm_batch_submit_failed', { ...failureFields(u), counts: { items: items.length } });
       return u;
     }
     const at = this.now();
@@ -865,11 +969,17 @@ class AnthropicLlmClient implements LlmClient {
     const decoder = await this.sdk.messages.batches.results(batchId);
     const rowOf = this.db.prepare('SELECT kind, model, params FROM llm_requests WHERE custom_id = ?');
     let n = 0;
+    /** Errored items per content-free error code (errorBodyCode), so a batch of 400s says why in the log. */
+    const errored: Record<string, number> = {};
     for await (const r of decoder) {
       const row = rowOf.get(r.custom_id) as { kind: string; model: string; params: string | null } | undefined;
       const ttl = row?.params ? ((JSON.parse(row.params) as { cacheTtl?: CacheTtl }).cacheTtl ?? '1h') : '1h';
       const res = mapBatchResult(r, { model: row?.model ?? LLM_MODEL, cacheTtl: ttl });
       if (r.result.type === 'succeeded') this.checkPromptSize(row?.kind ?? 'batch', r.result.message.usage as UsageLike);
+      if (r.result.type === 'errored') {
+        const code = errorBodyCode(r.result.error);
+        errored[code] = (errored[code] ?? 0) + 1;
+      }
       persistBatchResult(this.db, res, this.now());
       yield res;
       if (++n % 50 === 0) await yieldLoop();
@@ -878,7 +988,7 @@ class AnthropicLlmClient implements LlmClient {
     this.db
       .prepare(`UPDATE llm_batches SET results_fetched_at = ?, status = 'ended', usage = ?, cost_usd = ? WHERE id = ?`)
       .run(this.now(), JSON.stringify(t.usage), t.costUsd, batchId);
-    this.log.info('llm_batch_results', { batch_id: batchId, counts: { results: n } });
+    this.log.info('llm_batch_results', { batch_id: batchId, counts: { results: n, ...errored } });
   }
 }
 
