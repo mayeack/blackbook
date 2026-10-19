@@ -18,7 +18,7 @@ import { CONSOLIDATION_SYSTEM, EXTRACTION_SYSTEM } from '../../src/extraction/pr
 import { TIEBREAK_SYSTEM } from '../../src/identity/tiebreak';
 import { ADJUDICATION_SYSTEM } from '../../src/intel/adjudicationPrompt';
 import { outputFormat, volatileMarkers } from '../../src/llm/caching';
-import { promptTokens, requestIssues, requestParams, routeOverrides } from '../../src/llm/client';
+import { promptTokens, requestIssues, requestParams, routeOverrides, STRICT_MAX_OPTIONAL_PARAMS, STRICT_MAX_UNION_PARAMS, strictParamCounts, strictSchemaIssues } from '../../src/llm/client';
 import {
   BATCH_CACHE_MISS_SHARE,
   CACHE_WRITE_MULTIPLIER,
@@ -207,6 +207,27 @@ describe('request shape per route', () => {
     expect(requestIssues({ ...ok, messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: '{' }] })).toEqual(['last message must be a user turn (no prefill)']);
     expect(requestIssues({ ...ok, fallbacks: 'default' })).toEqual(['fallbacks on a model without server-side fallback']);
     expect(requestIssues({ ...ok, model: OPUS })).toEqual(['model not in the allowlist']);
+  });
+
+  it('strict tool sets over the API schema limits (16 union-typed, 24 optional parameters) are flagged', () => {
+    const tool = (name: string, properties: Record<string, unknown>, required: string[]) => ({ name, strict: true, input_schema: { type: 'object', additionalProperties: false, properties, required } });
+    const nullable = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+    // The shape that 400'd in production: 24 required-nullable filters across the Ask tools.
+    const unions = Array.from({ length: 3 }, (_, i) => tool(`t${i}`, Object.fromEntries(Array.from({ length: 8 }, (_, j) => [`p${j}`, nullable])), Array.from({ length: 8 }, (_, j) => `p${j}`)));
+    expect(strictParamCounts(unions.map((t) => t.input_schema))).toEqual({ union: 24, optional: 0 });
+    expect(strictSchemaIssues(unions)).toEqual(['24 union-typed tool parameters (max 16)']);
+    expect(strictSchemaIssues(unions.map((t) => ({ ...t, strict: false })))).toEqual([]);
+    const optional = [tool('a', Object.fromEntries(Array.from({ length: 25 }, (_, j) => [`p${j}`, { type: 'string' }])), [])];
+    expect(strictSchemaIssues(optional)).toEqual(['25 optional tool parameters (max 24)']);
+    expect(requestIssues({ ...build('intent', 'sync'), tools: unions })).toEqual(['24 union-typed tool parameters (max 16)']);
+  });
+
+  it('the Ask tools fit the strict schema limits', () => {
+    const body = requestParams(resolveRoute('ask_web'), { system: ASK_SYSTEM_PROMPT, messages: [{ role: 'user', content: 'Who do I know in Lisbon?' }], tools: ASK_TOOL_DEFS, mode: 'sync' });
+    expect(requestIssues(body)).toEqual([]);
+    const n = strictParamCounts(ASK_TOOL_DEFS.map((t) => t.inputSchema));
+    expect(n.union).toBeLessThanOrEqual(STRICT_MAX_UNION_PARAMS);
+    expect(n.optional).toBeLessThanOrEqual(STRICT_MAX_OPTIONAL_PARAMS);
   });
 });
 
