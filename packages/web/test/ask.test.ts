@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { encodeSseEvent, type AskCitation, type AskEvent, type AskTurn } from '@yb/shared';
+import { encodeSseEvent, SseParser, type AskCitation, type AskEvent, type AskPeopleList, type AskTurn } from '@yb/shared';
 import { ApiError } from '../src/api/client';
-import { applyEvent, citationHref, citationPersonId, fromStored, isNeedsKeyAnswer, newTurn, parseAnswer, superscript, toolLabel } from '../src/pages/ask/logic';
+import { applyEvent, citationHref, citationPersonId, fromStored, isNeedsKeyAnswer, newTurn, parseAnswer, parsePeopleList, superscript, toolLabel } from '../src/pages/ask/logic';
 import { AskStore, mergeTurns } from '../src/pages/ask/store';
 import { streamAsk, type StreamEnv } from '../src/pages/ask/stream';
 
@@ -14,12 +14,22 @@ beforeAll(() => {
 afterAll(() => vi.unstubAllGlobals());
 
 const PID = '0198f0a2-0000-7000-8000-000000000001';
+const PID2 = '0198f0a2-0000-7000-8000-000000000002';
 const cites: AskCitation[] = [
   { ref: 'm:2n9c', kind: 'message', label: 'Avery · iMessage Oct 3', href: `/p/${PID}?m=123456`, at: 1_700_000_000_000 },
   { ref: 'F1a', kind: 'fact', label: 'Avery — lives in Springfield', href: `/p/${PID}`, at: null },
   { ref: 'E4', kind: 'event', label: 'Board game night · Nov 22', href: '/e/0198f0a2-0000-7000-8000-0000000000e4', at: null },
   { ref: 'P1a', kind: 'person', label: 'Avery Quinn', href: `/p/${PID}`, at: null },
 ];
+
+const LIST: AskPeopleList = {
+  intro: '2 people in Springfield:',
+  rows: [
+    { person: { id: PID, displayName: 'Avery Quinn', firstName: 'Avery', state: 'steady' }, detail: 'lives in Springfield [F1a]', city: 'Springfield', circles: ['Board games'], lastContactAt: 1_700_000_000_000 },
+    { person: { id: PID2, displayName: 'Blake Ortiz', firstName: 'Blake', state: null }, detail: 'met Avery [P1a] at game night [m:2n9c][F1a]', city: null, circles: [], lastContactAt: null },
+  ],
+  note: '',
+};
 
 describe('live turn reducer', () => {
   it('walks start → tools → deltas → citation → done', () => {
@@ -77,10 +87,36 @@ describe('live turn reducer', () => {
     const stored: AskTurn = { id: 'turn-9', question: 'q', answer: 'a', citations: [], people: [], channel: 'web', status: 'degraded', createdAt: 5 };
     expect(fromStored(stored, 'c').status).toBe('degraded');
     expect(fromStored({ ...stored, status: 'running' }, 'c').status).toBe('pending');
+    expect(fromStored(stored, 'c').list).toBeNull(); // stored before people lists existed
+    expect(fromStored({ ...stored, list: LIST }, 'c').list).toEqual(LIST);
+  });
+
+  it('keeps the people list from done (and parses frames from a server that sends none)', () => {
+    const base = applyEvent(newTurn('k', 'Who lives in Springfield?', null), { type: 'start', conversationId: 'c', turnId: 't' });
+    const done: Extract<AskEvent, { type: 'done' }> = { type: 'done', conversationId: 'c', turnId: 't', answer: 'x', citations: cites, people: [], degraded: false, usage: null };
+    expect(applyEvent(base, { ...done, list: LIST }).list).toEqual(LIST);
+    expect(applyEvent(base, done).list).toBeNull();
+    const parsed = new SseParser().push(encodeSseEvent(done) + encodeSseEvent({ ...done, list: LIST }));
+    expect(parsed.map((e) => (e.type === 'done' ? (e.list ?? null) : 'other'))).toEqual([null, LIST]);
   });
 });
 
 describe('answer parsing', () => {
+  it('a people list becomes table rows; citations number across the whole table', () => {
+    const t = parsePeopleList(LIST, cites);
+    expect(t.intro).toHaveLength(1);
+    expect(t.note).toEqual([]);
+    expect(t.rows.map((r) => r.row.person.id)).toEqual([PID, PID2]);
+    const cited = (i: number) => t.rows[i]!.detail.filter((x) => x.kind === 'cite').map((x) => (x.kind === 'cite' ? [x.ref, x.n] : []));
+    expect(cited(0)).toEqual([['F1a', 1]]);
+    expect(cited(1)).toEqual([
+      ['m:2n9c', 2],
+      ['F1a', 1],
+    ]);
+    expect(t.rows[1]!.detail.some((x) => x.kind === 'person')).toBe(true);
+    expect(t.rows[0]!.detail[0]).toEqual({ kind: 'text', text: 'lives in Springfield ' });
+  });
+
   it('numbers footnotes by first appearance, inlines person chips, drops unknown ids', () => {
     const p = parseAnswer('Avery [P1a] lives in Springfield [F1a][m:2n9c]. Also [F1a] and [F9z].\n\n- Game night [E4]\n- Second', cites);
     expect(p.footnotes.map((f) => [f.n, f.citation.ref])).toEqual([

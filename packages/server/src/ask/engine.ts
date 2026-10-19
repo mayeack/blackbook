@@ -9,22 +9,24 @@
  *      append-only history (the client echoes response.content). The user turn and EVERY tool result go through
  *      egress.pseudonymize; tool results are wrapped as untrusted data;
  *   4. citation ids no tool returned in the conversation are stripped (and counted), person tokens become
- *      names, citations resolve to labels + deep links; the turn is stored for the conversation history.
+ *      names, citations resolve to labels + deep links; an answer listing people becomes one line per person plus
+ *      structured rows (people-list.ts; the web's table); the turn is stored for the conversation history.
  *
  * Ask writes nothing journaled: the tools are read-only and the only rows written are Ask's own history and
  * index tables. Logs carry ids and counts only (never the question, tool inputs or answer text).
  */
-import type { AskCitation, AskEvent, AskUsage, PersonChip } from '@yb/shared';
+import type { AskCitation, AskEvent, AskPeopleList, AskUsage, PersonChip } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { ASK_MAX_TOOL_CALLS, EgressBlocked, type LlmToolLoopOutcome, type LlmUnavailableReason } from '../llm/types';
 import { errorFields, type Logger } from '../ops/logger';
 import { maskText } from '../routes/people';
 import { servicesFor, type AgentServices, type ServicesConfig, type ServicesProvider } from '../services';
 import { personChips, resolveCitation, resolveCitations, type CitationContext } from './citations';
-import { degradedAnswer, type DegradedReason } from './degraded';
+import { degradedAnswer, intentOf, type DegradedReason } from './degraded';
 import { ensureAskIndexes } from './fts';
 import { ASK_PROMPT_VERSION, ASK_ROUTE, ASK_SYSTEM_PROMPT, askEstimateUsd, userTurnSections, type AskChannel } from './prompt';
-import { processAnswer } from './refs';
+import { asksForPeople, buildPeopleList, peopleLinesOf } from './people-list';
+import { detokenize, processAnswer, tidy } from './refs';
 import { createScope, firstNameOf, mentionedPeople, shortName, summarize, type AskScope, type PersonRow, type PersonSummary } from './retrieval';
 import { closeStaleTurns, finishTurn, priorContext, startTurn, type TurnResult } from './store';
 import { DeltaFilter } from './stream';
@@ -53,6 +55,8 @@ export interface AskEngineAnswer {
   answer: string;
   citations: AskCitation[];
   people: PersonChip[];
+  /** Set when the answer lists people: one row per person (the web renders a table; iMessage drops footnotes). */
+  list: AskPeopleList | null;
   degraded: boolean;
   /** Why no LLM answered (degraded only): 'no_key', 'budget_daily', … */
   degradedReason?: DegradedReason | null;
@@ -71,7 +75,7 @@ export async function askNetwork(req: AskEngineRequest): Promise<AskEngineAnswer
   const now = req.now ?? Date.now();
   const question = req.question.replace(/\s+/g, ' ').trim().slice(0, 2000);
   const started = performance.now();
-  if (!question) return { conversationId: null, turnId: null, answer: 'Ask me something about your network.', citations: [], people: [], degraded: true, degradedReason: null, usage: null };
+  if (!question) return { conversationId: null, turnId: null, answer: 'Ask me something about your network.', citations: [], people: [], list: null, degraded: true, degradedReason: null, usage: null };
 
   closeStaleTurns(db, now);
   const turn = startTurn(db, { conversationId: req.conversationId, question, channel, now });
@@ -98,13 +102,14 @@ export async function askNetwork(req: AskEngineRequest): Promise<AskEngineAnswer
     });
     if (out.result.violations > 0) req.log?.warn('ask.citation_violation', { ids: [turn.turnId], counts: { stripped: out.result.violations } });
     if (out.result.status === 'error') {
-      return { ...base, answer: out.result.answer ?? '', citations: [], people: [], degraded: false, usage: out.result.usage, error: { code: out.result.errorCode ?? 'error', message: out.result.answer ?? 'Ask failed.' } };
+      return { ...base, answer: out.result.answer ?? '', citations: [], people: [], list: null, degraded: false, usage: out.result.usage, error: { code: out.result.errorCode ?? 'error', message: out.result.answer ?? 'Ask failed.' } };
     }
     return {
       ...base,
       answer: out.result.answer ?? '',
       citations: out.result.citations,
       people: out.result.people,
+      list: out.result.list ?? null,
       degraded: out.result.status === 'degraded',
       degradedReason: (out.result.degradedReason as DegradedReason | null) ?? null,
       usage: out.result.usage,
@@ -114,12 +119,12 @@ export async function askNetwork(req: AskEngineRequest): Promise<AskEngineAnswer
     req.log?.error('ask.failed', { ids: [turn.turnId], ...errorFields(e) });
     const message = 'Ask hit a problem. Try again in a moment.';
     finishTurn(db, turn.turnId, emptyResult('error', message, 'internal'), Date.now());
-    return { ...base, answer: message, citations: [], people: [], degraded: false, usage: null, error: { code: 'internal', message } };
+    return { ...base, answer: message, citations: [], people: [], list: null, degraded: false, usage: null, error: { code: 'internal', message } };
   }
 }
 
 function emptyResult(status: TurnResult['status'], answer: string, errorCode: string | null = null): TurnResult {
-  return { status, answer, modelAnswer: null, citations: [], people: [], citableIds: [], errorCode, toolCalls: 0, violations: 0, usage: null };
+  return { status, answer, modelAnswer: null, citations: [], people: [], list: null, citableIds: [], errorCode, toolCalls: 0, violations: 0, usage: null };
 }
 
 interface TurnInput {
@@ -151,6 +156,7 @@ function degrade(t: TurnInput, reason: DegradedReason, found: PersonSummary[] = 
       modelAnswer: null,
       citations,
       people: personChips(scope, d.people),
+      list: d.list,
       citableIds: [],
       degradedReason: reason,
       toolCalls: 0,
@@ -286,13 +292,21 @@ async function answerTurn(t: TurnInput): Promise<{ result: TurnResult }> {
   const citations = resolveCitations(cctx, processed.cited);
   for (const c of citations) if (!announced.has(c.ref)) req.onEvent?.({ type: 'citation', citation: c });
   const mentionedPeopleRows = processed.personTokens.map(personOfToken).filter((p): p is PersonRow => !!p);
+  // A list of people: one line per person with their details (and rows for the web's table).
+  const listed = peopleLinesOf(processed.modelText, {
+    person: personOfToken,
+    display: (s) => tidy(detokenize(s, personName, 'you')),
+    peopleQuestion: asksForPeople(question) || intentOf(question) !== null,
+  });
+  const people = listed ? buildPeopleList(scope, listed, display) : null;
   return {
     result: {
       status: 'done',
-      answer: processed.text || 'I couldn’t find anything on that.',
+      answer: people?.text || processed.text || 'I couldn’t find anything on that.',
       modelAnswer: processed.modelText,
       citations,
       people: personChips(scope, mentionedPeopleRows),
+      list: people?.list ?? null,
       citableIds: [...session.citable],
       toolCalls: session.toolCalls,
       violations: processed.violations,

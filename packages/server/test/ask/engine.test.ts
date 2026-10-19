@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AskEvent } from '@yb/shared';
 import { askNetwork, getConversation, NEEDS_KEY_MESSAGE } from '../../src/ask';
+import { shortDate } from '../../src/ask/citations';
 import { asksForPeople } from '../../src/ask/degraded';
 import { ASK_PROMPT_VERSION, ASK_SYSTEM_PROMPT } from '../../src/ask/prompt';
 import { eventRef, factRef, messageRef } from '../../src/ask/refs';
@@ -11,7 +12,13 @@ import { createLogger, type LogRecord } from '../../src/ops/logger';
 import type { AgentServices } from '../../src/services';
 import { FakeOutboundSender, FakePushSender } from '../fakes/delivery';
 import { FakeEgress, FakeLlmClient, type FakeReply } from '../fakes/llm';
+import { T0 } from '../helpers';
 import { buildAskWorld, DAY, NOW } from './world';
+
+const TZ = 'America/Los_Angeles';
+/** "last contact Oct 14": Sam's last contact is T0, Jess's T0 + 1 day (world.ts). */
+const LAST_SAM = `last contact ${shortDate(T0, NOW, TZ)}`;
+const LAST_JESS = `last contact ${shortDate(T0 + DAY, NOW, TZ)}`;
 
 function services(llm: FakeLlmClient, egress: Egress = new FakeEgress()): AgentServices {
   return { llm, egress, outbound: new FakeOutboundSender(), push: new FakePushSender() };
@@ -51,6 +58,7 @@ describe('askNetwork (web)', () => {
     expect(out.citations[0]).toMatchObject({ kind: 'fact', label: expect.stringMatching(/^Sam — lives in Austin \(since /), href: `/p/${t.w.sam}` });
     expect(out.citations[2]).toMatchObject({ kind: 'person', label: 'Sam Rivera', href: `/p/${t.w.sam}` });
     expect(out.people.map((p) => p.id)).toEqual([t.w.sam, t.w.jess]);
+    expect(out.list).toBeNull(); // prose, not one line per person
     expect(out.usage).toMatchObject({ toolCalls: 2, inputTokens: 1000, outputTokens: 200 });
 
     // The call: kind ask on the ask_web route (Haiku, effort low, adaptive thinking, no fallbacks), the byte-stable
@@ -153,14 +161,96 @@ describe('askNetwork (web)', () => {
     expect(who.answer).not.toContain('Friendsgiving'); // an event at a venue in Austin
     expect(who.answer).not.toContain('ropes'); // a message mentioning Austin
     expect(who.citations.every((c) => c.kind === 'fact')).toBe(true);
-    // Over iMessage a fact that only repeats the city isn't footnoted ("Austin · Austin¹").
+    // The same one-line-per-person shape as a model answer, with rows for the web's table.
+    expect(who.answer).toMatch(new RegExp(`^- Sam Rivera — Austin · bouldering \\[F\\w+\\] · Climbing crew circle · ${LAST_SAM}$`, 'm'));
+    expect(who.list?.intro).toBe('Claude isn’t reachable right now. Here’s who a plain search found:');
+    expect(who.list?.rows.find((r) => r.person.id === who.people[0]?.id)).toBeTruthy();
+    const samRow = who.list!.rows.find((r) => r.person.displayName === 'Sam Rivera')!;
+    expect(samRow).toMatchObject({ city: 'Austin', circles: ['Climbing crew'], lastContactAt: T0 });
+    expect(samRow.detail).toMatch(/^Austin · bouldering \[F\w+\]$/);
+    // Over iMessage a fact that only repeats the city isn't cited ("Austin · Austin¹").
     const text = await ask('who do I know in Austin', 'imessage');
-    expect(text.answer).toMatch(/^- Sam R\. — Austin · bouldering \[F\w+\]$/m);
+    expect(text.answer).toMatch(new RegExp(`^- Sam R\\. — Austin · bouldering \\[F\\w+\\] · Climbing crew circle · ${LAST_SAM}$`, 'm'));
     expect(text.answer).not.toMatch(/Austin · Austin/);
+    expect(text.list?.rows.length).toBeGreaterThan(1);
     // Other questions still get events and messages.
     const what = await ask('Austin potluck', 'web');
     expect(what.answer).toContain('Here’s what a plain search found:');
     expect(what.answer).toContain('Friendsgiving potluck');
+    expect(what.list).toBeNull(); // events in it: not a list of people
+  });
+
+  it('a list of people: one line per person with their details, rows for the table, stored with the turn', async () => {
+    const t = setup();
+    const fAustin = factRef(t.w.facts.samAustin);
+    const fJess = factRef(t.w.facts.jessAustin);
+    const fAcme = factRef(t.w.facts.jessAcme);
+    t.llm.on('ask', {
+      toolCalls: [SEARCH_AUSTIN],
+      then: {
+        text: `2 people in Austin:\n- ${t.sam} — lives in Austin [${fAustin}]\n- ${t.jess} [${t.jess}] – East Austin [${fJess}]; works at Acme Robotics [${fAcme}]\n\nNothing more recent turned up.`,
+      },
+    });
+    const events: AskEvent[] = [];
+    const out = await askNetwork({ db: t.w.db, question: 'who do I know in Austin', channel: 'web', onEvent: (e) => events.push(e), services: () => t.svc, now: NOW });
+
+    expect(out.answer).toBe(
+      [
+        '2 people in Austin:',
+        `- Sam Rivera — lives in Austin [${fAustin}] · Climbing crew circle · ${LAST_SAM}`,
+        `- Jess Kim — East Austin [${fJess}]; works at Acme Robotics [${fAcme}] · Climbing crew circle · ${LAST_JESS}`,
+        '',
+        'Nothing more recent turned up.',
+      ].join('\n'),
+    );
+    expect(out.list).toEqual({
+      intro: '2 people in Austin:',
+      rows: [
+        { person: expect.objectContaining({ id: t.w.sam, displayName: 'Sam Rivera' }), detail: `lives in Austin [${fAustin}]`, city: 'Austin', circles: ['Climbing crew'], lastContactAt: T0 },
+        {
+          person: expect.objectContaining({ id: t.w.jess, displayName: 'Jess Kim' }),
+          detail: `East Austin [${fJess}]; works at Acme Robotics [${fAcme}]`,
+          city: 'East Austin',
+          circles: ['Climbing crew'],
+          lastContactAt: T0 + DAY,
+        },
+      ],
+      note: 'Nothing more recent turned up.',
+    });
+    expect(out.citations.map((c) => c.ref)).toEqual([fAustin, t.jess, fJess, fAcme]); // [P..] resolves but its row is the person
+    // The model's own text (tokens intact) is what a follow-up replays.
+    const row = t.w.db.prepare('SELECT model_answer, people_list FROM ask_turns WHERE id = ?').get(out.turnId) as { model_answer: string; people_list: string };
+    expect(row.model_answer).toContain(`- ${t.sam} — lives in Austin [${fAustin}]`);
+    expect(JSON.parse(row.people_list)).toEqual(JSON.parse(JSON.stringify(out.list)));
+    expect(getConversation(t.w.db, out.conversationId!)!.turns[0]!.list).toEqual(out.list);
+    expect(events.some((e) => e.type === 'delta')).toBe(true);
+
+    // Someone hidden since drops out of the stored table (and their name out of the text).
+    t.w.db.prepare('UPDATE people SET is_hidden = 1 WHERE id = ?').run(t.w.jess);
+    const later = getConversation(t.w.db, out.conversationId!)!.turns[0]!;
+    expect(later.list?.rows.map((r) => r.person.id)).toEqual([t.w.sam]);
+    expect(later.answer).not.toContain('Jess');
+  });
+
+  it('only one-line-per-person answers become lists: prose, mixed bullets and a lone line off a "who" question stay text', async () => {
+    const t = setup();
+    const fAustin = factRef(t.w.facts.samAustin);
+    const fBoulder = factRef(t.w.facts.samBoulder);
+    const e = eventRef(docNumber(t.w.db, 'occasion', t.w.occasions.friendsgiving));
+    const ask = async (question: string, text: string) => {
+      const llm = new FakeLlmClient().on('ask', { toolCalls: [SEARCH_AUSTIN, { name: 'list_events', input: { after: null, before: null, person_ref: null, query: 'potluck' } }], then: { text } });
+      return askNetwork({ db: t.w.db, question, channel: 'web', services: () => services(llm, t.egress), now: NOW });
+    };
+    const lone = await ask('What is Sam into?', `- ${t.sam} — into bouldering [${fBoulder}]`);
+    expect(lone.list).toBeNull();
+    expect(lone.answer).toBe(`- Sam Rivera — into bouldering [${fBoulder}]`);
+    const mixed = await ask('Who went to the potluck?', `- ${t.sam} — lives in Austin [${fAustin}]\n- the potluck itself [${e}]`);
+    expect(mixed.list).toBeNull();
+    const prose = await ask('Who went to the potluck?', `- ${t.sam} and ${t.jess} went together [${e}]`);
+    expect(prose.list).toBeNull();
+    // A single person still makes a one-row table for a "who" question.
+    const one = await ask('Who do I know in Austin?', `- ${t.sam}: lives in Austin [${fAustin}]`);
+    expect(one.list?.rows.map((r) => [r.person.id, r.detail])).toEqual([[t.w.sam, `lives in Austin [${fAustin}]`]]);
   });
 
   it('asksForPeople recognizes "who" questions', () => {
@@ -183,6 +273,8 @@ describe('askNetwork (web)', () => {
     const quiet = await askNetwork({ db: t.w.db, question: 'Who haven’t I talked to in a while?', channel: 'web', services: () => services(llm), now: NOW });
     expect(quiet.degraded).toBe(true);
     expect(quiet.answer).toContain('Sam Rivera — quiet 41d · usually ~9d');
+    expect(quiet.answer).not.toContain('last contact'); // "quiet 41d" already says it
+    expect(quiet.list?.rows).toEqual([expect.objectContaining({ person: expect.objectContaining({ id: t.w.sam }), detail: 'quiet 41d · usually ~9d' })]);
     expect(quiet.people.map((p) => p.id)).toEqual([t.w.sam]);
     t.w.db
       .prepare(
@@ -191,6 +283,7 @@ describe('askNetwork (web)', () => {
       .run(t.w.jess, NOW - DAY, NOW - DAY);
     const promises = await askNetwork({ db: t.w.db, question: 'What did I promise people I’d do?', channel: 'web', services: () => services(llm), now: NOW });
     expect(promises.answer).toContain('Jess Kim — you promised: send the trail map');
+    expect(promises.list?.rows.filter((r) => r.person.id === t.w.jess)).toHaveLength(1);
     expect(promises.people.map((p) => p.id)).toContain(t.w.jess);
     expect(llm.calls).toEqual([]);
   });
