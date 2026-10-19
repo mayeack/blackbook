@@ -186,7 +186,7 @@ describe('LLM contracts', () => {
       promptVersion: 'v1',
       system: 'stable',
       messages: [{ role: 'user', content: `[m:1|2026-10-12 19:04|P1→ME] hello ${w}` }],
-      schema: z.object({ facts: z.array(z.unknown()) }),
+      schema: z.object({ facts: z.array(z.string()) }),
     }));
     const sub = await llm.submitBatch(items, { purpose: 'extract', runId: 'run' });
     expect(sub).toMatchObject({ status: 'submitted', count: 3 });

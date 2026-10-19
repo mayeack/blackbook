@@ -307,13 +307,14 @@ Sanity checks: a daily texter is flagged at 21 days (floor); a monthly friend at
 - `cache_control: {type:"ephemeral", ttl:"1h"}` on that block. No timestamps, ids or flags in it. Steady and historical modes are the same system prompt; the mode is a line in the user turn.
 - `messages[0].user` = window (variable).
 - `tools`: none.
-- `output_config: {effort:"low", format: zodOutputFormat(Extraction)}`. Thinking omitted (adaptive; cannot be disabled).
+- **Two requests per window** (2026-10-18): the single `Extraction` format (86 grammar nodes) was refused by the API on every request ("The compiled grammar is too large", HTTP 400) although it was within the documented union/optional limits. A window now sends a *knowledge* request (`ExtractionKnowledge`: summary, facts, mentions, relations, self_id, topics; 58 nodes) and, unless its obligations would be dropped (historical and older than 30 days), an *obligations* request (`ExtractionObligations`: commitments, needs_reply; 29 nodes) over the same user turn, each with its own byte-stable system prompt (shared sections word for word). Both go in the same batch; their answers are merged into one `Extraction` before validation, so a window is still validated, applied and undone as one. `llm/client.ts` refuses any request over `GRAMMAR_MAX_NODES` (64) locally; `yb llm-smoke --live` checks every schema against the API.
+- `output_config: {effort:"low", format: zodOutputFormat(ExtractionKnowledge | ExtractionObligations)}`. Thinking disabled on Haiku 5.5.
 - `max_tokens`: 6000 steady, 12000 historical.
-- `prompt_version = sha256(system ‖ schemaJSON ‖ model ‖ effort)[0:8]`, stored on every derived row.
+- `prompt_version = sha256(both systems ‖ both schemaJSONs ‖ model ‖ effort)[0:8]`, stored on every derived row and in every custom_id (the split moved it off `7e37e334`).
 - Check `usage.cache_read_input_tokens` nightly. Batch cache hits are best-effort (30–98%).
 
 ### 4.4 Output schema (Zod)
-Every field is required; nullable is used instead of optional. Numeric bounds are enforced in code, because structured outputs drop min/max.
+Every field is required; nullable is used instead of optional. Numeric bounds are enforced in code, because structured outputs drop min/max. The merged shape below is what validation sees; it is sent as two formats (§4.3: knowledge = summary, facts, mentions, relations, self_id, topics; obligations = commitments, needs_reply).
 
 ```ts
 const Ref = z.string();                       // "ME" | "P…" | "H…" | "M…"(mention placeholder)

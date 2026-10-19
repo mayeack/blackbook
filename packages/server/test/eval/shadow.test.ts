@@ -12,7 +12,7 @@ import { shadowItems } from '../../src/eval/shadowStore';
 import { itemsOf } from '../../src/eval/store';
 import type { ExtractionPayload } from '../../src/eval/types';
 import { EXTRACTION_PROMPT_VERSION } from '../../src/extraction';
-import { EXTRACTION_SYSTEM, STEADY_MAX_TOKENS } from '../../src/extraction/prompt';
+import { KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM, STEADY_MAX_TOKENS } from '../../src/extraction/prompt';
 import { FakeLlmClient } from '../fakes/llm';
 import { extraction, fact, lineOf, tokenOf } from '../extraction/world';
 import { buildEvalWorld, HOUR, NOW, type EvalWorld } from './world';
@@ -60,7 +60,7 @@ describe('shadow replay', () => {
     const medium = planShadow({ db: w.db, now: T, effort: 'medium' });
     expect(medium.promptVersion).not.toBe(EXTRACTION_PROMPT_VERSION);
     expect(medium.sameAsCurrent).toBe(false);
-    expect(planShadow({ db: w.db, now: T, system: { text: `${EXTRACTION_SYSTEM}\nBe terse.`, source: 'file' } })).toMatchObject({ systemSource: 'file', sameAsCurrent: false });
+    expect(planShadow({ db: w.db, now: T, system: { text: `${KNOWLEDGE_SYSTEM}\nBe terse.`, source: 'file' } })).toMatchObject({ systemSource: 'file', sameAsCurrent: false });
   });
 
   it('without an API key nothing is sent and nothing is written', async () => {
@@ -101,10 +101,13 @@ describe('shadow replay', () => {
     if (out.status === 'unavailable') throw new Error('unreachable');
     // Exactly the stored pseudonymized turns went out, synchronously on the eval_shadow route (Haiku, no fallbacks),
     // at the candidate's effort.
-    expect(llm.calls.map((c) => c.subjectRef).sort()).toEqual([w.dmWindow, w.groupWindow, w.emptyWindow].sort());
+    // Two requests per (steady) window: knowledge, then obligations.
+    const windows = [w.dmWindow, w.groupWindow, w.emptyWindow];
+    expect(llm.calls.map((c) => c.subjectRef).sort()).toEqual([...windows, ...windows].sort());
+    expect(llm.calls.filter((c) => c.system === KNOWLEDGE_SYSTEM).map((c) => c.subjectRef).sort()).toEqual([...windows].sort());
+    expect(llm.calls.filter((c) => c.system === OBLIGATIONS_SYSTEM).map((c) => c.subjectRef).sort()).toEqual([...windows].sort());
     for (const c of llm.calls) {
       expect(c).toMatchObject({ method: 'parse', kind: 'extract', route: 'eval_shadow', effort: 'low', fallbacks: false, maxTokens: STEADY_MAX_TOKENS });
-      expect(c.system).toBe(EXTRACTION_SYSTEM);
       expect(c.userText).toBe(w.db.prepare('SELECT user_text FROM extraction_packets WHERE window_id = ?').pluck().get(c.subjectRef));
       expect(c.userText).not.toMatch(/555-01|example\.com/);
     }
@@ -149,13 +152,14 @@ describe('shadow replay', () => {
     const w = await buildEvalWorld();
     w.db.prepare(`INSERT INTO settings (key, value, created_at, updated_at) VALUES ('llm.excluded_conversation_ids', ?, 0, 0)`).run(JSON.stringify([w.group]));
     const llm = scriptedLlm(w);
-    const out = await runShadow({ db: w.db, llm, now: T, concurrency: 1, maxUsd: 0.0003 });
+    const out = await runShadow({ db: w.db, llm, now: T, concurrency: 1, maxUsd: 0.0007 });
     expect(llm.calls.some((c) => c.subjectRef === w.groupWindow)).toBe(false);
     if (out.status === 'unavailable') throw new Error('unexpected');
     expect(out.plan.excluded).toBe(1);
     expect(out.stopReason).toBe('max_usd');
     expect(out.status).toBe('partial');
-    expect(llm.calls.length).toBe(2); // 2 × $0.0002 (Haiku: 1k in + 200 out) crosses the $0.0003 cap
+    // 2 windows × 2 requests × $0.0002 (Haiku: 1k in + 200 out) cross the $0.0007 cap; one window would not.
+    expect(llm.calls.length).toBe(4);
     const statuses = shadowItems(w.db, out.runId).map((r) => r.status).sort();
     expect(statuses).toEqual(['excluded', 'ok', 'ok']);
   });
