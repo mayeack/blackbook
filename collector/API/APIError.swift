@@ -20,6 +20,9 @@ struct APIError: Error, Equatable {
     static let recipientNotAllowed = APIError(status: 403, code: "recipient_not_allowed", message: "recipient is not one of the owner's own handles")
     static let whatsappNotInstalled = APIError(status: 404, code: "whatsapp_not_installed", message: "WhatsApp for Mac data not found")
     static func snapshotInconsistent(_ detail: String) -> APIError { APIError(status: 503, code: "snapshot_inconsistent", message: detail) }
+    static let attachmentNotFound = APIError(status: 404, code: "attachment_not_found", message: "no such attachment")
+    static func attachmentNotAllowed(_ detail: String) -> APIError { APIError(status: 403, code: "attachment_not_allowed", message: detail) }
+    static let attachmentUnreadable = APIError(status: 422, code: "attachment_unreadable", message: "the attachment is not a decodable image")
     static func internalError(_ detail: String) -> APIError { APIError(status: 500, code: "internal", message: detail) }
 
     var response: LoopbackResponse {

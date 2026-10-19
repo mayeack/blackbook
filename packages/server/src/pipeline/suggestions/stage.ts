@@ -8,8 +8,9 @@
  *   3. eligibility: kind mutes (setting learner.muted_kinds), person mutes, the person ignore-cooldown
  *      (7 d × 2^n, cap 90), per-(person, kind) / per-subject cooldowns, max showings, intro rate limits
  *      (≤1 per 3 days, ≤4 per 30 days); time-critical items skip only the ignore-cooldown;
- *   4. score = base × w_kind × θ_kind × θ_bucket × θ_person (× θ_wild) × (1 + 0.3·priority) × fatigue
- *      (×0.5 if the person was in a digest in the last 3 days), with one seeded Thompson sample per arm;
+ *   4. score = base × w_kind × θ_kind × θ_bucket × θ_person (× θ_wild) × (1 + 0.3·priority) × (1 + 0.3·party) × fatigue
+ *      (×0.5 if the person was in a digest in the last 3 days), with one seeded Thompson sample per arm; party = a
+ *      pre-event / follow-up / intro item about someone in the Party invites circle (set by text);
  *   5. the ranker picks (forced, greedy + diversity, floor/relax, adaptive cap 3–5, maybe one wildcard);
  *   6. today's digest row (status 'composing', rng_seed, item_cap) + digest_items, the picked rows 'selected'
  *      with their factors, and the showing cooldowns — all in one transaction; compose writes the copy later.
@@ -23,6 +24,7 @@ import { selfPeople } from '../../identity/self';
 import { finishRun, startRun } from '../../journal/runs';
 import { nullLogger, errorFields, type Logger } from '../../ops/logger';
 import { settingsSnapshot, type SettingsSnapshot } from '../../settings/registry';
+import { preferredPeople } from '../circles/preferences';
 import { adaptiveCap, armsFor, ArmSampler, personState, sampleFactors, snapshotArms, type ArmRef, type ScoredFactors } from './learner';
 import { PeopleCache, shortName } from './people';
 import { rankDetailed, type DetailedRankResult } from './ranker';
@@ -43,6 +45,7 @@ import {
 } from './store';
 import {
   KIND_POLICY,
+  PARTY_BOOST_KINDS,
   SELECTION,
   suggestionDedupeKey,
   type Candidate,
@@ -89,7 +92,7 @@ interface Scored extends ScoredCandidate {
   factorDetails: ScoredFactors;
   /** What an outcome of this item trains. */
   arms: ArmRef[];
-  adjustments: { fatigue: boolean; priority: boolean; weight: number };
+  adjustments: { fatigue: boolean; priority: boolean; party: boolean; weight: number };
   stored: boolean;
 }
 
@@ -272,6 +275,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
 
     // 4. scoring
     const people = new PeopleCache(db);
+    const partyPeople = preferredPeople(db, 'party_invites');
     const circleName = db.prepare('SELECT name FROM circles WHERE id = ?').pluck();
     const sampler = new ArmSampler(db, now, stream(seed, 0), settings['learner.enabled']);
     const fatigued = recentDigestPeople(db, today, SELECTION.fatigueDays);
@@ -288,9 +292,18 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
       );
       const fatigue = c.personIds.some((p) => fatigued.has(p));
       const priority = !!primary?.isPriority;
+      const party = PARTY_BOOST_KINDS.has(c.kind) && c.personIds.some((p) => partyPeople.has(p));
       const weight = KIND_POLICY[c.kind].weight;
       const s =
-        c.base * weight * f.kind * f.bucket * f.person * f.wildcard * (priority ? 1 + SELECTION.priorityBoost : 1) * (fatigue ? SELECTION.fatigueFactor : 1);
+        c.base *
+        weight *
+        f.kind *
+        f.bucket *
+        f.person *
+        f.wildcard *
+        (priority ? 1 + SELECTION.priorityBoost : 1) *
+        (party ? 1 + SELECTION.partyBoost : 1) *
+        (fatigue ? SELECTION.fatigueFactor : 1);
       return {
         ...c,
         suggestionId: id,
@@ -300,7 +313,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
         wildcardGenerator: g,
         factorDetails: f,
         arms: armsFor(c.kind, primary, g, c.links?.circleId ?? null),
-        adjustments: { fatigue, priority, weight },
+        adjustments: { fatigue, priority, party, weight },
         stored,
       };
     };
@@ -366,6 +379,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
           merged: d?.merged ?? [],
           fatigue: s.adjustments.fatigue,
           priority: s.adjustments.priority,
+          party: s.adjustments.party,
           weight: s.adjustments.weight,
           cap,
           seed,

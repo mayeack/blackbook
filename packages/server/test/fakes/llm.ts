@@ -96,6 +96,8 @@ export interface FakeCall {
   system: string;
   /** Concatenated text of the user messages (already pseudonymized by the caller). */
   userText: string;
+  /** Images attached to a parse() call (vision routes only). */
+  images: number;
   customId?: string;
 }
 
@@ -203,6 +205,7 @@ export class FakeLlmClient implements LlmClient {
       fallbacks: sendsFallbacks(p, method === 'batch' ? 'batch' : 'sync'),
       system: req.system,
       userText: textOf(req.messages),
+      images: 'images' in req ? (req.images?.length ?? 0) : 0,
       ...(customId ? { customId } : {}),
     };
     this.calls.push(call);
@@ -221,6 +224,8 @@ export class FakeLlmClient implements LlmClient {
     const call = this.record('parse', req as LlmParseRequest<unknown>);
     const blocked = this.gate(req, call.userText);
     if (blocked) return blocked;
+    // Like the real client: only a route with an image allowance may carry images.
+    if (call.images > this.params(req.route).maxImages) return { status: 'unavailable', reason: 'egress_blocked' };
     const requestId = `fake_req_${++this.reqSeq}`;
     const r = this.reply(call, req.schema === (ExtractionObligations as unknown));
     return this.settle(r, req.schema, req.validate, requestId, req.pool ?? 'steady', this.params(req.route));

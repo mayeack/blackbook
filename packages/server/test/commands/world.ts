@@ -10,6 +10,7 @@ import { processCommands } from '../../src/commands/executor';
 import type { DB } from '../../src/db/connection';
 import { createEgress } from '../../src/llm/egress';
 import type { Egress } from '../../src/llm/types';
+import type { AttachmentSource } from '../../src/adapters/imessage/attachments';
 import type { AgentServices } from '../../src/services';
 import { FakeOutboundSender, FakePushSender } from '../fakes/delivery';
 import { FakeEgress, FakeLlmClient, type FakeLlmOptions } from '../fakes/llm';
@@ -48,7 +49,7 @@ export function setSetting(db: DB, key: string, value: unknown, now = BRIEF_AT):
   ).run(key, JSON.stringify(value), now, now);
 }
 
-export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboundConfigured?: boolean; realEgress?: boolean } = {}) {
+export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboundConfigured?: boolean; realEgress?: boolean; attachments?: AttachmentSource } = {}) {
   const db = memDb();
   setSetting(db, 'tz', TZ);
   let now = BRIEF_AT;
@@ -56,7 +57,7 @@ export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboun
   const outbound = new FakeOutboundSender({ db, now: clock, configured: o.outboundConfigured ?? true });
   const llm = o.llm instanceof FakeLlmClient ? o.llm : new FakeLlmClient({ configured: false, ...(o.llm ?? {}) });
   const egress: Egress = o.realEgress ? createEgress(db) : new FakeEgress();
-  const services: AgentServices = { llm, egress, outbound, push: new FakePushSender() };
+  const services: AgentServices = { llm, egress, outbound, push: new FakePushSender(), ...(o.attachments ? { attachments: o.attachments } : {}) };
   const provider = () => services;
 
   const selfConv = uuidv7(now);
@@ -65,14 +66,24 @@ export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboun
   ).run(selfConv, now, now);
 
   let guidSeq = 0;
-  const insertMessage = (text: string, at: number, extra: { isBot?: boolean; replyTo?: number | null; guid?: string } = {}): number =>
+  const insertMessage = (text: string, at: number, extra: { isBot?: boolean; replyTo?: number | null; guid?: string; attachments?: object[] } = {}): number =>
     Number(
       db
         .prepare(
           `INSERT INTO messages (source, source_msg_id, conversation_id, sender_identity_id, is_from_me, sent_at, kind, text, reply_to_msg_id,
-             is_bot, ingested_at, updated_at) VALUES ('imessage', ?, ?, NULL, 1, ?, 'text', ?, ?, ?, ?, ?)`,
+             is_bot, attachments, ingested_at, updated_at) VALUES ('imessage', ?, ?, NULL, 1, ?, 'text', ?, ?, ?, ?, ?, ?)`,
         )
-        .run(extra.guid ?? `TEST-GUID-${++guidSeq}`, selfConv, at, text, extra.replyTo ?? null, extra.isBot ? 1 : 0, at, at).lastInsertRowid,
+        .run(
+          extra.guid ?? `TEST-GUID-${++guidSeq}`,
+          selfConv,
+          at,
+          text,
+          extra.replyTo ?? null,
+          extra.isBot ? 1 : 0,
+          extra.attachments ? JSON.stringify(extra.attachments) : null,
+          at,
+          at,
+        ).lastInsertRowid,
     );
 
   const world = {
@@ -90,8 +101,11 @@ export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboun
     person(first: string, last: string | null, extra: Record<string, unknown> = {}): string {
       return seedPerson(db, { first_name: first, last_name: last, display_name: [first, last].filter(Boolean).join(' '), status: 'active', ...extra });
     },
-    /** A text the owner typed in the self thread, staged as a pending command the way the iMessage ingest does. */
-    say(text: string, at: number = now, extra: { replyTo?: number | null } = {}): { messageId: number; commandId: string } {
+    /**
+     * A text the owner typed in the self thread, staged as a pending command the way the iMessage ingest does
+     * (`attachments`: chat.db attachment metadata, e.g. a screenshot sent with it).
+     */
+    say(text: string, at: number = now, extra: { replyTo?: number | null; attachments?: object[] } = {}): { messageId: number; commandId: string } {
       const messageId = insertMessage(text, at, extra);
       const commandId = uuidv7(at);
       db.prepare(`INSERT INTO inbound_commands (id, message_id, raw_text, status, created_at) VALUES (?, ?, ?, 'pending', ?)`).run(commandId, messageId, text, at);

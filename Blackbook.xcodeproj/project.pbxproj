@@ -39,6 +39,7 @@
 		28092BCCCBD27C677F28E65F /* ContactMergeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */; };
 		28D30061B05714E65E0FAA2C /* ForgotPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23843A28716C56CF55E7614C /* ForgotPasswordView.swift */; };
 		2A167CBAA266A4BBFB1DB374 /* SendTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A945F23C62E842BB8224D0F /* SendTests.swift */; };
+		308F4C84EAA616D8502DFC1D /* AttachmentImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8063928B446FF6A8971BAF17 /* AttachmentImages.swift */; };
 		30AF15C1B74324EE958E26CC /* SendLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAA4FD7A017847497D8AE952 /* SendLedger.swift */; };
 		349461D101C51D6D178972AD /* Contact.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8222BEE7020B6711480F644E /* Contact.swift */; };
 		38133D435F6BEF39527FC2CB /* GroupModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101D3964C1DEC2520B694372 /* GroupModelTests.swift */; };
@@ -92,6 +93,7 @@
 		69C167B283DF373F9AADEE03 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B4686D34DCC894416E2DB8D /* SettingsView.swift */; };
 		69E8237701B2BDD1763EEE1F /* ContactModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D95AA83A5437DFA01312E219 /* ContactModelTests.swift */; };
 		6EBB34A3DDBE871B6B3BF70E /* DateHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815CE74C56D359F1D0990254 /* DateHelpers.swift */; };
+		6F36CF24BD62C8D765F7F749 /* AttachmentImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8063928B446FF6A8971BAF17 /* AttachmentImages.swift */; };
 		712B7AFBCF2FC20D64D203D6 /* ContactGroupPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 972BC195190AAFA50ABE3DC7 /* ContactGroupPickerView.swift */; };
 		72326B255067A794241B231C /* BackupMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */; };
 		72883A5C13AC7845998454E1 /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89AD54534AC73AD4F065D4D0 /* SubscriptionManager.swift */; };
@@ -134,6 +136,7 @@
 		A83BFC0E65269E8E57FE2EF7 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2877312225BA97E41E36D583 /* KeychainService.swift */; };
 		A9C0AC72BC7536D4CA4B2702 /* BackupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B388096991E8F365A624F046 /* BackupDetailView.swift */; };
 		AADE6DA4DB134D860275385E /* TagListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEE4CD8BE91D0E8284B87F31 /* TagListView.swift */; };
+		AB6AA160C7C760232EBD1386 /* AttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB72773FE5A1D95AE7E5E7FF /* AttachmentTests.swift */; };
 		AC83AF34CB61E8BE2848B4F1 /* LocalSyncProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B8831D66944BBBD80A6E6E /* LocalSyncProtocol.swift */; };
 		ACFC1AC1A920460AF58376E2 /* ContactRelationshipModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D94FB331F41A7E2A777101F /* ContactRelationshipModelTests.swift */; };
 		ADD9B5E47EF47C5E5D0D23F3 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60CB33C4C83A483A548510B /* TestHelpers.swift */; };
@@ -310,6 +313,7 @@
 		75F47D5E806EFA1DA2D5935A /* ContactDetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDetailViewModelTests.swift; sourceTree = "<group>"; };
 		7A2B2419CA33490186B4DAB4 /* Location.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Location.swift; sourceTree = "<group>"; };
 		7DB7F634E85EAB2589E6F041 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
+		8063928B446FF6A8971BAF17 /* AttachmentImages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentImages.swift; sourceTree = "<group>"; };
 		815CE74C56D359F1D0990254 /* DateHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateHelpers.swift; sourceTree = "<group>"; };
 		8211A08153FF7DE2A707EB06 /* DashboardViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewModelTests.swift; sourceTree = "<group>"; };
 		8222BEE7020B6711480F644E /* Contact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Contact.swift; sourceTree = "<group>"; };
@@ -364,6 +368,7 @@
 		BD3DA721ABACC1B6E8A0F5C9 /* CollectorAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectorAPI.swift; sourceTree = "<group>"; };
 		BEE4CD8BE91D0E8284B87F31 /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		C0BF1D07C08681789AF0CC48 /* FeatureGating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureGating.swift; sourceTree = "<group>"; };
+		CB72773FE5A1D95AE7E5E7FF /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
 		CC03CDCAD902D26F5F68C651 /* LocationManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManagerView.swift; sourceTree = "<group>"; };
 		CDB72A4E15A1B06A6877A310 /* BackupMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupMetadata.swift; sourceTree = "<group>"; };
 		D013C140BD61E02DB3CEF4C0 /* HTTPAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPAPITests.swift; sourceTree = "<group>"; };
@@ -442,6 +447,7 @@
 		41F52BACD319753F11392A04 /* CollectorTests */ = {
 			isa = PBXGroup;
 			children = (
+				CB72773FE5A1D95AE7E5E7FF /* AttachmentTests.swift */,
 				DC555780C1246D69358D6177 /* ContactsAndGoldenTests.swift */,
 				D013C140BD61E02DB3CEF4C0 /* HTTPAPITests.swift */,
 				6BC3CA6D0B14BE7A363C3E72 /* MessageReaderTests.swift */,
@@ -531,6 +537,7 @@
 		6E1A19B401322725EA536971 /* IMessage */ = {
 			isa = PBXGroup;
 			children = (
+				8063928B446FF6A8971BAF17 /* AttachmentImages.swift */,
 				8E3B0D3973F3C0F3B7BCF7AB /* ChatDB.swift */,
 				597C89B5D78BDC924BFE6E87 /* MessageReader.swift */,
 				4C8CD824760D89A53C41EA4D /* Msg.swift */,
@@ -1168,6 +1175,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F1AEE8275FE88D52F36CE525 /* APIError.swift in Sources */,
+				6F36CF24BD62C8D765F7F749 /* AttachmentImages.swift in Sources */,
+				AB6AA160C7C760232EBD1386 /* AttachmentTests.swift in Sources */,
 				7341E282FE7C684A316788E4 /* ChatDB.swift in Sources */,
 				C53BCDE22565D22701723C59 /* CollectorAPI.swift in Sources */,
 				AED03FF411FC27D9BE402ED3 /* CollectorRuntime.swift in Sources */,
@@ -1247,6 +1256,7 @@
 				C9A95803F289FB168406C278 /* APIError.swift in Sources */,
 				54ED84A76C60399BC05F5C99 /* Activity.swift in Sources */,
 				233530392EB2ADCFAA331164 /* AppNotification.swift in Sources */,
+				308F4C84EAA616D8502DFC1D /* AttachmentImages.swift in Sources */,
 				E9C12D0FA76386A83E75A5A7 /* BackupMetadata.swift in Sources */,
 				9CFACF1D237FBFDB8BE35DA2 /* BackupServer.swift in Sources */,
 				3D6714171EE7057CBE848A07 /* BlackbookServerApp.swift in Sources */,
