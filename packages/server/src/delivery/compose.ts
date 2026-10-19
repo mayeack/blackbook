@@ -7,7 +7,8 @@
  *
  *   🅨 Good morning! 3 things for today.     ← U+1F168 is the very first character of every text
  *
- *   1. Reply to Sam R.                       ← ordinal + headline (first name + last initial)
+ *   1. Reply to Sam R.                       ← ordinal + headline (first name + last initial; "Sam Rivera" when
+ *                                               "Sam R." is also the owner or someone else in the brief)
  *   Sam has been waiting 2 days for an answer.
  *
  *   🅨 2. Check in with Priya S.
@@ -27,6 +28,7 @@
  */
 import type { DigestItem } from '@yb/shared';
 import type { DB } from '../db/connection';
+import { ownerNames } from '../identity/ownerNames';
 import type { LlmUsage } from '../llm/types';
 import type { Logger } from '../ops/logger';
 import type { AgentServices } from '../services';
@@ -44,7 +46,7 @@ import {
 } from './selection';
 import { failureLine, healthLine, lastNightCounts, lastNightLine, pipelineFailure, topHealthIssue } from './status';
 import { SENSITIVE_BODY, SENSITIVE_LINE, templateCopy, type ItemCopy } from './template';
-import { BOT_MARKER, firstNameOnly, MAX_MAIN_LINE, MAX_SUB_LINE, nameList, plural, TODAY_LINK, truncate } from './text';
+import { BOT_MARKER, briefNames, firstNameOnly, MAX_MAIN_LINE, MAX_SUB_LINE, nameList, plural, TODAY_LINK, truncate } from './text';
 import { checkOutboundText } from './types';
 
 const DAY = 86_400_000;
@@ -208,7 +210,10 @@ export async function composeSelection(
   const settings = o.settings ?? settingsSnapshot(db);
   const tz = settings.tz;
   const items = selection.items;
-  const templates = new Map<string, ItemCopy>(items.map((i) => [i.suggestionId, templateCopy(i, { db, now: o.now, timeZone: tz })]));
+  // One set of names for the whole brief: a name that would read as the owner's, or as someone else's in the brief,
+  // gets the full last name everywhere (template and LLM copy alike).
+  const names = briefNames(items.flatMap((i) => i.people), ownerNames(db));
+  const templates = new Map<string, ItemCopy>(items.map((i) => [i.suggestionId, templateCopy(i, { db, now: o.now, timeZone: tz, names })]));
   let llm: LlmComposeResult | null = null;
   if (o.useLlm !== false && items.length) {
     llm = await composeWithLlm({
@@ -221,6 +226,7 @@ export async function composeSelection(
       settings,
       items,
       templates,
+      names,
       runId: o.runId ?? selection.digest.run_id,
       signal: o.signal,
       log: o.log,

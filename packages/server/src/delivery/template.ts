@@ -3,17 +3,20 @@
  * can't ground). Per kind, a short action as the headline ("Check in with Sam R.") and one or two plain sentences
  * of context as the body ("It's been 6 weeks. You usually talk about once a week."), from the generator payload
  * plus a few local lookups (silence and usual gap, the occasion title and time, the circle name, the commitment's
- * due date). Names are first name + last initial; every dynamic fragment goes through safeFragment (no URLs,
- * phones, emails, amounts, long digit runs).
+ * due date). Names are first name + last initial (the full last name when that would be ambiguous: briefNames);
+ * every dynamic fragment goes through safeFragment (no URLs, phones, emails, amounts, long digit runs).
  */
 import type { DB } from '../db/connection';
+import { ownerNames } from '../identity/ownerNames';
 import type { SelectedItem } from './selection';
-import { endSentence, humanDuration, humanEvery, peopleList, plural, safeFragment, shortDay, shortName, truncate, whenPhrase } from './text';
+import { briefNames, endSentence, humanDuration, humanEvery, peopleList, plural, safeFragment, shortDay, truncate, whenPhrase, type BriefNames } from './text';
 
 export interface TemplateContext {
   db: DB;
   now: number;
   timeZone: string;
+  /** Names across the whole brief (compose); default: the item's own people and the owner. */
+  names?: BriefNames;
 }
 
 export interface ItemCopy {
@@ -102,7 +105,8 @@ function debtAge(db: DB, item: SelectedItem, now: number): number | null {
 
 /** Template copy for one item: a short action as the headline and a plain sentence of context as the body. */
 export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy {
-  const names = item.people.map((p) => shortName(p) ?? 'someone');
+  const named = ctx.names ?? briefNames(item.people, ownerNames(ctx.db));
+  const names = item.people.map((p) => named.of(p) ?? 'someone');
   const who = names[0] ?? 'someone';
   const first = who.split(' ')[0]!;
   const p = item.payload;
