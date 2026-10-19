@@ -281,7 +281,7 @@ export const toChip = (p: PersonInfo): PersonChip => ({ id: p.id, displayName: p
 export function targetOf(item: Pick<SelectedItem, 'kind' | 'people' | 'links'>): SuggestionTarget | null {
   const [a, b] = item.people;
   if (item.kind === 'intro' && a && b) return { type: 'pair', id: a.id, otherId: b.id, href: `/p/${a.id}/with/${b.id}` };
-  if ((item.kind === 'pre_event_brief' || item.kind === 'event_followup' || item.kind === 'memory') && (item.links.occasionId || item.links.eventId)) {
+  if ((item.kind === 'pre_event_brief' || item.kind === 'event_followup' || item.kind === 'party_invite' || item.kind === 'memory') && (item.links.occasionId || item.links.eventId)) {
     const id = (item.links.occasionId ?? item.links.eventId)!;
     return { type: 'event', id, otherId: null, href: `/e/${id}` };
   }

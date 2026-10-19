@@ -9,7 +9,7 @@
  *      (≤1 per 3 days, ≤4 per 30 days); time-critical items skip only the ignore-cooldown;
  *   4. score = base × w_kind × θ_kind × θ_bucket × θ_person (× θ_wild) × (1 + 0.3·priority) × (1 + 0.3·party) × fatigue
  *      (×0.5 if the person was in a digest in the last 3 days), with one seeded Thompson sample per arm; party = a
- *      pre-event / follow-up / intro item about someone in the Party invites circle (set by text);
+ *      pre-event / follow-up / party-invite / intro item about someone in the Party invites circle (set by text);
  *   5. the ranker picks (forced, greedy + diversity, floor/relax, adaptive cap 3–5, maybe one wildcard);
  *   6. today's digest row (status 'composing', rng_seed, item_cap) + digest_items, the picked rows 'selected'
  *      with their factors, and the showing cooldowns — all in one transaction; compose writes the copy later.
