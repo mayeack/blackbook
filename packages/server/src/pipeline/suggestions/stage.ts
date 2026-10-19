@@ -1,15 +1,16 @@
 /**
  * The nightly suggestions stage (job 'suggestions', after ties/obligations/intel, before compose):
  *
- *   1. every registered generator emits candidates → validated (canonical, visible people; finite base) and
- *      upserted into `suggestions` by dedupe key; candidates no longer emitted are superseded, expired ones expire;
+ *   1. every registered generator emits candidates → validated (canonical, visible people, never a record of mine
+ *      (identity/self.ts); finite base) and upserted into `suggestions` by dedupe key; candidates no longer emitted
+ *      are superseded, expired ones expire;
  *   2. 🎲 wildcard sources propose candidates (stored only if picked);
  *   3. eligibility: kind mutes (setting learner.muted_kinds), person mutes, the person ignore-cooldown
  *      (7 d × 2^n, cap 90), per-(person, kind) / per-subject cooldowns, max showings, intro rate limits
  *      (≤1 per 3 days, ≤4 per 30 days); time-critical items skip only the ignore-cooldown;
  *   4. score = base × w_kind × θ_kind × θ_bucket × θ_person (× θ_wild) × (1 + 0.3·priority) × (1 + 0.3·party) × fatigue
  *      (×0.5 if the person was in a digest in the last 3 days), with one seeded Thompson sample per arm; party = a
- *      pre-event / follow-up / intro item about someone in the Party invites circle (set by text);
+ *      pre-event / follow-up / party-invite / intro item about someone in the Party invites circle (set by text);
  *   5. the ranker picks (forced, greedy + diversity, floor/relax, adaptive cap 3–5, maybe one wildcard);
  *   6. today's digest row (status 'composing', rng_seed, item_cap) + digest_items, the picked rows 'selected'
  *      with their factors, and the showing cooldowns — all in one transaction; compose writes the copy later.
@@ -19,6 +20,7 @@
 import { addDays, localDate, uuidv7, type SuggestionKind, type WildcardGenerator } from '@yb/shared';
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
+import { selfPeople } from '../../identity/self';
 import { finishRun, startRun } from '../../journal/runs';
 import { nullLogger, errorFields, type Logger } from '../../ops/logger';
 import { settingsSnapshot, type SettingsSnapshot } from '../../settings/registry';
@@ -153,6 +155,8 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
   };
 
   try {
+    // Records of the owner (me, merged into me, holding my handles) never become anyone's suggestion.
+    const self = selfPeople(db);
     // 1. generators → stored candidates
     const okKinds = new Set<SuggestionKind>();
     for (const g of o.generators ?? allGenerators()) {
@@ -168,7 +172,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
       }
       tx(db, () => {
         for (const c of raw) {
-          const n = normalizeCandidate(db, c, now);
+          const n = normalizeCandidate(db, c, now, self);
           if (!n) {
             bump('dropped');
             continue;
@@ -234,7 +238,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
       try {
         const seen = new Set<string>();
         for (const raw of await s.generate(ctx, wildRng)) {
-          const n = normalizeCandidate(db, raw, now);
+          const n = normalizeCandidate(db, raw, now, self);
           if (!n) continue;
           const key = suggestionDedupeKey(n);
           if (seen.has(key)) continue;

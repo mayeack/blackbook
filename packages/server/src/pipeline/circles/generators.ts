@@ -5,10 +5,11 @@
  * A circle (auto or the owner's own, ≥ 3 visible members) is neglected when the owner's last contact with ANY of its
  * members is at least max(30 days, 3 × the members' median usual gap) ago, it was active within the last year, and
  * at least two members were real ties (H ≥ 30). Circle-level items carry no personIds (contract): the circle id is in
- * links.circleId and the top members by tie strength in payload.memberIds. Pure readers; cooldowns are the
- * suggestions stage's job.
+ * links.circleId and the top members by tie strength in payload.memberIds (never a record of mine: identity/self.ts).
+ * Pure readers; cooldowns are the suggestions stage's job.
  */
 import type { DB } from '../../db/connection';
+import { selfPeople } from '../../identity/self';
 import type { Candidate, CandidateGenerator, GeneratorContext, WildcardSource } from '../suggestions/types';
 
 const DAY = 86_400_000;
@@ -52,7 +53,9 @@ export function circleActivity(db: DB): CircleActivity[] {
     tie_strength: number | null;
   }[];
   const by = new Map<string, { kind: 'auto' | 'user'; members: Map<string, (typeof rows)[number]> }>();
+  const self = selfPeople(db);
   for (const r of rows) {
+    if (self.has(r.person_id)) continue;
     let c = by.get(r.circle_id);
     if (!c) by.set(r.circle_id, (c = { kind: r.kind, members: new Map() }));
     c.members.set(r.person_id, r);

@@ -75,6 +75,7 @@ const KIND_HINT: Record<string, string> = {
   pre_event_brief: 'an event coming up soon; who will be there',
   commitment_due: 'a promise that is due',
   event_followup: 'follow up after a recent event',
+  party_invite: 'the owner is hosting an event soon; friends worth inviting who are not on the guest list yet',
   fading: 'they have gone quiet compared with their usual rhythm',
   travel_overlap: 'they will be in the same place as the owner',
   cooling: 'contact is slowing down',

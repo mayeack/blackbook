@@ -13,7 +13,8 @@
  *                       families only) and the person page's one-tap merge.
  *   blocked             in band but a guard fails (a vetoed pair whose score without the veto is in band too).
  *   separate            below the band: no action (an earlier candidate row is closed).
- * A 'dismissed' candidate (the user said "not the same") is never merged and keeps its status.
+ * A 'dismissed' candidate (the user said "not the same") is never merged and keeps its status. First of all, the
+ * self-link pass (identity/selfLink.ts) moves my own handles that sit on someone else to me.
  * Nothing here logs names, handles or keys; the job stats are counts.
  */
 import { uuidv7 } from '@yb/shared';
@@ -26,6 +27,7 @@ import { chooseSurvivor, mergePeople, MergeRefusedError } from './merge';
 import { guardFailures } from './matcherGuards';
 import { loadBook } from './matcherProfiles';
 import { blockPairs, priorBits, scorePair, type Family, type PairScore } from './matcherScore';
+import { linkSelfHandles } from './selfLink';
 
 export const AUTO_MERGE_P = 0.98;
 export const POSSIBLE_P = 0.7;
@@ -66,6 +68,8 @@ export interface MatcherStats {
   dismissed: number;
   closed: number;
   refused: number;
+  /** My own handles moved to me by the self-link pass (identity/selfLink.ts). */
+  self_linked: number;
 }
 
 interface Candidate {
@@ -165,7 +169,16 @@ function updateAlert(db: DB, now: number, held: number, cap: number): void {
 export function runMatcher(db: DB, o: MatcherOptions = {}): MatcherStats {
   const now = o.now ?? Date.now();
   const cap = o.maxMerges ?? MAX_MERGES_PER_NIGHT;
-  const stats: MatcherStats = { people: 0, pairs: 0, in_band: 0, merged: 0, held: 0, possible: 0, blocked: 0, dismissed: 0, closed: 0, refused: 0 };
+  const stats: MatcherStats = { people: 0, pairs: 0, in_band: 0, merged: 0, held: 0, possible: 0, blocked: 0, dismissed: 0, closed: 0, refused: 0, self_linked: 0 };
+  const run = sourceRun(db, MATCHER_SOURCE, { now, jobRunId: o.jobRunId ?? null, kind: 'nightly' });
+  // My own handles go to me before anyone is scored: a stray one of mine must never pair me with someone else.
+  try {
+    const self = linkSelfHandles(run.ctx);
+    stats.self_linked = self.absorbed + self.moved;
+  } catch (e) {
+    run.finish('error');
+    throw e;
+  }
   const book = loadBook(db);
   stats.people = book.profiles.size;
   const prior = priorBits(book.profiles.size);
@@ -188,7 +201,6 @@ export function runMatcher(db: DB, o: MatcherOptions = {}): MatcherStats {
   stats.in_band = candidates.length;
 
   // Merges, best first, re-checking the guards on the current clusters (earlier merges tonight change them).
-  const run = sourceRun(db, MATCHER_SOURCE, { now, jobRunId: o.jobRunId ?? null, kind: 'nightly' });
   try {
     let budget = Math.max(0, cap - recentMerges(db, now));
     const queue = candidates
