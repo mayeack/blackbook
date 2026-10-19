@@ -82,9 +82,11 @@ describe('commands × egress (real pseudonymizer)', () => {
         return {
           json: {
             intent: 'log_interaction',
+            image: null,
             command: null,
             question: null,
             log: { people: [{ surface: 'Sam', ref: token }], kind: 'drinks', date: null, facts: [{ ref: token, cat: 'interest', value: 'bouldering' }], note: null },
+            preferences: [],
           },
         };
       },

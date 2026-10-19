@@ -116,6 +116,9 @@ function AgentForm({ form }: { form: SettingsForm }) {
         <SettingRow form={form} k="commands.enabled">
           <Toggle id={fieldId('commands.enabled')} checked={v['commands.enabled']} onChange={(x) => form.set('commands.enabled', x)} />
         </SettingRow>
+        <SettingRow form={form} k="commands.read_images">
+          <Toggle id={fieldId('commands.read_images')} checked={v['commands.read_images']} onChange={(x) => form.set('commands.read_images', x)} />
+        </SettingRow>
         <HomeCityRow form={form} />
       </div>
     </>

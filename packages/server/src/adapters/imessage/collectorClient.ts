@@ -7,6 +7,8 @@
  */
 import fs from 'node:fs/promises';
 import {
+  AttachmentImageResponse,
+  AttachmentQuery,
   ChatsQuery,
   ChatsResponse,
   COLLECTOR_ROUTES,
@@ -175,6 +177,12 @@ export class CollectorClient {
 
   handles() {
     return this.get('handles', COLLECTOR_ROUTES.imessageHandles, HandlesResponse);
+  }
+
+  /** One image attachment of a note-to-self message as a downscaled JPEG (the collector refuses other chats). */
+  attachmentImage(q: AttachmentQuery) {
+    const p = AttachmentQuery.parse(q);
+    return this.get('attachment', `${COLLECTOR_ROUTES.imessageAttachment}${query(p)}`, AttachmentImageResponse);
   }
 
   async close(): Promise<void> {

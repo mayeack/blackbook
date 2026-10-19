@@ -612,9 +612,11 @@ describe('commands: log', () => {
         return {
           json: {
             intent: 'log_interaction',
+            image: null,
             command: null,
             question: null,
             log: { people: [{ surface: 'Sam', ref: token }], kind: 'meal', date: '2026-10-14', facts: [{ ref: token, cat: 'location_next', value: 'moving to Denver' }], note: 'dinner' },
+            preferences: [],
           },
         };
       },
@@ -635,7 +637,7 @@ describe('commands: log', () => {
 
   it('with the AI key, free text in the window is classified: notes stay silent, questions go to Ask', async () => {
     const llm = new FakeLlmClient()
-      .on('intent', { json: { intent: 'note', command: null, log: null, question: null } }, { json: { intent: 'question', command: null, log: null, question: 'Who lives in Austin?' } });
+      .on('intent', { json: { intent: 'note', image: null, command: null, log: null, preferences: [], question: null } }, { json: { intent: 'question', image: null, command: null, log: null, preferences: [], question: 'Who lives in Austin?' } });
     const w = commandsWorld({ llm });
     w.botSays('✓ done', at(0));
     const note = w.say('remember to water plants', at(1));
@@ -647,7 +649,7 @@ describe('commands: log', () => {
   });
 
   it('text addressed to the bot is never dropped as a note: yb and inline replies get "Sorry, I didn\'t get that"', async () => {
-    const llm = new FakeLlmClient().on('intent', { json: { intent: 'note', command: null, log: null, question: null } });
+    const llm = new FakeLlmClient().on('intent', { json: { intent: 'note', image: null, command: null, log: null, preferences: [], question: null } });
     const w = commandsWorld({ llm });
     const bot = w.botSays('✓ done', at(-13 * 60)); // outside the 12 h window: only yb or an inline reply reaches the bot
     const yb = w.say('Yb prioritize inviting this person to parties, is a great DJ', at(0));
@@ -664,7 +666,7 @@ describe('commands: log', () => {
   });
 
   it('people excluded from the AI are never sent: the text is logged deterministically', async () => {
-    const llm = new FakeLlmClient().on('intent', { json: { intent: 'note', command: null, log: null, question: null } });
+    const llm = new FakeLlmClient().on('intent', { json: { intent: 'note', image: null, command: null, log: null, preferences: [], question: null } });
     const w = commandsWorld({ llm });
     const sam = w.person('Sam', 'Rivera');
     setSetting(w.db, 'llm.excluded_person_ids', [sam]);

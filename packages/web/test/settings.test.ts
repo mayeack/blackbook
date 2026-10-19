@@ -62,6 +62,7 @@ const values = (o: Partial<SettingsValues> = {}): SettingsValues => ({
   'llm.excluded_conversation_ids': [],
   'llm.route_overrides': {},
   'commands.enabled': true,
+  'commands.read_images': true,
   'intros.enabled': true,
   'travel.home_city': null,
   tz: 'UTC',

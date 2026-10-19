@@ -39,8 +39,11 @@ async function setup() {
   return { paths, run, dir: t.dir };
 }
 
+/** Random ids (run UUIDs) can contain "555" by chance; they're not PII, so they're blanked first. */
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const noPii = (s: string) => {
-  for (const p of PII) expect(s, p).not.toContain(p);
+  const text = s.replace(UUID, '<id>');
+  for (const p of PII) expect(text, p).not.toContain(p);
 };
 
 describe('yb eval', () => {
