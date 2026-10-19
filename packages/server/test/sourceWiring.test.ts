@@ -60,7 +60,7 @@ describe('job registry', () => {
     expect(sourceJobDeps({ config: loadConfig({ ...base, BEEPER_TOKEN: 'synthetic' }) }).beeper?.token).toBe('synthetic');
     // Every source's jobs are registered through the real registry, in order, with their cadences. Agent-loop
     // jobs follow them (gated and checked in agentWiring.test.ts).
-    expect(buildJobs({ config: full }).slice(0, 13).map((j) => [j.name, j.schedule])).toEqual([
+    expect(buildJobs({ config: full }).slice(0, 14).map((j) => [j.name, j.schedule])).toEqual([
       ['backup', { kind: 'daily', at: '02:15' }],
       ['logs-prune', { kind: 'daily', at: '04:45' }],
       ['imessage-tail', { kind: 'interval', everyMs: 10_000 }],
@@ -71,6 +71,7 @@ describe('job registry', () => {
       ['instagram-dyi', expect.anything()],
       ['partiful', { kind: 'daily', at: '02:00' }],
       ['partiful-contacts', { kind: 'weekly', dow: 0, at: '03:30' }],
+      ['partiful-hosted-guests', { kind: 'interval', everyMs: 30 * 60_000 }],
       ['gcal', expect.anything()],
       ['identity-match', expect.anything()],
       ['occasions', { kind: 'daily', at: '03:00' }],

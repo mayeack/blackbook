@@ -4,7 +4,9 @@
  *
  * `SelectDigestItems` is the seam: the default reads the rows; a ranker that exposes its own selector can be passed
  * instead (compose / delivery / routes all take `select`). Items whose people are no longer visible (hidden,
- * merged away, roster-only since the ranker ran) are dropped here, so nothing hidden ever reaches a text.
+ * merged away, roster-only since the ranker ran) are dropped here, so nothing hidden ever reaches a text; so is a
+ * "Who to invite" item whose Partiful guest list went stale or that now names someone already invited
+ * (intel/invites.ts partyInviteStale), so a duplicate invite never goes out.
  */
 import {
   SUGGESTION_KINDS,
@@ -20,6 +22,7 @@ import {
   type WildcardGenerator,
 } from '@yb/shared';
 import type { DB } from '../db/connection';
+import { partyInviteStale } from '../intel/invites';
 
 export interface DigestRow {
   id: string;
@@ -94,6 +97,8 @@ export interface DigestSelection {
   items: SelectedItem[];
   /** Items the ranker picked whose people are no longer visible (not shown anywhere). */
   droppedHidden: number;
+  /** "Who to invite" items dropped because their guest list went stale or someone on them is invited by now. */
+  droppedStale?: number;
 }
 
 export type SelectDigestItems = (db: DB, o: { localDate: string; now: number }) => DigestSelection | null;
@@ -196,7 +201,7 @@ export function peopleInfo(db: DB, ids: string[]): Map<string, PersonInfo> {
 }
 
 /** The default selector: today's digest row and its items, in ordinal order. Null when the ranker wrote no row. */
-export const readDigestSelection: SelectDigestItems = (db, { localDate }) => {
+export const readDigestSelection: SelectDigestItems = (db, { localDate, now }) => {
   const digest = getDigestRow(db, localDate);
   if (!digest) return null;
   const rows = db
@@ -205,7 +210,7 @@ export const readDigestSelection: SelectDigestItems = (db, { localDate }) => {
        WHERE di.digest_id = ? ORDER BY di.ordinal`,
     )
     .all(digest.id) as SuggestionRow[];
-  return { digest, ...toSelectedItems(db, rows) };
+  return { digest, ...toSelectedItems(db, rows, now) };
 };
 
 /** One suggestion as a digest item with the given ordinal (e.g. the next one `more` texts), or null if hidden. */
@@ -214,7 +219,8 @@ export function selectedItemById(db: DB, suggestionId: string, ordinal: number):
   return row ? (toSelectedItems(db, [row]).items[0] ?? null) : null;
 }
 
-function toSelectedItems(db: DB, rows: SuggestionRow[]): { items: SelectedItem[]; droppedHidden: number } {
+/** `now` (digest reads) also re-checks "Who to invite" items against their guest list (see the header). */
+function toSelectedItems(db: DB, rows: SuggestionRow[], now?: number): { items: SelectedItem[]; droppedHidden: number; droppedStale: number } {
   const personIdsOf = (r: SuggestionRow): string[] => {
     const listed = strings(parseJson(r.person_ids ?? null));
     const ids = listed.length ? listed : [r.person_id, r.related_person_id].filter((x): x is string => !!x);
@@ -225,6 +231,7 @@ function toSelectedItems(db: DB, rows: SuggestionRow[]): { items: SelectedItem[]
   const people = peopleInfo(db, ids);
   const items: SelectedItem[] = [];
   let droppedHidden = 0;
+  let droppedStale = 0;
   for (const r of rows) {
     const kind = normalizeKind(r.kind);
     if (!kind) continue;
@@ -233,6 +240,10 @@ function toSelectedItems(db: DB, rows: SuggestionRow[]): { items: SelectedItem[]
     const required = personIds.slice(0, kind === 'intro' ? 2 : 1);
     if (required.some((id) => !people.get(id))) {
       droppedHidden++;
+      continue;
+    }
+    if (now !== undefined && kind === 'party_invite' && partyInviteStale(db, { occasionId: r.occasion_id, eventId: r.event_id, personIds }, now)) {
+      droppedStale++;
       continue;
     }
     const ppl = personIds.map((id) => people.get(id)).filter((p): p is PersonInfo => !!p);
@@ -268,7 +279,7 @@ function toSelectedItems(db: DB, rows: SuggestionRow[]): { items: SelectedItem[]
       openers: strings(parseJson(r.openers)),
     });
   }
-  return { items, droppedHidden };
+  return { items, droppedHidden, droppedStale };
 }
 
 // ---------------------------------------------------------------------------------------------- DTO pieces

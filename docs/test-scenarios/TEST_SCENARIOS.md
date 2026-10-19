@@ -1191,3 +1191,39 @@ first name; clarification options ("Which Sam did you mean?") keep their own rul
 options collide); the plain-search fallback may use the full name when a colliding person was found but cut from the
 text by the length cap.
 **Platforms**: server only. Not checked against live Haiku output or the production DB.
+
+## 2026-10-18 — "Who to invite" never suggests someone already invited (Partiful cross-check)
+
+Owner: "Always cross check who to suggest to invite against currently invited people on partiful, to ensure im not
+told to invite duplicates". Three gaps closed:
+1. **Freshness.** New job `partiful-hosted-guests` (every 30 min) re-reads the guest lists of Partiful events you host
+   in the next 15 days (read-only `getGuests`, same allowlist and rate gate; no hosted event → no calls). A party_invite
+   item for a Partiful event needs a complete read within the last hour; otherwise there is no item. Before the brief
+   sends (and on Today), an item whose list went stale or that now names someone on it is dropped.
+2. **Identity gaps.** Candidates sharing an identity with a guest on another record are left out: a phone inside a
+   WhatsApp id, Gmail addresses differing in dots or +tags, an @handle on a Beeper/Instagram record, the same Partiful
+   user, or an open "maybe the same person" match.
+3. **Name-only guests.** Candidates whose first + last name matches any name on the list (same last name; first names
+   in one nickname family like Will/William) are left out — including SMS invitees with no Partiful account, now kept
+   by name for events you host (migration **024 partiful_guest_names**), and names on the calendar invite.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root, all green.
+2. `test/adapters/partiful/ingest.test.ts` "partiful-hosted-guests" (only hosted lists in the next 15 days are read,
+   SMS invitees kept by name and forgotten when removed, a failed read is marked error, nothing hosted → no calls);
+   `test/intel/invites.test.ts` "never a duplicate invite" (stale / failed / partial / unread list → no item; phone,
+   Gmail, @handle and maybe-match gaps; names incl. nickname, SMS invitee and calendar name; single first names and
+   other families don't count; the brief drops a stale item or one naming someone invited after the ranking).
+
+### Scenario B — Live (owner, after deploy)
+**Setup**: a Partiful event you host 2–14 days out, Party invites people or close party-goers not on it yet.
+1. Next morning, note who "Who to invite to <event>" names. In Partiful, invite one of them (or text-invite them by
+   phone through Partiful) before 07:00 the next day. **Expected**: the next brief doesn't name them.
+2. Invite someone named in today's item between 07:16 and the brief's send time. **Expected**: within 30 minutes the
+   refresh job reads the list and the item is dropped from the brief / Today.
+3. Sign out of Partiful in the sandbox browser (the refresh fails). **Expected**: within an hour no "Who to invite"
+   item for the Partiful event appears; Sources shows Partiful needs a sign-in. Sign back in → items return.
+
+**Edge cases**: calendar-only hosted events (no Partiful) aren't gated on freshness; a guest named only "Sam" (no last
+name) doesn't block anyone; a matcher pair marked separate doesn't block.
+**Platforms**: server only. Not deployed; not run against the live Partiful API.
