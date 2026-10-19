@@ -155,6 +155,14 @@ export interface ValidatedWindow {
   dropped: Record<string, number>;
 }
 
+/** A historical window whose NEW messages all predate as_of − 30 days: its commitments and needs_reply are dropped. */
+export function obligationsTooOld(packet: Pick<Packet, 'mode' | 'asOf' | 'lines'>): boolean {
+  return packet.mode === 'historical' && Math.max(...packet.lines.filter((l) => l.role === 'new').map((l) => l.at), 0) < packet.asOf - HISTORICAL_OBLIGATION_MAX_AGE_MS;
+}
+
+/** Whether a window sends the obligations request at all (prompt.ts extractionParts): not when they'd be dropped. */
+export const needsObligations = (packet: Pick<Packet, 'mode' | 'asOf' | 'lines'>): boolean => !obligationsTooOld(packet);
+
 const MSG_RE = /^m:(\d{1,6})$/;
 const okConf = (c: number) => Number.isFinite(c) && c >= 0 && c <= 1;
 
@@ -197,7 +205,7 @@ export function validateExtraction(x: Extraction, packet: Packet, _o: { now: num
   const byN = new Map<number, PacketLine>(packet.lines.map((l) => [l.n, l]));
   const tokenOfPerson = new Map<string, string>(Object.entries(packet.refs).map(([t, r]) => [r.personId, t]));
   const participants = new Set(Object.entries(packet.refs).filter(([, r]) => r.role === 'participant').map(([t]) => t));
-  const obligationsTooOld = historical && Math.max(...packet.lines.filter((l) => l.role === 'new').map((l) => l.at), 0) < packet.asOf - HISTORICAL_OBLIGATION_MAX_AGE_MS;
+  const tooOld = obligationsTooOld(packet);
 
   // ---- evidence
   const evidence = (evs: { msg: string; quote: string }[]): EvidenceRef[] => {
@@ -361,7 +369,7 @@ export function validateExtraction(x: Extraction, packet: Packet, _o: { now: num
   // ---- commitments
   const commitments: VCommitment[] = [];
   for (const c of x.commitments) {
-    if (obligationsTooOld) {
+    if (tooOld) {
       drop('commitment_too_old');
       continue;
     }
@@ -465,7 +473,7 @@ export function validateExtraction(x: Extraction, packet: Packet, _o: { now: num
   const nr = x.needs_reply;
   const newSorted = packet.lines.filter((l) => l.role === 'new').sort((a, b) => a.at - b.at || a.msgId - b.msgId);
   const through = newSorted[newSorted.length - 1];
-  if (obligationsTooOld || !through) {
+  if (tooOld || !through) {
     if (nr.state !== 'n_a') drop('needs_reply_too_old');
   } else if (!okConf(nr.conf)) {
     drop('needs_reply_bad');

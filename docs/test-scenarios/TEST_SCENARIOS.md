@@ -834,3 +834,45 @@ window build stopped part-way (no `stats.built_at`) finishes building on the nex
 **Edge cases**: a window blocked at render is never re-sent automatically (it stays `dead_letter`); a whole-batch
 `excluded` refusal by the client is not covered by the per-request check (only egress findings are).
 **Platforms**: server only. Production behavior (backfill submit, real Haiku results) is not verified by Claude.
+
+---
+
+## 2026-10-18 — Extraction requests accepted by the API: one window, two requests (grammar-size fix)
+
+**What changed**: every extraction request was refused with HTTP 400 "The compiled grammar is too large…" (all 45
+batch items of 2026-10-16/17; the single `Extraction` output schema had 86 grammar nodes). A window is now read by two
+structured-output requests over the same user turn: knowledge (summary, facts, mentions, relations, self_id, topics;
+58 nodes) and obligations (commitments, needs_reply; 29 nodes), the second only when obligations can still be kept
+(not for historical windows older than 30 days). Both go out in one batch and are merged before validation, so a
+window still has one item, one apply and one undo. New prompt version (`7e37e334` → `73a9fc73`). Windows dead-lettered
+as `invalid_request` under an older prompt version go back to pending once (nightly submit / backfill step).
+`llm/client.ts` refuses any request over 64 grammar nodes locally; `yb llm-smoke` checks every schema.
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii` (1,298 tests green on 2026-10-18).
+2. `test/llm/outputSchemas.test.ts`: the node counter matches the live calibration points; the one-request schema
+   (86) is refused locally; knowledge 58 / obligations 29 are pinned; every schema in `src/llmSchemas.ts` passes
+   `requestIssues` on its route; an LLM call site with an unregistered `schema: X` fails the test.
+3. `test/extraction/parts.test.ts`: custom_id pairing, merge (each part only its own keys), failure precedence, a
+   refused or errored obligations request deciding for the window, revive under an old version (and no revive under
+   the current one).
+
+### Scenario B — Live API smoke (Claude verified on 2026-10-18)
+1. `ANTHROPIC_API_KEY=… npm run smoke:llm-schemas` (or `npm run yb -- llm-smoke --live`).
+2. **Expected**: 11 lines, every one `200 end_turn` (ExtractionKnowledge, ExtractionObligations, Consolidation, the
+   other route schemas and the Ask tool set), then `11/11 accepted by the API`. `--model claude-sonnet-5-5 --only
+   ExtractionKnowledge,ExtractionObligations` → both 200 as well. Without `--live` nothing is sent (node counts only).
+
+### Scenario C — Production after deploy (owner)
+1. Merge (after #59), `git pull` in `~/Blackbook`, `bash scripts/service.sh restart`.
+2. At the next 03:10 `extract-submit`: counts show `revived_invalid_request` (the dead-lettered steady windows) and
+   `submitted`; `llm_requests` gets two rows per steady window (custom_ids `x73a9fc73-…-N` and `…_o-N`).
+3. **Expected**: the following `extract-collect` reports `applied` > 0 and no `dead_letter_invalid_request`; facts,
+   commitments and reply verdicts appear with `prompt_version = 73a9fc73`.
+4. `sqlite3 -readonly <data dir>/yeackbot.db "select outcome, count(*) from extraction_items where prompt_version='73a9fc73' group by 1"`
+   shows `ok` rows and no `invalid_request`.
+
+**Edge cases**: a window whose obligations request is refused is refused whole (nothing from its knowledge answer
+applies); a missing or errored part retries the whole window; the shadow eval's `--system-file` replaces only the
+knowledge prompt.
+**Platforms**: server only. Real extraction results (quality of the split prompts) are not verified by Claude.

@@ -127,8 +127,11 @@ describe('egress blocks are per request', () => {
     expect(rep.status).toBe('ok');
     expect(rep.counts).toMatchObject({ windows: 2, submitted: 1, batches: 1, egress_blocked: 1 });
     const batch = f.llm.calls.filter((c) => c.method === 'batch');
-    expect(batch).toHaveLength(1); // without the per-request check the client refuses the whole batch
-    expect(batch[0]!.userText).toContain('Lumen Labs');
+    // The dm window's two requests (knowledge + obligations); without the per-request check the client refuses
+    // the whole batch.
+    expect(batch).toHaveLength(2);
+    expect(new Set(batch.map((c) => c.subjectRef)).size).toBe(1);
+    for (const c of batch) expect(c.userText).toContain('Lumen Labs');
     const [groupWin] = windowsOf(w.db, w.group);
     expect(groupWin!.status).toBe('dead_letter');
     expect(blockedItems(w)).toEqual([{ kind: 'extract', window_id: groupWin!.id, person_id: null, attempt: 0, custom_id: expect.stringMatching(/-0$/), batch_id: null }]);

@@ -14,7 +14,7 @@ import { ASK_TOOL_DEFS } from '../../src/ask/tools';
 import { INTENT_SYSTEM } from '../../src/commands/intent';
 import { DRAFT_SYSTEM } from '../../src/commands/draft';
 import { COMPOSER_SYSTEM } from '../../src/delivery/llmComposer';
-import { CONSOLIDATION_SYSTEM, EXTRACTION_SYSTEM } from '../../src/extraction/prompt';
+import { CONSOLIDATION_SYSTEM, KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM } from '../../src/extraction/prompt';
 import { TIEBREAK_SYSTEM } from '../../src/identity/tiebreak';
 import { ADJUDICATION_SYSTEM } from '../../src/intel/adjudicationPrompt';
 import { outputFormat, volatileMarkers } from '../../src/llm/caching';
@@ -181,10 +181,10 @@ describe('request shape per route', () => {
       expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     }
     expect(outputFormat(Out)).toBe(outputFormat(Out)); // memoized: one schema object per zod schema
-    const systems = { EXTRACTION_SYSTEM, CONSOLIDATION_SYSTEM, TIEBREAK_SYSTEM, INTENT_SYSTEM, DRAFT_SYSTEM, COMPOSER_SYSTEM, ADJUDICATION_SYSTEM, ASK_SYSTEM_PROMPT, NAMING_SYSTEM };
+    const systems = { KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM, CONSOLIDATION_SYSTEM, TIEBREAK_SYSTEM, INTENT_SYSTEM, DRAFT_SYSTEM, COMPOSER_SYSTEM, ADJUDICATION_SYSTEM, ASK_SYSTEM_PROMPT, NAMING_SYSTEM };
     for (const [name, sys] of Object.entries(systems)) {
       // Fixed few-shot dates in the extraction examples are literals; nothing else may look volatile.
-      const markers = volatileMarkers(sys).filter((m) => !(name === 'EXTRACTION_SYSTEM' && m === 'iso_timestamp'));
+      const markers = volatileMarkers(sys).filter((m) => !((name === 'KNOWLEDGE_SYSTEM' || name === 'OBLIGATIONS_SYSTEM') && m === 'iso_timestamp'));
       expect(markers, name).toEqual([]);
     }
     expect(JSON.stringify(ASK_TOOL_DEFS)).toBe(JSON.stringify(ASK_TOOL_DEFS));
@@ -192,7 +192,8 @@ describe('request shape per route', () => {
 
   it('cacheable prefixes clear the 512-token minimum on the routes that reuse them at volume', () => {
     // Batch routes and the Ask loop (conservative 3 chars/token; the schema/tools are part of the prefix).
-    expect(estimatePromptTokens(EXTRACTION_SYSTEM)).toBeGreaterThan(512);
+    expect(estimatePromptTokens(KNOWLEDGE_SYSTEM)).toBeGreaterThan(512);
+    expect(estimatePromptTokens(OBLIGATIONS_SYSTEM)).toBeGreaterThan(512);
     expect(estimatePromptTokens(CONSOLIDATION_SYSTEM)).toBeGreaterThan(512);
     expect(estimatePromptTokens(ADJUDICATION_SYSTEM)).toBeGreaterThan(512);
     expect(estimatePromptTokens(ASK_SYSTEM_PROMPT + JSON.stringify(ASK_TOOL_DEFS))).toBeGreaterThan(512);
@@ -219,7 +220,8 @@ describe('request shape per route', () => {
     expect(strictSchemaIssues(unions.map((t) => ({ ...t, strict: false })))).toEqual([]);
     const optional = [tool('a', Object.fromEntries(Array.from({ length: 25 }, (_, j) => [`p${j}`, { type: 'string' }])), [])];
     expect(strictSchemaIssues(optional)).toEqual(['25 optional tool parameters (max 24)']);
-    expect(requestIssues({ ...build('intent', 'sync'), tools: unions })).toEqual(['24 union-typed tool parameters (max 16)']);
+    // With an output format the limits count the format and the strict tools together (one grammar).
+    expect(requestIssues({ ...build('intent', 'sync'), tools: unions })).toEqual(['24 union-typed parameters in the strict schemas (max 16)']);
   });
 
   it('the Ask tools fit the strict schema limits', () => {

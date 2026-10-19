@@ -19,8 +19,14 @@
  *                  allowance covers; the rest waits); when all are done: chronological reconcile, then one
  *                  consolidation request per person with ≥8 facts. planBackfill (yb backfill-extract --estimate) prices
  *                  it beforehand without sending anything.
+ *   two requests   a window is read by a knowledge request and, when obligations can still be kept, an obligations
+ *                  request (prompt.ts extractionParts; parts.ts). Both go out in one batch and their results are
+ *                  joined before anything else, so the window keeps one item, one apply and one undo.
+ *   revive         a window dead-lettered as invalid_request under an older prompt version (the one-request schema
+ *                  the API refused) goes back to pending once (reviveInvalidRequests), at the nightly submit and
+ *                  the backfill step.
  *   cost           routes extract_steady / extract_historical / extract_consolidate (llm/models.ts: Haiku 5.5,
- *                  effort low, thinking off, 1 h cache on the shared system prompt; batches 50% off). Every request
+ *                  effort low, thinking off, 1 h cache on each shared system prompt; batches 50% off). Every request
  *                  stays under PROMPT_TOKEN_LIMIT: a window whose prompt would not is split before it is sent. At most
  *                  STEADY_MAX_WINDOWS_PER_RUN new steady windows a run (the rest stay uncovered for the next wave).
  *   egress         fail closed PER REQUEST: a window whose packet the egress scanner refuses (at render, or its user
@@ -59,14 +65,16 @@ import {
   CONSOLIDATION_PROMPT_VERSION,
   CONSOLIDATION_SYSTEM,
   EXTRACTION_PROMPT_VERSION,
-  EXTRACTION_SYSTEM,
+  extractionParts,
   HISTORICAL_MAX_TOKENS,
   MAX_TOKENS_CEILING,
   STEADY_MAX_TOKENS,
   SYSTEM_TOKENS,
+  type ExtractionPart,
 } from './prompt';
+import { isObligationsCustomId, joinBatchParts, obligationsCustomId, parseWindowSync, windowCustomId } from './parts';
 import { Consolidation, Extraction } from './schema';
-import { validateExtraction } from './validate';
+import { HISTORICAL_OBLIGATION_MAX_AGE_MS, needsObligations, validateExtraction } from './validate';
 import {
   backfillThroughAt,
   carryOver,
@@ -137,6 +145,8 @@ interface Spec {
   userText: string;
   tokens: number;
   payload: unknown;
+  /** A window that also sends the obligations request (validate.ts needsObligations); false for consolidation. */
+  obligations: boolean;
 }
 
 export interface Counts {
@@ -150,13 +160,25 @@ const baseMaxTokens = (k: ItemKind) => (k === 'historical' ? HISTORICAL_MAX_TOKE
 /** The LLM route of an item kind. */
 export const routeOf = (k: ItemKind): LlmRoute => (k === 'historical' ? 'extract_historical' : k === 'consolidate' ? 'extract_consolidate' : 'extract_steady');
 
+/** The conservative (3 chars/token) count of a user turn measured with the 4-chars packing count. */
+const conservative = (tokens: number) => Math.ceil((tokens * 4) / 3);
+
 /**
- * Batch estimate for one extraction request on `params` (default: the steady route's defaults): the user turn
- * uncached (`tokens` from the 4-chars packing count, rescaled to the conservative 3 chars/token), the shared system
- * prompt read from the cache, the route's expected output.
+ * Estimate for one of a window's requests on `params`: the user turn uncached (conservatively counted), the part's
+ * system prompt read from the cache, its expected output (the route's for the knowledge request).
  */
-export function estimateWindowUsd(tokens: number, params: RouteParams = resolveRoute('extract_steady')): number {
-  return estimateRouteUsd(params, { userTokens: Math.ceil((tokens * 4) / 3), systemTokens: SYSTEM_TOKENS, mode: 'batch' });
+function estimatePartUsd(userTokens: number, part: ExtractionPart, params: RouteParams, mode: 'batch' | 'sync' = 'batch'): number {
+  return estimateRouteUsd(params, {
+    userTokens,
+    systemTokens: part.systemTokens,
+    mode,
+    ...(part.estOutputTokens !== null ? { outputTokens: part.estOutputTokens } : {}),
+  });
+}
+
+/** Batch estimate for a window on `params` (default: the steady route's defaults): its one or two requests. */
+export function estimateWindowUsd(tokens: number, params: RouteParams = resolveRoute('extract_steady'), obligations = true): number {
+  return extractionParts(obligations).reduce((n, part) => n + estimatePartUsd(conservative(tokens), part, params), 0);
 }
 
 /**
@@ -178,24 +200,40 @@ function night(now: number, tz: string): string {
 
 // ---------------------------------------------------------------------------------------------- items & batches
 
-function specToItem(s: Spec, runId: string, params: RouteParams): LlmBatchItem {
-  const isConsolidate = s.kind === 'consolidate';
-  const promptVersion = isConsolidate ? CONSOLIDATION_PROMPT_VERSION : EXTRACTION_PROMPT_VERSION;
+/** A spec's batch items: the request itself (the item's custom_id) first, then a window's obligations request. */
+function specItems(s: Spec, runId: string, params: RouteParams): LlmBatchItem[] {
   const subject = (s.windowId ?? s.personId)!;
-  return {
+  const base = {
     kind: s.kind as LlmKind,
     route: routeOf(s.kind),
     subjectRef: subject,
-    promptVersion,
-    system: isConsolidate ? CONSOLIDATION_SYSTEM : EXTRACTION_SYSTEM,
-    messages: [{ role: 'user', content: s.userText }],
+    messages: [{ role: 'user' as const, content: s.userText }],
     maxTokens: s.maxTokens,
     pool: poolOf(s.kind, s.backfillId),
-    estimateUsd: isConsolidate ? estimateConsolidationUsd(s.tokens, 'batch', params) : estimateWindowUsd(s.tokens, params),
     runId,
-    customId: customId(s.kind as LlmKind, promptVersion, subject, s.attempt),
-    schema: isConsolidate ? Consolidation : Extraction,
   };
+  if (s.kind === 'consolidate') {
+    const promptVersion = CONSOLIDATION_PROMPT_VERSION;
+    return [
+      {
+        ...base,
+        promptVersion,
+        system: CONSOLIDATION_SYSTEM,
+        estimateUsd: estimateConsolidationUsd(s.tokens, 'batch', params),
+        customId: customId(s.kind as LlmKind, promptVersion, subject, s.attempt),
+        schema: Consolidation,
+      },
+    ];
+  }
+  const id = customId(s.kind as LlmKind, EXTRACTION_PROMPT_VERSION, subject, s.attempt);
+  return extractionParts(s.obligations).map((part) => ({
+    ...base,
+    promptVersion: EXTRACTION_PROMPT_VERSION,
+    system: part.system,
+    estimateUsd: estimatePartUsd(conservative(s.tokens), part, params),
+    customId: part.name === 'knowledge' ? id : obligationsCustomId(id),
+    schema: part.schema,
+  }));
 }
 
 /**
@@ -226,18 +264,20 @@ async function submitSpecs(
     if (i % 50 === 49) await yieldToLoop();
   }
   const blocked = all.length - specs.length;
-  for (let i = 0; i < specs.length; i += BATCH_MAX_ITEMS) {
-    let chunk = specs.slice(i, i + BATCH_MAX_ITEMS);
+  // A window sends up to two requests, both in the same batch.
+  const specsPerBatch = Math.floor(BATCH_MAX_ITEMS / 2);
+  for (let i = 0; i < specs.length; i += specsPerBatch) {
+    let chunk = specs.slice(i, i + specsPerBatch);
     if (unavailable) {
       failed.push(...chunk);
       continue;
     }
     const params = deps.llm.params(routeOf(o.kind));
-    let items = chunk.map((s) => specToItem(s, o.runId, params));
+    let groups = chunk.map((s) => specItems(s, o.runId, params));
     // Send as much as the remaining budget allows (largest prefix that fits, by halving); the rest waits.
-    const pool = items[0]!.pool ?? 'steady';
-    const prefixUsd = (k: number) => items.slice(0, k).reduce((n, it) => n + (it.estimateUsd ?? 0), 0);
-    let take = items.length;
+    const pool = groups[0]![0]!.pool ?? 'steady';
+    const prefixUsd = (k: number) => groups.slice(0, k).flat().reduce((n, it) => n + (it.estimateUsd ?? 0), 0);
+    let take = groups.length;
     let spend = deps.llm.canSpend(pool, prefixUsd(take));
     while (!spend.ok && take > 1 && spend.reason.startsWith('budget_')) {
       take = Math.floor(take / 2);
@@ -247,8 +287,9 @@ async function submitSpecs(
       failed.push(...chunk.slice(take));
       unavailable = deps.llm.canSpend(pool, prefixUsd(chunk.length)).ok ? null : pool === 'backfill' ? 'budget_backfill' : 'budget_daily';
       chunk = chunk.slice(0, take);
-      items = items.slice(0, take);
+      groups = groups.slice(0, take);
     }
+    const items = groups.flat();
     const res = spend.ok ? await deps.llm.submitBatch(items, { purpose: o.kind, runId: o.runId }) : ({ status: 'unavailable', reason: spend.reason } as const);
     if (res.status !== 'submitted') {
       unavailable = res.reason;
@@ -268,7 +309,7 @@ async function submitSpecs(
       );
       const win = db.prepare(`UPDATE windows SET status = 'submitted', attempts = attempts + 1, last_custom_id = ?, prompt_version = ?, updated_at = ? WHERE id = ?`);
       chunk.forEach((s, j) => {
-        const it = items[j]!;
+        const it = groups[j]![0]!;
         ins.run(it.customId, res.batchId, s.kind, s.windowId, s.personId, s.backfillId, s.attempt, s.maxTokens, it.promptVersion, s.payload === undefined ? null : JSON.stringify(s.payload), now, now);
         if (s.windowId) win.run(it.customId, it.promptVersion, now, s.windowId);
       });
@@ -283,13 +324,14 @@ function setItem(db: DB, customIdValue: string, status: string, outcome: string 
   db.prepare('UPDATE extraction_items SET status = ?, outcome = coalesce(?, outcome), updated_at = ? WHERE custom_id = ?').run(status, outcome, now, customIdValue);
 }
 
-/** Bookkeeping on the LLM ledger row (written by the client; absent with fakes). */
+/** Bookkeeping on the LLM ledger rows of an item and its obligations request (written by the client; absent with fakes). */
 function markLedger(db: DB, customIdValue: string, status: 'applied' | 'rejected' | 'dead_letter', now: number): void {
-  db.prepare(`UPDATE llm_requests SET status = ?, applied_at = CASE WHEN ? IN ('applied','rejected') THEN ? ELSE applied_at END WHERE custom_id = ?`).run(
+  db.prepare(`UPDATE llm_requests SET status = ?, applied_at = CASE WHEN ? IN ('applied','rejected') THEN ? ELSE applied_at END WHERE custom_id IN (?, ?)`).run(
     status,
     status,
     now,
     customIdValue,
+    obligationsCustomId(customIdValue),
   );
 }
 
@@ -351,7 +393,18 @@ function renderSpec(env: Env, egress: Egress, names: NameIndex, windowId: string
   if (!r.newLines) return 'empty';
   storePacket(env.db, r, env.now);
   const kind = kindOfMode(mode);
-  return { kind, windowId, personId: null, backfillId, attempt, maxTokens: baseMaxTokens(kind), userText: r.userText, tokens: r.tokens, payload: undefined };
+  return {
+    kind,
+    windowId,
+    personId: null,
+    backfillId,
+    attempt,
+    maxTokens: baseMaxTokens(kind),
+    userText: r.userText,
+    tokens: r.tokens,
+    payload: undefined,
+    obligations: needsObligations(r.packet),
+  };
 }
 
 /** A window without a spec: 'empty' → triaged out; 'egress_blocked' → recordBlocked (counted as egress_blocked). */
@@ -470,7 +523,18 @@ async function pendingSpecs(env: Env, egress: Egress, names: NameIndex, mode: Wi
     const kind = kindOfMode(mode);
     const stored = mode === 'historical' ? loadPacket(env.db, id) : null;
     const spec: Spec | NoSpec = stored?.userText
-      ? { kind, windowId: id, personId: null, backfillId, attempt, maxTokens: baseMaxTokens(kind), userText: stored.userText, tokens: stored.tokens, payload: undefined }
+      ? {
+          kind,
+          windowId: id,
+          personId: null,
+          backfillId,
+          attempt,
+          maxTokens: baseMaxTokens(kind),
+          userText: stored.userText,
+          tokens: stored.tokens,
+          payload: undefined,
+          obligations: needsObligations(stored.packet),
+        }
       : renderSpec(env, egress, names, id, mode, attempt, backfillId);
     if (typeof spec === 'string') {
       settleNoSpec(env, { windowId: id, mode, attempt, backfillId }, spec, counts);
@@ -480,6 +544,25 @@ async function pendingSpecs(env: Env, egress: Egress, names: NameIndex, mode: Wi
     out.push(...fitSpec(env, egress, names, spec, { counts }));
   }
   return out;
+}
+
+/**
+ * Windows dead-lettered because the API refused their request as invalid under an OLDER prompt version (the
+ * one-request extraction schema whose grammar was too large) go back to pending once, so the next submit sends
+ * them under this version. Bounded: a window refused as invalid under the current version stays dead.
+ */
+export function reviveInvalidRequests(db: DB, mode: WindowMode, now: number): number {
+  const ids = db
+    .prepare(
+      `SELECT w.id FROM windows w JOIN extraction_items i ON i.custom_id = w.last_custom_id
+       WHERE w.mode = ? AND w.status = 'dead_letter' AND i.outcome = 'invalid_request' AND i.prompt_version <> ?`,
+    )
+    .pluck()
+    .all(mode, EXTRACTION_PROMPT_VERSION) as string[];
+  tx(db, () => {
+    for (const id of ids) setWindowStatus(db, id, 'pending', now);
+  });
+  return ids.length;
 }
 
 // ---------------------------------------------------------------------------------------------- steady submit
@@ -505,7 +588,11 @@ export async function submitSteady(deps: ExtractionDeps, o: { wave?: number; con
   const runId = o.runId ?? startRun(deps.db, 'nightly', { jobRunId: deps.jobRunId ?? null, now });
   const out: BuildResult = { specs: [], created: [], counts };
   try {
-    if (wave === 1) out.specs.push(...(await pendingSpecs(env, deps.egress, names, 'steady', null, counts, deps.signal)));
+    if (wave === 1) {
+      const revived = reviveInvalidRequests(deps.db, 'steady', now);
+      if (revived) bump(counts, 'revived_invalid_request', revived);
+      out.specs.push(...(await pendingSpecs(env, deps.egress, names, 'steady', null, counts, deps.signal)));
+    }
     const before = o.newBefore ?? now;
     const through = backfillThroughAt(deps.db);
     const convs = o.conversations ?? conversationsWithUncovered(deps.db, now - STEADY_MAX_LOOKBACK_MS, before);
@@ -574,8 +661,8 @@ function applyParsed(c: CollectCtx, item: ItemRow, packet: Packet, value: Extrac
   return stats;
 }
 
-/** Re-queues an item at attempt + 1 (or dead-letters past MAX_ATTEMPTS). */
-function requeue(c: CollectCtx, item: ItemRow, userText: string | null, o: { maxTokens?: number; outcome: string }): void {
+/** Re-queues an item at attempt + 1 (or dead-letters past MAX_ATTEMPTS). `obligations`: the window's second request. */
+function requeue(c: CollectCtx, item: ItemRow, userText: string | null, o: { maxTokens?: number; outcome: string; obligations?: boolean }): void {
   const db = c.deps.db;
   const next = item.attempt + 1;
   if (next > MAX_ATTEMPTS || !userText) {
@@ -593,6 +680,7 @@ function requeue(c: CollectCtx, item: ItemRow, userText: string | null, o: { max
     userText,
     tokens: Math.ceil(userText.length / 4),
     payload: item.payload ? JSON.parse(item.payload) : undefined,
+    obligations: o.obligations ?? false,
   });
   bump(c.counts, `requeued_${o.outcome}`);
 }
@@ -630,26 +718,33 @@ function splitWindow(c: CollectCtx, item: ItemRow): void {
   bump(c.counts, 'split');
 }
 
-async function handleWindowResult(c: CollectCtx, item: ItemRow, r: LlmBatchResult): Promise<void> {
+/**
+ * A window's results (its knowledge request and, when it sent one, its obligations request), joined first
+ * (parts.ts joinBatchParts) so everything below handles the window as one.
+ */
+async function handleWindowResult(c: CollectCtx, item: ItemRow, knowledge: LlmBatchResult, obligationsResult: LlmBatchResult | null): Promise<void> {
   const db = c.deps.db;
   const stored = item.window_id ? loadPacket(db, item.window_id) : null;
   if (!stored) return deadLetter(c, item, 'no_packet');
   const { packet, userText } = stored;
+  const obligations = needsObligations(packet);
+  const r = joinBatchParts(knowledge, obligationsResult, obligations);
+  const again = (o: { maxTokens?: number; outcome: string }) => requeue(c, item, userText, { ...o, obligations });
   if (r.type === 'errored') {
     if (r.errorType === 'invalid_request') {
       deadLetter(c, item, 'invalid_request');
       raiseAlert(db, 'extraction:invalid_request', 'Some extraction requests were rejected as invalid (a prompt or schema bug); those windows were dead-lettered.', c.env.now);
       return;
     }
-    return hhmm(c.env.now, c.env.tz) < RETRY_NOW_BEFORE ? requeue(c, item, userText, { outcome: 'errored' }) : retryLater(c, item, 'errored');
+    return hhmm(c.env.now, c.env.tz) < RETRY_NOW_BEFORE ? again({ outcome: 'errored' }) : retryLater(c, item, 'errored');
   }
-  if (r.type === 'canceled') return hhmm(c.env.now, c.env.tz) < RETRY_NOW_BEFORE ? requeue(c, item, userText, { outcome: 'canceled' }) : retryLater(c, item, 'canceled');
+  if (r.type === 'canceled') return hhmm(c.env.now, c.env.tz) < RETRY_NOW_BEFORE ? again({ outcome: 'canceled' }) : retryLater(c, item, 'canceled');
   if (r.type === 'expired') return retryLater(c, item, 'expired');
 
   // succeeded: check stop_reason before reading anything
   if (r.stopReason === 'max_tokens') {
     const hadCutoff = db.prepare(`SELECT 1 FROM extraction_items WHERE window_id = ? AND outcome = 'max_tokens' AND custom_id <> ?`).pluck().get(item.window_id, item.custom_id);
-    if (!hadCutoff && item.max_tokens < MAX_TOKENS_CEILING) return requeue(c, item, userText, { maxTokens: Math.min(item.max_tokens * 2, MAX_TOKENS_CEILING), outcome: 'max_tokens' });
+    if (!hadCutoff && item.max_tokens < MAX_TOKENS_CEILING) return again({ maxTokens: Math.min(item.max_tokens * 2, MAX_TOKENS_CEILING), outcome: 'max_tokens' });
     setItem(db, item.custom_id, 'requeued', 'max_tokens', c.env.now);
     return splitWindow(c, item);
   }
@@ -659,19 +754,22 @@ async function handleWindowResult(c: CollectCtx, item: ItemRow, r: LlmBatchResul
     // Haiku 5.5 has no server-side fallback: the refusal is final (no paid re-run of the same request, no escalation).
     if (!userText || !refusalRerun(c.deps, item.custom_id, route, r.refusalCategory)) return refuseWindow(c, item);
     // A route overridden to a model with sync fallbacks: re-run this one window synchronously (the client sends them).
-    const out = await c.deps.llm.parse({
-      kind: item.kind as LlmKind,
-      route,
-      subjectRef: item.window_id!,
-      promptVersion: item.prompt_version,
-      system: EXTRACTION_SYSTEM,
-      messages: [{ role: 'user', content: userText }],
-      maxTokens: item.max_tokens,
-      pool: poolOf(item.kind, item.backfill_id),
-      estimateUsd: estimateRouteUsd(c.deps.llm.params(route), { userTokens: estimatePromptTokens(userText), systemTokens: SYSTEM_TOKENS, mode: 'sync' }),
-      schema: Extraction,
-      runId: c.runId,
-    });
+    const params = c.deps.llm.params(route);
+    const out = await parseWindowSync(
+      c.deps.llm,
+      {
+        kind: item.kind as LlmKind,
+        route,
+        subjectRef: item.window_id!,
+        promptVersion: item.prompt_version,
+        messages: [{ role: 'user', content: userText }],
+        maxTokens: item.max_tokens,
+        pool: poolOf(item.kind, item.backfill_id),
+        estimateUsd: (part) => estimatePartUsd(estimatePromptTokens(userText), part, params, 'sync'),
+        runId: c.runId,
+      },
+      obligations,
+    );
     if (out.status === 'ok') {
       applyParsed(c, item, packet, out.value, item.custom_id);
       setItem(db, item.custom_id, 'applied', 'refusal_rerun', c.env.now);
@@ -679,13 +777,13 @@ async function handleWindowResult(c: CollectCtx, item: ItemRow, r: LlmBatchResul
       return;
     }
     if (out.status === 'refused') return refuseWindow(c, item);
-    if (out.status === 'max_tokens') return requeue(c, item, userText, { maxTokens: Math.min(item.max_tokens * 2, MAX_TOKENS_CEILING), outcome: 'max_tokens' });
-    if (out.status === 'invalid') return schemaFailure(c, item, userText);
+    if (out.status === 'max_tokens') return again({ maxTokens: Math.min(item.max_tokens * 2, MAX_TOKENS_CEILING), outcome: 'max_tokens' });
+    if (out.status === 'invalid') return schemaFailure(c, item, userText, obligations);
     return retryLater(c, item, 'refusal_unavailable');
   }
 
   const parsed = Extraction.safeParse(parseJson(r.text));
-  if (!parsed.success) return schemaFailure(c, item, userText);
+  if (!parsed.success) return schemaFailure(c, item, userText, obligations);
   try {
     applyParsed(c, item, packet, parsed.data, item.custom_id);
   } catch (e) {
@@ -713,13 +811,13 @@ function refuseWindow(c: CollectCtx, item: ItemRow): void {
 }
 
 /** Schema-invalid output: retry once, then dead-letter. */
-function schemaFailure(c: CollectCtx, item: ItemRow, userText: string | null): void {
+function schemaFailure(c: CollectCtx, item: ItemRow, userText: string | null, obligations = false): void {
   const prior = c.deps.db
     .prepare(`SELECT count(*) FROM extraction_items WHERE ${item.window_id ? 'window_id' : 'person_id'} = ? AND outcome = 'schema_invalid' AND custom_id <> ?`)
     .pluck()
     .get(item.window_id ?? item.person_id, item.custom_id) as number;
   if (prior >= 1) return deadLetter(c, item, 'schema_invalid');
-  requeue(c, item, userText, { outcome: 'schema_invalid' });
+  requeue(c, item, userText, { outcome: 'schema_invalid', obligations });
 }
 
 async function handleConsolidationResult(c: CollectCtx, item: ItemRow, r: LlmBatchResult): Promise<void> {
@@ -815,16 +913,29 @@ export async function collect(deps: ExtractionDeps): Promise<CollectReport> {
         bump(counts, 'batches_in_progress');
         continue;
       }
+      // Results come in any order: a window's two requests are paired by its custom_id before it is handled.
       let n = 0;
+      const results = new Map<string, { main?: LlmBatchResult; obligations?: LlmBatchResult }>();
       for await (const r of deps.llm.batchResults(b.batch_id)) {
-        const item = db.prepare('SELECT * FROM extraction_items WHERE custom_id = ?').get(r.customId) as ItemRow | undefined;
+        const id = windowCustomId(r.customId);
+        const slot = results.get(id) ?? {};
+        if (isObligationsCustomId(r.customId)) slot.obligations = r;
+        else slot.main = r;
+        results.set(id, slot);
+        if (++n % 50 === 0) await yieldToLoop();
+      }
+      let handled = 0;
+      for (const [id, slot] of results) {
+        const item = db.prepare('SELECT * FROM extraction_items WHERE custom_id = ?').get(id) as ItemRow | undefined;
         if (!item || item.status !== 'submitted') {
           bump(counts, 'results_ignored');
           continue;
         }
-        if (item.kind === 'consolidate') await handleConsolidationResult(c, item, r);
-        else await handleWindowResult(c, item, r);
-        if (++n % 20 === 0) await yieldToLoop();
+        // Without the item's own result it stays submitted: the sweep below retries it.
+        if (!slot.main) continue;
+        if (item.kind === 'consolidate') await handleConsolidationResult(c, item, slot.main);
+        else await handleWindowResult(c, item, slot.main, slot.obligations ?? null);
+        if (++handled % 20 === 0) await yieldToLoop();
       }
       // Anything the batch never answered goes back for another try.
       const missing = db.prepare(`SELECT * FROM extraction_items WHERE batch_id = ? AND status = 'submitted'`).all(b.batch_id) as ItemRow[];
@@ -1019,6 +1130,8 @@ export async function advanceBackfill(deps: ExtractionDeps, o: { runId?: string 
         if (deps.signal?.aborted) return backfillReport(deps, row.status === 'budget_exhausted' ? 'budget_exhausted' : 'running', counts);
         bump(counts, 'build_resumed');
       }
+      const revived = reviveInvalidRequests(db, 'historical', now);
+      if (revived) bump(counts, 'revived_invalid_request', revived);
       const pending = await pendingSpecs(env, deps.egress, new NameIndex(env), 'historical', row.id, counts, deps.signal);
       if (pending.length) {
         const res = await submitSpecs(deps, pending, { kind: 'historical', wave: 1, runId, tz: env.tz });
@@ -1048,7 +1161,18 @@ export async function advanceBackfill(deps: ExtractionDeps, o: { runId?: string 
           continue;
         }
         if (!req) continue;
-        specs.push({ kind: 'consolidate', windowId: null, personId: req.personId, backfillId: row.id, attempt: 0, maxTokens: CONSOLIDATION_MAX_TOKENS, userText: req.userText, tokens: req.tokens, payload: req });
+        specs.push({
+          kind: 'consolidate',
+          windowId: null,
+          personId: req.personId,
+          backfillId: row.id,
+          attempt: 0,
+          maxTokens: CONSOLIDATION_MAX_TOKENS,
+          userText: req.userText,
+          tokens: req.tokens,
+          payload: req,
+          obligations: false,
+        });
       }
       if (specs.length) {
         const res = await submitSpecs(deps, specs, { kind: 'consolidate', wave: 1, runId, tz: env.tz });
@@ -1141,10 +1265,12 @@ export function planBackfill(db: DB, now: number): BackfillPlan {
         continue;
       }
       plan.windows++;
-      // NEW text + header/cards/mentionables (~600 packing tokens), rescaled to the conservative count.
+      // NEW text + header/cards/mentionables (~600 packing tokens), rescaled to the conservative count. Only
+      // windows that end within 30 days also send the obligations request.
       const tokens = p.tokens + 600;
-      plan.tokens += Math.ceil((tokens * 4) / 3);
-      const usd = estimateWindowUsd(tokens, params);
+      plan.tokens += conservative(tokens);
+      const newest = p.messages.reduce((n, m) => Math.max(n, m.sent_at), 0);
+      const usd = estimateWindowUsd(tokens, params, newest >= now - HISTORICAL_OBLIGATION_MAX_AGE_MS);
       plan.estimateUsd += usd;
       if (plan.estimateUsd <= remaining) plan.windowsWithinBudget++;
     }
