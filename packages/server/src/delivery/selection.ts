@@ -205,6 +205,16 @@ export const readDigestSelection: SelectDigestItems = (db, { localDate }) => {
        WHERE di.digest_id = ? ORDER BY di.ordinal`,
     )
     .all(digest.id) as SuggestionRow[];
+  return { digest, ...toSelectedItems(db, rows) };
+};
+
+/** One suggestion as a digest item with the given ordinal (e.g. the next one `more` texts), or null if hidden. */
+export function selectedItemById(db: DB, suggestionId: string, ordinal: number): SelectedItem | null {
+  const row = db.prepare('SELECT ? AS ordinal, s.* FROM suggestions s WHERE s.id = ?').get(ordinal, suggestionId) as SuggestionRow | undefined;
+  return row ? (toSelectedItems(db, [row]).items[0] ?? null) : null;
+}
+
+function toSelectedItems(db: DB, rows: SuggestionRow[]): { items: SelectedItem[]; droppedHidden: number } {
   const personIdsOf = (r: SuggestionRow): string[] => {
     const listed = strings(parseJson(r.person_ids ?? null));
     const ids = listed.length ? listed : [r.person_id, r.related_person_id].filter((x): x is string => !!x);
@@ -258,8 +268,8 @@ export const readDigestSelection: SelectDigestItems = (db, { localDate }) => {
       openers: strings(parseJson(r.openers)),
     });
   }
-  return { digest, items, droppedHidden };
-};
+  return { items, droppedHidden };
+}
 
 // ---------------------------------------------------------------------------------------------- DTO pieces
 

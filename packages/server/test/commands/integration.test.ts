@@ -24,13 +24,13 @@ describe('commands × suggestions feedback (real module)', () => {
     const { w, suggestionIds } = world();
     w.say('done 2', at(1));
     await w.run({ now: at(2) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ 2 done (Priya S.) · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Nice, marked Priya S. done.\n\n(Text "undo" to take that back.)`);
     expect(w.suggestionStatus(suggestionIds[1]!)).toBe('done');
     const effective = () => w.db.prepare(`SELECT count(*) FROM suggestion_outcomes WHERE suggestion_id = ? AND source = 'explicit' AND effective = 1`).pluck().get(suggestionIds[1]!);
     expect(effective()).toBe(1);
     w.say('undo', at(3));
     await w.run({ now: at(4) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undid: 2 done (Priya S.)`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Undone: 2 done (Priya S.)`);
     expect(w.suggestionStatus(suggestionIds[1]!)).toBe('delivered');
     expect(effective()).toBe(0);
   });
@@ -39,25 +39,25 @@ describe('commands × suggestions feedback (real module)', () => {
     const { w, suggestionIds } = world();
     w.say('skip 1 · snooze 2 2w', at(1));
     await w.run({ now: at(2) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ 1 skipped (Sam R.) · 2 snoozed (Priya S.) → Oct 28 · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Skipped Sam R. I'll suggest things like that a bit less.\n✓ Snoozed Priya S. until Wed Oct 28.\n\n(Text "undo" to take that back.)`);
     expect(w.suggestionStatus(suggestionIds[0]!)).toBe('dismissed');
     expect(w.suggestionStatus(suggestionIds[1]!)).toBe('snoozed');
     w.say('why 1', at(3));
     await w.run({ now: at(4) });
-    expect(w.lastReply()!.startsWith(`${BOT_MARKER} Why 1 · Sam R.: `)).toBe(true);
+    expect(w.lastReply()!.startsWith(`${BOT_MARKER} Why I suggested Sam R.:\n`)).toBe(true);
     expect(w.lastReply()!.endsWith('yeackbot.com/today')).toBe(true);
     w.say('draft 2', at(5));
     await w.run({ now: at(6) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Drafts need the AI key`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} I need the AI key to write drafts.`);
   });
 });
 
 describe('commands × Ask (real engine, no AI key)', () => {
-  it('nothing found → "Ask needs the AI key"; something found → the retrieval-only answer, ≤600 chars', async () => {
+  it('nothing found → "I need the AI key"; something found → the retrieval-only answer, ≤600 chars', async () => {
     const w = commandsWorld();
     w.say('? who do I know in Austin', at(0));
     await w.run({ now: at(1) });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} Ask needs the AI key · try yeackbot.com/ask`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} I need the AI key to answer questions. You can still search at yeackbot.com/ask`);
 
     const sam = w.person('Sam', 'Rivera');
     w.db.prepare(
@@ -99,6 +99,6 @@ describe('commands × egress (real pseudonymizer)', () => {
     expect(sent).not.toContain('Rivera');
     expect(sent).not.toContain('555-0100');
     expect(w.db.prepare(`SELECT value, source FROM facts WHERE person_id = ?`).get(sam)).toEqual({ value: 'bouldering', source: 'user_log' });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged for Sam R.: drinks today · “bouldering” · undo to revert`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged drinks with Sam R. today.\nNoted: “bouldering”\n\n(Text "undo" to take that back.)`);
   });
 });

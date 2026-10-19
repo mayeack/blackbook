@@ -98,29 +98,33 @@ export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboun
       return { messageId, commandId };
     },
     /** A bot text already in the thread (an ack, an answer): recorded in outbound_messages + its row. */
-    botSays(text: string, at: number, digestId: string | null = null): number {
+    botSays(text: string, at: number, digestId: string | null = null, ordinal: number | null = null): number {
       const body = text.startsWith(BOT_MARKER) ? text : `${BOT_MARKER} ${text}`;
       const guid = `TEST-BOT-${++guidSeq}`;
       const outId = uuidv7(at);
       db.prepare(
-        `INSERT INTO outbound_messages (id, client_ref, purpose, to_handle, text_hash, status, message_guids, digest_id, created_at, sent_at)
-         VALUES (?, ?, ?, 'self@example.com', ?, 'delivered', ?, ?, ?, ?)`,
-      ).run(outId, uuidv7(at), digestId ? 'digest' : 'reply', outboundTextHash(body), JSON.stringify([guid]), digestId, at, at);
+        `INSERT INTO outbound_messages (id, client_ref, purpose, to_handle, text_hash, status, message_guids, digest_id, digest_ordinal, created_at, sent_at)
+         VALUES (?, ?, ?, 'self@example.com', ?, 'delivered', ?, ?, ?, ?, ?)`,
+      ).run(outId, uuidv7(at), digestId ? 'digest' : 'reply', outboundTextHash(body), JSON.stringify([guid]), digestId, ordinal, at, at);
       db.prepare('INSERT INTO outbound_guids (guid, outbound_id) VALUES (?, ?)').run(guid, outId);
       return insertMessage(body, at, { isBot: true, guid });
     },
-    /** A sent digest with numbered items; returns its id, the bot row id and the suggestion ids by ordinal. */
+    /**
+     * A sent digest with numbered items, one bot text per item (like the real brief); returns its id, the first
+     * text's row id, every item text's row id by ordinal and the suggestion ids by ordinal.
+     */
     digest(items: ItemSpec[], at: number = BRIEF_AT, localDate = '2026-10-14') {
       const digestId = uuidv7(at);
       db.prepare(`INSERT INTO digests (id, local_date, status, sent_at, composed_at) VALUES (?, ?, 'sent', ?, ?)`).run(digestId, localDate, at, at - 30 * MIN);
       const suggestionIds = items.map((it, i) => world.suggestion({ status: 'delivered', ...it }, at, `${digestId}:${i}`));
       suggestionIds.forEach((sid, i) => db.prepare('INSERT INTO digest_items (digest_id, ordinal, suggestion_id) VALUES (?, ?, ?)').run(digestId, i + 1, sid));
-      const messageId = world.botSays(`Wed Oct 14 · ${items.length} for today`, at, digestId);
+      const itemMessageIds = items.map((_, i) => world.botSays(`${i === 0 ? `Good morning! ${items.length} things for today.\n\n` : ''}${i + 1}. Item ${i + 1} of ${localDate}`, at + i, digestId, i + 1));
+      const messageId = itemMessageIds[0]!;
       db.prepare('UPDATE digests SET outbound_id = (SELECT outbound_id FROM outbound_guids og JOIN messages m ON m.source_msg_id = og.guid WHERE m.id = ?) WHERE id = ?').run(
         messageId,
         digestId,
       );
-      return { digestId, messageId, suggestionIds };
+      return { digestId, messageId, itemMessageIds, suggestionIds };
     },
     suggestion(it: ItemSpec, at: number = now, key = uuidv7(at)): string {
       const id = uuidv7(at);

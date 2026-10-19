@@ -186,19 +186,24 @@ export class CollectorOutboundSender implements OutboundSender {
     const id = retryId ?? uuidv7(now);
     const hash = outboundTextHash(text);
     if (retryId) {
-      db.prepare(`UPDATE outbound_messages SET status = 'sending', to_handle = ?, text_hash = ?, created_at = ?, collector_result = NULL WHERE id = ?`).run(
+      db.prepare(
+        `UPDATE outbound_messages SET status = 'sending', to_handle = ?, text_hash = ?, created_at = ?, collector_result = NULL,
+           digest_id = coalesce(?, digest_id), digest_ordinal = coalesce(?, digest_ordinal) WHERE id = ?`,
+      ).run(
         to,
         hash,
         now,
+        options.digestId ?? null,
+        options.digestOrdinal ?? null,
         id,
       );
     } else {
       const inserted = db
         .prepare(
-          `INSERT INTO outbound_messages (id, client_ref, purpose, to_handle, text_hash, status, digest_id, created_at)
-           VALUES (?, ?, ?, ?, ?, 'sending', ?, ?) ON CONFLICT (client_ref) DO NOTHING`,
+          `INSERT INTO outbound_messages (id, client_ref, purpose, to_handle, text_hash, status, digest_id, digest_ordinal, created_at)
+           VALUES (?, ?, ?, ?, ?, 'sending', ?, ?, ?) ON CONFLICT (client_ref) DO NOTHING`,
         )
-        .run(id, clientRef, purpose, to, hash, options.digestId ?? null, now);
+        .run(id, clientRef, purpose, to, hash, options.digestId ?? null, options.digestOrdinal ?? null, now);
       if (!inserted.changes) {
         // A concurrent send with the same ref got there first: that one is the send.
         const other = db.prepare('SELECT id, message_guids FROM outbound_messages WHERE client_ref = ?').get(clientRef) as OutboundRow;

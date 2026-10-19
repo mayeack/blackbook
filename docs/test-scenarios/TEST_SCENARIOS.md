@@ -704,6 +704,40 @@ The Ask footer shows sub-cent costs with four decimals.
 refusal is recorded `refused` with no synchronous re-run.
 **Platforms**: server + web. Real-API behavior (fallback blocks, cache usage) needs the owner's key.
 
+## Human-style texts: one suggestion per text (2026-10-17)
+
+The morning brief is now one iMessage per suggestion, written in plain sentences with line breaks (greeting on the
+first, "That's it! Reply…" + the one link on the last, a health issue as its own final text). Command replies (help,
+why, draft, log, pause, status, acks) are full sentences on separate lines. Replying to a suggestion's own text with
+just "done", "skip", "snooze 2w", "why" or "draft" acts on that item; `more` sends one more suggestion.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root (the root config installs the
+   network guard; running vitest inside `packages/server` skips it).
+2. `test/delivery/compose.test.ts` (exact texts, per-item fallback), `test/delivery/send.test.ts` (one text per item
+   in order, digest_ordinal recorded, a brief cut off after two texts resumes past catch-up with no repeats),
+   `test/commands/executor.test.ts` (inline "done" / "skip this one" / "snooze 2w" on the echo row, "why" with no
+   number), `test/commands/grammar.test.ts` (number-less item verbs).
+
+### Scenario B — Preview (web)
+1. yeackbot.com → Settings → Digest → **Preview today's text**.
+2. **Expected**: one bubble per suggestion (plus a "Heads up" bubble when a source is unhealthy); the caption says
+   "N texts · N items"; no "·" separators inside the bubbles.
+
+### Scenario C — Real brief (owner's phone)
+1. With the daily brief on (or Settings → Digest → **Send today's brief to me**), watch the self thread at 08:00.
+2. **Expected**: one text per suggestion (plus a "Heads up" text if a source is unhealthy), in order, each starting
+   with 🅨; the first greets, the last suggestion's text ends with
+   "That's it! Reply "done 2", "skip 2" or "snooze 2" anytime." and yeackbot.com/today.
+3. Long-press text 3 → Reply → "done". **Expected**: "✓ Nice, marked <name> done." on its own line, then
+   "(Text "undo" to take that back.)".
+4. Text "yb help". **Expected**: a bulleted list, one command per line.
+
+**Edge cases**: a reply to the brief's echo row (the grey copy) binds to the same item; a bare "done" with several
+open items asks "Which one? Reply "done 1", or reply to that suggestion's text with just "done"."; "why?" as an
+inline reply explains that item.
+**Platforms**: server + web; the inline-reply binding needs a real iPhone/Mac Messages reply to verify end to end.
+
 ---
 
 ## Ask works again + "who do I know in …" answers with people only (2026-10-18)

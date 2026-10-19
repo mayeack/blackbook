@@ -52,12 +52,12 @@ export const SOURCE_LABELS: Readonly<Record<string, string>> = {
   contacts: 'Contacts',
 };
 
-/** What to do about a source, in a few words (shown after "·"). */
+/** What to do about a source, as a sentence. */
 const ACTION: Readonly<Record<string, string>> = {
-  WhatsApp: 'open WhatsApp on your phone',
-  Instagram: 'check Beeper',
-  Partiful: 'sign in to Partiful',
-  'Google Calendar': 'reconnect Google',
+  WhatsApp: 'Open WhatsApp on your phone to wake it up.',
+  Instagram: 'Check that Beeper is running on the Mac.',
+  Partiful: 'Sign in to Partiful again.',
+  'Google Calendar': 'Reconnect Google in Settings.',
 };
 
 export interface HealthIssue {
@@ -101,12 +101,15 @@ export function topHealthIssue(db: DB, now: number): HealthIssue | null {
   return issues[0] ?? null;
 }
 
-/** "⚠ WhatsApp quiet 4d · open WhatsApp on your phone" / "⚠ Partiful needs attention · see Sources". */
+/** "Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up." */
 export function healthLine(i: HealthIssue | null): string | null {
   if (!i) return null;
-  const what = i.status === 'stale' && i.quietDays ? `quiet ${i.quietDays}d` : 'needs attention';
-  return `⚠ ${i.label} ${what} · ${ACTION[i.label] ?? 'see Sources'}`;
+  const what = i.status === 'stale' && i.quietDays ? `hasn't synced in ${i.quietDays === 1 ? 'a day' : `${i.quietDays} days`}` : 'needs attention';
+  return `Heads up: ${i.label} ${what}. ${ACTION[i.label] ?? 'See yeackbot.com/sources'}`;
 }
+
+/** "Heads up: last night's run failed at extract. Details at yeackbot.com/sources" */
+export const failureLine = (stage: string): string => `Heads up: last night's run failed at ${stage}. Details at yeackbot.com/sources`;
 
 /** Jobs that run every few seconds/minutes or deliver: their failures are source health, not "last night's run". */
 const NOT_PIPELINE = /(?:tail|health|commands|digest-send|compose|backup|logs-prune|whatsapp|beeper|gcal|addressbook|contacts|partiful|instagram)/;

@@ -29,7 +29,9 @@ export type DigestNotSentReason = z.infer<typeof DigestNotSentReason>;
 
 export const DigestPreview = z.object({
   date: LocalDate,
-  /** The iMessage text exactly as it would be sent (first character U+1F168). */
+  /** The iMessage texts exactly as they would be sent, in order: one per suggestion (each starts with U+1F168). */
+  texts: z.array(z.string()),
+  /** The texts joined with blank lines (display only). */
   text: z.string(),
   /** Push notification body ("Your brief is ready · 4 things"). */
   pushBody: z.string(),
