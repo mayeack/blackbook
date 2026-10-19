@@ -214,6 +214,7 @@ const KIND_LABEL: Record<string, string> = {
   pre_event: 'event brief',
   commitment_due: 'a promise',
   event_followup: 'follow-up',
+  party_invite: 'who to invite',
   fading: 'quiet a while',
   travel_overlap: 'same city soon',
   travel: 'trip',

@@ -462,6 +462,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 | `pre_event_brief` | 0.8 | 1.00 | once per event |
 | `commitment_due` | 0.6 + 0.4·[owner ME] | 0.95 | 3 days |
 | `event_followup` | 0.7 | 0.85 | once per event |
+| `party_invite` | 0.8 if ≤5 days out, else 0.7 | 0.80 | once per hosted event |
 | `fading` | sev | 0.80 | 14 days |
 | `travel_overlap` | 0.75 | 0.80 | once per trip |
 | `cooling` | 0.6·H/100 | 0.50 | 21 days |
@@ -469,7 +470,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 | `circle_neglect` | 0.4 | 0.40 | 30 days |
 | `dormant` (S>365, H was ≥50) | 0.3 | 0.30 | 90 days |
 
-**Score:** `s = base · w_kind · fb_kind · (1 + 0.3·priority) · (1 + 0.3·party) · fatigue_p`, where `fatigue_p = 0.5` if the person appeared in any digest in the last 3 days and `party = 1` for a pre-event brief, event follow-up or intro about someone in the Party invites circle (the owner's standing "prioritize inviting X to parties" texts; the same people lead the event brief and follow-up lists).
+**Score:** `s = base · w_kind · fb_kind · (1 + 0.3·priority) · (1 + 0.3·party) · fatigue_p`, where `fatigue_p = 0.5` if the person appeared in any digest in the last 3 days and `party = 1` for a pre-event brief, event follow-up, party invite or intro about someone in the Party invites circle (the owner's standing "prioritize inviting X to parties" texts; the same people lead the event brief and follow-up lists).
 
 **Selection:**
 1. Time-critical items (pre-event within 36h, travel within 48h) are forced in.
@@ -533,6 +534,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
   2. known people with S ≥2E or a fading state → "Great seeing Y — follow up"
   3. the host, if it isn't me and T is in 20–70 → thank-you opener
 - **Pre-event brief:** the morning before, or a push 3h before for same-day events, for Partiful or calendar events with ≥2 known attendees. Contents: top 5 known attendees by T, each with last contact, open debts and commitments, and 1 recent fact; unknown guest names; mutual connectors. Full version lives at `/events/:id/brief`.
+- **Who to invite** (`party_invite`, intel/invites.ts): for a party or event I host 2–14 days out — a Partiful event where I'm host/co-host, or a social calendar occasion I organize (my own calendar copy, not "Sam's …"; the title says I'm hosting, or I sent calendar invites: ≥1 to a party-like title, ≥3 to anything social) — up to 5 people not yet on the guest list: Party invites circle members first (by T), then strong ties (T ≥40) who came to ≥2 of my social happenings in the last year or to one I hosted, ranked `0.6·T/100 + 0.4·min(1, parties/4) + 0.1·came_to_mine`. Anyone with a guest-list row in any status (incl. invited/declined), a calendar invite or an occasion-candidate match is left out, as are people muted for the kind or resting after ignores (dropped from the list, not killing it). Acted = an outbound message to one of them, or one of them joining the guest list, within 7 days.
 
 ---
 
