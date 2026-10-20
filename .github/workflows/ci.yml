@@ -6,19 +6,21 @@ on:
   pull_request:
     branches: [main]
 
+# A new push to a PR supersedes its running checks; runs on main always finish so every main commit gets a result.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The native app's TestFlight deploy is retired; it is kept in .github/archived-workflows/ to re-enable later.
 jobs:
   # Yeackbot (Node workspaces + collector). The repo is public: lint:pii runs first and gates everything else.
   node:
     name: Yeackbot server, web & PII lint
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm
@@ -42,7 +44,7 @@ jobs:
     name: Collector & BlackbookServer
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.3.app
@@ -62,129 +64,34 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             | xcpretty
 
-  test:
-    name: Build & Test
+  # The legacy native app is no longer shipped, but its Blackbook/Models sources are compiled into the collector.
+  app:
+    name: Blackbook app (macOS)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.3.app
 
-      - name: Cache SPM packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
-          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
-          restore-keys: ${{ runner.os }}-spm-
-
-      - name: Resolve packages
-        run: xcodebuild -resolvePackageDependencies -project Blackbook.xcodeproj -scheme Blackbook
-
-      - name: Build (iOS)
+      # The generated TEST_HOST is the iOS bundle layout; the macOS app keeps its binary in Contents/MacOS.
+      - name: Build & test (macOS)
         run: |
-          xcodebuild build \
-            -project Blackbook.xcodeproj \
-            -scheme Blackbook \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -configuration Debug \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            | xcpretty
-
-      - name: Test (iOS)
-        run: |
-          xcodebuild test \
-            -project Blackbook.xcodeproj \
-            -scheme BlackbookTests \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -configuration Debug \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            -resultBundlePath TestResults-iOS \
-            | xcpretty
-
-      - name: Build (macOS)
-        run: |
-          xcodebuild build \
+          set -o pipefail
+          xcodebuild build test \
             -project Blackbook.xcodeproj \
             -scheme Blackbook \
             -destination 'platform=macOS' \
             -configuration Debug \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            | xcpretty
-
-      - name: Test (macOS)
-        run: |
-          xcodebuild test \
-            -project Blackbook.xcodeproj \
-            -scheme BlackbookTests \
-            -destination 'platform=macOS' \
-            -configuration Debug \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
             -resultBundlePath TestResults-macOS \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            'TEST_HOST=$(BUILT_PRODUCTS_DIR)/Blackbook.app/Contents/MacOS/Blackbook' \
             | xcpretty
 
       - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: failure()
+        uses: actions/upload-artifact@v7
         with:
-          name: test-results
-          path: |
-            TestResults-iOS.xcresult
-            TestResults-macOS.xcresult
-
-  deploy-testflight:
-    name: Deploy to TestFlight
-    runs-on: macos-15
-    needs: [test, node, collector]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.3.app
-
-      - name: Install Fastlane
-        run: gem install fastlane
-
-      - name: Resolve packages
-        run: xcodebuild -resolvePackageDependencies -project Blackbook.xcodeproj -scheme Blackbook
-
-      - name: Install App Store Connect API Key
-        env:
-          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-        run: |
-          mkdir -p ~/private_keys
-          echo "$ASC_KEY_CONTENT" | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
-
-      - name: Deploy iOS to TestFlight
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
-          BUILD_NUMBER: ${{ github.run_number }}
-        run: fastlane ios beta
-
-      - name: Deploy macOS to TestFlight
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          XCODEBUILD_AUTHENTICATION_KEY_PATH: ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
-          XCODEBUILD_AUTHENTICATION_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          XCODEBUILD_AUTHENTICATION_KEY_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
-          BUILD_NUMBER: ${{ github.run_number }}
-        run: fastlane mac beta
+          name: test-results-macos
+          path: TestResults-macOS.xcresult
