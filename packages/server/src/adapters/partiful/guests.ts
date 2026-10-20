@@ -15,6 +15,8 @@
  * known as Partiful users plus the qualifying ones; strangers there are counted, never created.
  * A guest record that embeds its user's profile (`user.socials`) gets the Instagram link right here, so no
  * getUsers call is spent on it.
+ * On events I host, guests with no Partiful account (invited by SMS: a name, no user) are kept by name in
+ * partiful_guest_names, so "Who to invite" never suggests them again (a complete read replaces the event's names).
  */
 import { uuidv7 } from '@yb/shared';
 import type { DB } from '../../db/connection';
@@ -53,7 +55,7 @@ export interface GuestPlan {
   backfillPending: number;
 }
 
-const isCanceled = (e: StoredEvent) => e.ev.canceled || /cancel/i.test(e.status ?? '');
+export const isCanceled = (e: StoredEvent) => e.ev.canceled || /cancel/i.test(e.status ?? '');
 
 /** Chooses this run's guest lists (see the header). */
 export function planGuestFetches(db: DB, now: number, limits: GuestLimits = DEFAULT_GUEST_LIMITS): GuestPlan {
@@ -149,6 +151,19 @@ interface AttendeeRow {
 const PERSON_OK = `SELECT 1 FROM people WHERE id = ? AND kind IN ('person','me') AND status NOT IN ('service','suppressed')`;
 
 /** Writes one event's guest list (identities + one attendee batch) in a transaction. */
+/** Names of an event's guests who have no Partiful account (see the header); `complete` replaces the event's names. */
+function keepGuestNames(db: DB, e: StoredEvent, guests: readonly ParsedGuest[], now: number, complete: boolean): void {
+  if (complete) db.prepare('DELETE FROM partiful_guest_names WHERE event_id = ?').run(e.rowId);
+  const put = db.prepare(
+    `INSERT INTO partiful_guest_names (event_id, name, status, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (event_id, name) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
+  );
+  for (const g of guests) {
+    const name = g.userId ? null : g.name?.replace(/\s+/g, ' ').trim();
+    if (name) put.run(e.rowId, name.slice(0, 200), mapGuestStatus(g.status).status, now);
+  }
+}
+
 export function applyGuestList(s: RunScope, e: StoredEvent, guests: readonly ParsedGuest[], status: 'ok' | 'partial' = 'ok'): GuestApplyStats {
   const { db, ctx, now, uid } = s;
   const stats: GuestApplyStats = {
@@ -187,6 +202,7 @@ export function applyGuestList(s: RunScope, e: StoredEvent, guests: readonly Par
     const resolveUser = (ref: string | null) => (ref ? (userOfGuest.get(ref) ?? ref) : null);
 
     const entries = new Map<string, Entry>();
+    if (iHost) keepGuestNames(db, e, guests, now, status === 'ok');
     for (const g of guests) {
       if (!g.userId) {
         stats.without_user++;

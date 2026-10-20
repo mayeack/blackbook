@@ -6,6 +6,8 @@
  *                                    'event' interactions rebuilt; source_health (ok / stale = texts name events
  *                                    the API never returned / contract_broken / auth_required).
  *   syncPartifulContacts (weekly)    getContacts + getMutuals → identities + sharedEventCount (tie seeding).
+ *   refreshHostedGuests (30 min)     getGuests for events I host in the next 15 days, so "Who to invite" is checked
+ *                                    against who is invited right now (no hosted events → no calls).
  * Every journaled write (people, identities, merges, event_attendees) shares one run per pass (undo per run).
  * A spent budget, a 429 or a scheduler stop ends the pass early as 'partial': the next run continues where this
  * one stopped. Logs and stats carry counts only.
@@ -29,9 +31,9 @@ import {
   PartifulRateLimitedError,
   SIGN_IN_MESSAGE,
 } from './errors';
-import { isHost, mergeFound, upsertEvents, type EventOrigin, type FoundEvent } from './events';
+import { isHost, mergeFound, storedEvents, upsertEvents, type EventOrigin, type FoundEvent } from './events';
 import { rebuildPartifulInteractions } from './interactions';
-import { applyGuestList, DEFAULT_GUEST_LIMITS, markGuestState, planGuestFetches, type GuestLimits } from './guests';
+import { applyGuestList, DEFAULT_GUEST_LIMITS, isCanceled, markGuestState, planGuestFetches, type GuestLimits } from './guests';
 import { parseContacts, parseEventInfo, parseEventList, parseGuestPage, parseUsers, type ParsedGuest } from './schemas';
 import type { RunScope } from './scope';
 import { applyContacts, applyProfiles, countPendingProfiles, pendingProfiles } from './users';
@@ -253,12 +255,7 @@ export async function syncPartiful(db: DB, client: PartifulClient, o: SyncOption
       }
       const guests: ParsedGuest[] = [];
       try {
-        const pages = client.pages('getGuests', { eventId: e.ev.id, includeInvitedGuests: true }, { maxResults: 500, maxPages: limits.guestPagesPerEvent });
-        for await (const page of pages) {
-          const p = parseGuestPage('getGuests', page.data);
-          guests.push(...p.guests);
-          stats.items_invalid += p.invalid;
-        }
+        await readGuests(client, e.ev.id, limits.guestPagesPerEvent, stats, guests);
       } catch (err) {
         if ((stop = stopReason(err, o.signal))) {
           if (guests.length) {
@@ -356,6 +353,66 @@ export async function syncPartiful(db: DB, client: PartifulClient, o: SyncOption
     run.finish(partial ? 'partial' : 'ok', nonZeroStats(stats));
     o.log?.info('partiful.sync', { counts: nonZeroStats(stats) });
     return { stats: nonZeroStats(stats), partial, health: v.status };
+  } catch (e) {
+    run.finish('error');
+    throw e;
+  }
+}
+
+/** Every page of one event's guest list, invited guests included, into `into` (kept if a later page throws). */
+async function readGuests(client: PartifulClient, eventId: string, maxPages: number, stats: Stats, into: ParsedGuest[]): Promise<void> {
+  for await (const page of client.pages('getGuests', { eventId, includeInvitedGuests: true }, { maxResults: 500, maxPages })) {
+    const p = parseGuestPage('getGuests', page.data);
+    into.push(...p.guests);
+    stats.items_invalid += p.invalid;
+  }
+}
+
+const DAY = 86_400_000;
+/** Hosted events this many days ahead get their guest lists refreshed (the 2–14 day invite window, plus slack). */
+export const HOSTED_REFRESH_DAYS = 15;
+
+/**
+ * Re-reads the guest lists of Partiful events I host that start in the next HOSTED_REFRESH_DAYS days (job
+ * 'partiful-hosted-guests', every 30 min), so "Who to invite" never names someone already invited: the generator and
+ * the brief only trust a list read 'ok' within the last hour (intel/invites.ts). Only complete lists are applied; one
+ * that can't be read is marked 'error', which keeps its invite suggestion out. No hosted events → no calls at all.
+ */
+export async function refreshHostedGuests(db: DB, client: PartifulClient, o: SyncOptions = {}): Promise<SyncResult> {
+  const now = o.now ?? Date.now();
+  const limits: SyncLimits = { ...DEFAULT_LIMITS, ...o.limits };
+  const due = storedEvents(db).filter((e) => e.myRole === 'host' && e.startsAt !== null && e.startsAt >= now && e.startsAt < now + HOSTED_REFRESH_DAYS * DAY && !isCanceled(e));
+  if (!due.length) return { stats: {}, partial: false, health: 'ok' };
+  const stats = emptyStats();
+  let stop: StopReason | null = null;
+  const run = sourceRun(db, SOURCE, { now, jobRunId: o.jobRunId ?? null });
+  try {
+    const uid = await client.userId();
+    const scope: RunScope = { db, ctx: run.ctx, now, uid, mePersonId: bindMe(run.ctx, uid) };
+    for (const e of due) {
+      if (o.signal?.aborted) {
+        stop = 'aborted';
+        break;
+      }
+      const guests: ParsedGuest[] = [];
+      try {
+        await readGuests(client, e.ev.id, limits.guestPagesPerEvent, stats, guests);
+      } catch (err) {
+        const hidden = err instanceof PartifulCallError && err.code === 'PERMISSION_DENIED';
+        markGuestState(db, e, now, hidden ? 'hidden' : 'error', { fetched: true });
+        stats.guest_lists_failed++;
+        if ((stop = stopReason(err, o.signal))) break;
+        if (err instanceof PartifulCallError || err instanceof PartifulContractError || isServerError(err)) continue;
+        throw err;
+      }
+      add(stats, applyGuestList(scope, e, guests));
+      stats.guest_lists++;
+    }
+    stats.calls = client.callCount;
+    const partial = stop !== null || stats.guest_lists_failed > 0;
+    run.finish(partial ? 'partial' : 'ok', nonZeroStats(stats));
+    o.log?.info('partiful.hosted_guests', { counts: nonZeroStats(stats) });
+    return { stats: nonZeroStats(stats), partial, health: 'ok' };
   } catch (e) {
     run.finish('error');
     throw e;

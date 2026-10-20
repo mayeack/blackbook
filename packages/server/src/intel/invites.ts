@@ -13,11 +13,20 @@
  * for — at least one to a party-like title ("game night", "BBQ"), or three or more to anything social. A Partiful
  * event linked to the occasion decides on its own (a guest there never hosts here).
  *
- * Left out: anyone on the guest list in any status (going, maybe, invited, declined, waitlist, rejected …), people
- * the calendar names or invited by email, people muted for this kind or resting after ignored suggestions (one of
- * five is dropped rather than the whole list), and the owner, hidden, merged, roster-only and service people.
+ * Never anyone already invited (the owner: "always cross check … to ensure I'm not told to invite duplicates"):
+ *   - a Partiful event's list must have been read in full within the last hour (job partiful-hosted-guests refreshes
+ *     hosted lists every 30 min); a list that is older or failed to read means no item for that event, and the brief
+ *     drops an item whose list went stale or that now names someone on it (partyInviteStale, before every send);
+ *   - left out: anyone with a guest-list row in any status (going, maybe, invited, declined, waitlist, rejected …),
+ *     people the calendar names or invited by email, anyone sharing an identity with a guest in another form (phone
+ *     inside a WhatsApp id, a Gmail address with other dots, an @handle, the Partiful user) or an open "maybe the same
+ *     person" match with one, and anyone whose first + last name matches a name on the list (nicknames included:
+ *     "Sam" = "Samuel"), including SMS invitees with no Partiful account — when in doubt, they stay out;
+ *   - also left out: people muted for this kind or resting after ignored suggestions (one of five is dropped rather
+ *     than the whole list), and the owner, hidden, merged, roster-only and service people.
  * Pure reader; payload is numbers and short codes only (the composer reads the title at render time).
  */
+import { emailMatchKey, firstNameScore, normalizeNamePart } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { selfPeople } from '../identity/self';
 import { preferredPeople } from '../pipeline/circles/preferences';
@@ -38,6 +47,8 @@ export const INVITE = {
   lookbackDays: 365,
   /** Calendar invitations that make any social occasion he organizes a gathering he hosts. */
   minCalendarInvitees: 3,
+  /** A Partiful guest list counts only when read in full this recently (job partiful-hosted-guests: every 30 min). */
+  freshGuestsMs: 60 * 60_000,
 } as const;
 
 /** The title says the owner is hosting. */
@@ -144,6 +155,176 @@ export function guestList(db: DB, e: Pick<SocialEvent, 'type' | 'id' | 'eventId'
   return new Set(ids);
 }
 
+// ---------------------------------------------------------------------------------------------- the guest list
+
+/** The Partiful event behind a hosted happening (null for a calendar-only occasion). */
+export function partifulEventOf(db: DB, e: Pick<SocialEvent, 'type' | 'id' | 'eventId'>): string | null {
+  const id = e.type === 'event' ? e.id : e.eventId;
+  if (!id) return null;
+  return (db.prepare(`SELECT id FROM events WHERE id = ? AND source = 'partiful'`).pluck().get(id) as string | undefined) ?? null;
+}
+
+/** Whether a Partiful event's guest list was read in full ('ok') within INVITE.freshGuestsMs of `now`. */
+export function guestListFresh(db: DB, eventRowId: string, now: number): boolean {
+  const r = db
+    .prepare(`SELECT s.guests_status AS status, s.guests_fetched_at AS at FROM events e JOIN partiful_event_sync s ON s.event_id = e.source_event_id WHERE e.id = ?`)
+    .get(eventRowId) as { status: string | null; at: number | null } | undefined;
+  return r?.status === 'ok' && r.at !== null && r.at >= now - INVITE.freshGuestsMs;
+}
+
+/** Match keys of one identity, in every form another record of the same human may use. */
+function identityKeys(kind: string, key: string, raw: string | null): string[] {
+  const out: string[] = [];
+  const handle = (h: string | null | undefined) => {
+    const v = h?.trim().replace(/^@/, '').toLowerCase();
+    if (v && /^[a-z0-9._]{1,30}$/.test(v)) out.push(`ig:${v}`);
+  };
+  switch (kind) {
+    case 'phone':
+      out.push(`tel:${key}`);
+      break;
+    case 'whatsapp_jid': {
+      const digits = /^(\d{8,15})@/.exec(key)?.[1];
+      if (digits) out.push(`tel:+${digits}`);
+      break;
+    }
+    case 'email': {
+      const m = emailMatchKey(key);
+      if (m) out.push(`mail:${m}`);
+      break;
+    }
+    case 'partiful_user':
+      out.push(`pty:${key}`);
+      break;
+    case 'instagram_username':
+      handle(key);
+      break;
+    case 'instagram_id':
+    case 'instagram_name':
+    case 'beeper_user':
+      if (raw?.trim().startsWith('@')) handle(raw);
+      break;
+  }
+  return out;
+}
+
+/** "first last" (first and last word) of a name, normalized; null for a single word. */
+function nameParts(full: string | null | undefined): { first: string; last: string } | null {
+  const words = (full ?? '')
+    .split(/\s+/)
+    .map((w) => normalizeNamePart(w.replace(/[^\p{L}\p{N}'’-]+/gu, '')))
+    .filter(Boolean);
+  return words.length >= 2 ? { first: words[0]!, last: words[words.length - 1]! } : null;
+}
+
+/** Everyone already tied to a hosted event, in every form a duplicate could hide behind. */
+export interface GuestCheck {
+  /** Canonical people: guest-list rows in any status, occasion candidates, calendar invitees by email. */
+  ids: Set<string>;
+  /** Identity match keys of those people and of calendar invitees ('tel:', 'mail:', 'pty:', 'ig:'). */
+  keys: Set<string>;
+  /** Names on the list, matched or not: guests, their accounts, SMS invitees, calendar names. */
+  names: { first: string; last: string }[];
+  /** People the matcher thinks may be one of the guests (an open match candidate). */
+  maybe: Set<string>;
+}
+
+export function guestCheck(db: DB, e: Pick<SocialEvent, 'type' | 'id' | 'eventId'>): GuestCheck {
+  const ids = guestList(db, e);
+  const idsJson = JSON.stringify([...ids]);
+  const chain = JSON.stringify(e.type === 'occasion' ? occasionChain(db, e.id) : []);
+  const eventId = e.type === 'event' ? e.id : (e.eventId ?? null);
+  const keys = new Set<string>();
+  const names: { first: string; last: string }[] = [];
+  const addName = (n: string | null | undefined) => {
+    const p = nameParts(n);
+    if (p) names.push(p);
+  };
+  const idents = db
+    .prepare(
+      `SELECT i.kind, i.key, i.raw, i.display_name FROM identities i JOIN person_canon pc ON pc.person_id = i.person_id
+       WHERE pc.canonical_id IN (SELECT value FROM json_each(?)) AND i.status <> 'detached'`,
+    )
+    .all(idsJson) as { kind: string; key: string; raw: string | null; display_name: string | null }[];
+  for (const i of idents) {
+    for (const k of identityKeys(i.kind, i.key, i.raw)) keys.add(k);
+    addName(i.display_name);
+  }
+  const people = db
+    .prepare(
+      `SELECT p.display_name, p.first_name, p.last_name FROM people p JOIN person_canon pc ON pc.person_id = p.id
+       WHERE pc.canonical_id IN (SELECT value FROM json_each(?))`,
+    )
+    .all(idsJson) as { display_name: string; first_name: string | null; last_name: string | null }[];
+  for (const p of people) {
+    addName(p.display_name);
+    addName(`${p.first_name ?? ''} ${p.last_name ?? ''}`);
+  }
+  if (eventId) for (const n of db.prepare('SELECT name FROM partiful_guest_names WHERE event_id = ?').pluck().all(eventId) as string[]) addName(n);
+  for (const n of db.prepare(`SELECT surface FROM occasion_candidates WHERE occasion_id IN (SELECT value FROM json_each(?)) AND surface IS NOT NULL`).pluck().all(chain) as string[]) {
+    addName(n);
+  }
+  const invitees = db
+    .prepare(
+      `SELECT json_extract(a.value, '$.name') AS name, json_extract(a.value, '$.email') AS email FROM occasion_sources s
+         JOIN calendar_events ce ON ce.id = s.source_ref JOIN json_each(ce.attendees) a
+       WHERE s.occasion_id IN (SELECT value FROM json_each(?)) AND s.source = 'calendar' AND coalesce(json_extract(a.value, '$.self'), 0) = 0`,
+    )
+    .all(chain) as { name: string | null; email: string | null }[];
+  for (const a of invitees) {
+    addName(a.name);
+    const m = a.email ? emailMatchKey(a.email) : null;
+    if (m) keys.add(`mail:${m}`);
+  }
+  const maybe = new Set(
+    db
+      .prepare(
+        `SELECT cb.canonical_id FROM match_candidates m
+           JOIN person_canon ca ON ca.person_id = m.a_id JOIN person_canon cb ON cb.person_id = m.b_id
+         WHERE m.status IN ('pending','possible_duplicate','held') AND ca.canonical_id IN (SELECT value FROM json_each(@ids))
+         UNION
+         SELECT ca.canonical_id FROM match_candidates m
+           JOIN person_canon ca ON ca.person_id = m.a_id JOIN person_canon cb ON cb.person_id = m.b_id
+         WHERE m.status IN ('pending','possible_duplicate','held') AND cb.canonical_id IN (SELECT value FROM json_each(@ids))`,
+      )
+      .pluck()
+      .all({ ids: idsJson }) as string[],
+  );
+  return { ids, keys, names, maybe };
+}
+
+/** Whether `personId` (canonical) may already be on the list: same person, a shared identity, a name, a maybe-match. */
+export function alreadyInvited(db: DB, g: GuestCheck, personId: string): boolean {
+  if (g.ids.has(personId) || g.maybe.has(personId)) return true;
+  if (g.keys.size) {
+    const idents = db
+      .prepare(`SELECT i.kind, i.key, i.raw FROM identities i JOIN person_canon pc ON pc.person_id = i.person_id WHERE pc.canonical_id = ? AND i.status <> 'detached'`)
+      .all(personId) as { kind: string; key: string; raw: string | null }[];
+    if (idents.some((i) => identityKeys(i.kind, i.key, i.raw).some((k) => g.keys.has(k)))) return true;
+  }
+  if (!g.names.length) return false;
+  const p = db.prepare('SELECT display_name, first_name, last_name FROM people WHERE id = ?').get(personId) as
+    | { display_name: string; first_name: string | null; last_name: string | null }
+    | undefined;
+  if (!p) return false;
+  const mine = [nameParts(`${p.first_name ?? ''} ${p.last_name ?? ''}`), nameParts(p.display_name)].filter((x): x is { first: string; last: string } => !!x);
+  return mine.some((m) => g.names.some((n) => n.last === m.last && firstNameScore(n.first, m.first) >= 0.9));
+}
+
+/**
+ * Before a party_invite item goes out (or shows on Today): true when it shouldn't — its Partiful guest list isn't
+ * freshly read, or one of its people is on the list by now.
+ */
+export function partyInviteStale(db: DB, s: { occasionId: string | null; eventId: string | null; personIds: readonly string[] }, now: number): boolean {
+  const e: Pick<SocialEvent, 'type' | 'id' | 'eventId'> = s.occasionId ? { type: 'occasion', id: s.occasionId, eventId: s.eventId } : { type: 'event', id: s.eventId ?? '', eventId: null };
+  if (!e.id) return true;
+  const pe = partifulEventOf(db, e);
+  if (pe && !guestListFresh(db, pe, now)) return true;
+  const g = guestCheck(db, e);
+  const canon = db.prepare('SELECT canonical_id FROM person_canon WHERE person_id = ?').pluck();
+  return s.personIds.some((id) => alreadyInvited(db, g, (canon.get(id) as string | undefined) ?? id));
+}
+
 /**
  * Visible canonical people among `ids` (never the owner, hidden, merged, roster-only or service people, nor a record
  * of mine still holding one of my handles: identity/self.ts).
@@ -194,9 +375,9 @@ export function invitePicks(
   e: Pick<SocialEvent, 'type' | 'id' | 'eventId'>,
   o: { preferred: ReadonlySet<string>; records: ReadonlyMap<string, PartyRecord>; now: number; limit?: number },
 ): InvitePick[] {
-  const taken = guestList(db, e);
+  const onList = guestCheck(db, e);
   const ok = (id: string) => {
-    if (taken.has(id)) return false;
+    if (alreadyInvited(db, onList, id)) return false;
     const s = personState(db, id);
     return !s.muted && !s.mutedKinds.includes('party_invite') && !(s.cooldownUntil !== null && s.cooldownUntil > o.now);
   };
@@ -229,6 +410,9 @@ export function partyInviteCandidates(db: DB, now: number, timeZone: string): Ca
   const records = partyRecords(db, now - INVITE.lookbackDays * DAY, now);
   const out: Candidate[] = [];
   for (const e of events) {
+    // A Partiful list read more than an hour ago (or not read at all) could miss someone just invited: skip it.
+    const pe = partifulEventOf(db, e);
+    if (pe && !guestListFresh(db, pe, now)) continue;
     const picks = invitePicks(db, e, { preferred, records, now });
     if (!picks.length) continue;
     const daysOut = daysBetween(today, localDate(e.startsAt, timeZone));

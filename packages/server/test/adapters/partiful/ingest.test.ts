@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PartifulClient, RateGate } from '../../../src/adapters/partiful/client';
 import { PartifulContractError, SIGN_IN_MESSAGE } from '../../../src/adapters/partiful/errors';
-import { syncPartiful, syncPartifulContacts, type SyncOptions } from '../../../src/adapters/partiful/ingest';
+import { refreshHostedGuests, syncPartiful, syncPartifulContacts, type SyncOptions } from '../../../src/adapters/partiful/ingest';
 import { partifulJobs } from '../../../src/adapters/partiful/jobs';
 import { PartifulAuth, storeSession } from '../../../src/adapters/partiful/session';
 import { canonicalId } from '../../../src/db/canon';
@@ -461,6 +461,46 @@ describe('contract checks', () => {
   });
 });
 
+describe('partiful-hosted-guests (every 30 min)', () => {
+  const HOUR = 3_600_000;
+  const syncRow = (db: DB) => one<{ guests_status: string; guests_fetched_at: number }>(db, `SELECT guests_status, guests_fetched_at FROM partiful_event_sync WHERE event_id = 'evtHosted001'`);
+  const smsNames = (db: DB, eventId: string) => db.prepare('SELECT name FROM partiful_guest_names WHERE event_id = ? ORDER BY name').pluck().all(eventId);
+
+  it('re-reads only the lists of events I host in the next 15 days, and keeps SMS invitees (no Partiful account) by name', async () => {
+    const s = setup();
+    await s.sync(T0);
+    const hosted = eventRow(s.db, 'evtHosted001');
+    const e = s.f.events.find((x) => x.id === 'evtHosted001')!;
+    // Invited after the nightly pass: a Partiful user, and someone by SMS.
+    e.guests.push({ id: 'h-jordan', userId: JORDAN, name: 'Jordan Demo', status: 'SENT' }, { id: 'h-sms', name: 'Morgan Textinvite', status: 'SENT' });
+    const before = s.f.fnCalls('getGuests').length;
+    const r = await refreshHostedGuests(s.db, s.client(), { now: T0 + HOUR });
+    expect(r.partial).toBe(false);
+    expect(s.f.fnCalls('getGuests').slice(before).map((c) => c.params.eventId)).toEqual(['evtHosted001']);
+    expect(attendees(s.db, 'evtHosted001').map((a) => a.person_id)).toContain(personOfUser(s.db, JORDAN));
+    expect(smsNames(s.db, hosted)).toEqual(['Morgan Textinvite']);
+    expect(syncRow(s.db)).toEqual({ guests_status: 'ok', guests_fetched_at: T0 + HOUR });
+    // Off the list again: a complete read forgets the name. Someone else's event never keeps names.
+    e.guests.splice(e.guests.findIndex((g) => g.id === 'h-sms'), 1);
+    await refreshHostedGuests(s.db, s.client(), { now: T0 + 2 * HOUR });
+    expect(smsNames(s.db, hosted)).toEqual([]);
+    expect(smsNames(s.db, eventRow(s.db, 'evtPast0001'))).toEqual([]);
+  });
+
+  it('a list that fails to read is marked error (no invite suggestion trusts it); nothing hosted ahead → no calls', async () => {
+    const s = setup();
+    await s.sync(T0);
+    s.f.override.set('getGuests', () => ({ statusCode: 500, data: { error: { status: 'INTERNAL', message: 'synthetic outage' } } }));
+    const r = await refreshHostedGuests(s.db, s.client(), { now: T0 + HOUR });
+    expect(r.partial).toBe(true);
+    expect(syncRow(s.db)).toEqual({ guests_status: 'error', guests_fetched_at: T0 + HOUR });
+    s.f.override.clear();
+    const calls = s.f.calls.length;
+    expect(await refreshHostedGuests(s.db, s.client(), { now: T0 + 20 * DAY })).toEqual({ stats: {}, partial: false, health: 'ok' });
+    expect(s.f.calls.length).toBe(calls);
+  });
+});
+
 describe('partiful-contacts (weekly)', () => {
   it('stores sharedEventCount (max of contacts and mutuals) and promotes frequent co-attendees', async () => {
     const { f, db, client } = setup();
@@ -497,11 +537,12 @@ describe('partiful-contacts (weekly)', () => {
 describe('jobs', () => {
   const CDP = 'http://127.0.0.1:9'; // a placeholder: `connect` is always injected
 
-  it('registers partiful (daily 02:00) and partiful-contacts (weekly)', () => {
+  it('registers partiful (daily 02:00), partiful-contacts (weekly) and partiful-hosted-guests (every 30 min)', () => {
     const jobs = partifulJobs({ browserCdpUrl: CDP, secretsKey: null });
     expect(jobs.map((j) => [j.name, j.schedule])).toEqual([
       ['partiful', { kind: 'daily', at: '02:00' }],
       ['partiful-contacts', { kind: 'weekly', dow: 0, at: '03:30' }],
+      ['partiful-hosted-guests', { kind: 'interval', everyMs: 30 * 60_000 }],
     ]);
   });
 
