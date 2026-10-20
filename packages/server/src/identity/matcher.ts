@@ -14,7 +14,8 @@
  *   blocked             in band but a guard fails (a vetoed pair whose score without the veto is in band too).
  *   separate            below the band: no action (an earlier candidate row is closed).
  * A 'dismissed' candidate (the user said "not the same") is never merged and keeps its status. First of all, the
- * self-link pass (identity/selfLink.ts) moves my own handles that sit on someone else to me.
+ * self-link pass (identity/selfLink.ts) moves my own handles that sit on someone else to me, then the Partiful link pass
+ * (identity/partifulLink.ts) joins a Partiful-only guest record to the one contact that shares its full name.
  * Nothing here logs names, handles or keys; the job stats are counts.
  */
 import { uuidv7 } from '@yb/shared';
@@ -27,6 +28,7 @@ import { chooseSurvivor, mergePeople, MergeRefusedError } from './merge';
 import { guardFailures } from './matcherGuards';
 import { loadBook } from './matcherProfiles';
 import { blockPairs, priorBits, scorePair, type Family, type PairScore } from './matcherScore';
+import { linkPartifulGuests } from './partifulLink';
 import { linkSelfHandles } from './selfLink';
 
 export const AUTO_MERGE_P = 0.98;
@@ -70,6 +72,8 @@ export interface MatcherStats {
   refused: number;
   /** My own handles moved to me by the self-link pass (identity/selfLink.ts). */
   self_linked: number;
+  /** Partiful-only guests linked to the one contact with their full name (identity/partifulLink.ts). */
+  partiful_linked: number;
 }
 
 interface Candidate {
@@ -169,12 +173,27 @@ function updateAlert(db: DB, now: number, held: number, cap: number): void {
 export function runMatcher(db: DB, o: MatcherOptions = {}): MatcherStats {
   const now = o.now ?? Date.now();
   const cap = o.maxMerges ?? MAX_MERGES_PER_NIGHT;
-  const stats: MatcherStats = { people: 0, pairs: 0, in_band: 0, merged: 0, held: 0, possible: 0, blocked: 0, dismissed: 0, closed: 0, refused: 0, self_linked: 0 };
+  const stats: MatcherStats = {
+    people: 0,
+    pairs: 0,
+    in_band: 0,
+    merged: 0,
+    held: 0,
+    possible: 0,
+    blocked: 0,
+    dismissed: 0,
+    closed: 0,
+    refused: 0,
+    self_linked: 0,
+    partiful_linked: 0,
+  };
   const run = sourceRun(db, MATCHER_SOURCE, { now, jobRunId: o.jobRunId ?? null, kind: 'nightly' });
   // My own handles go to me before anyone is scored: a stray one of mine must never pair me with someone else.
   try {
     const self = linkSelfHandles(run.ctx);
     stats.self_linked = self.absorbed + self.moved;
+    // A Partiful guest record and the one contact with its full name are one person (they count against G6).
+    stats.partiful_linked = linkPartifulGuests(run.ctx, { budget: cap - recentMerges(db, now), signal: o.signal }).linked;
   } catch (e) {
     run.finish('error');
     throw e;
