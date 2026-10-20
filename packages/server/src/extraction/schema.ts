@@ -1,8 +1,9 @@
 /**
  * The extraction output contract (intelligence §4.4) and the consolidation pass's answer. Structured outputs
  * (output_config.format) compile these to JSON Schema: every field is required, `nullable` replaces optional, and
- * there are no numeric/length bounds (the API drops them) — validate.ts enforces bounds, ref sets and quotes. The
- * SDK's zod helper also moves `enum` into the description, so enums are checked by zod after the fact.
+ * there are no numeric/length bounds (the API drops them) — validate.ts enforces bounds, ref sets and quotes. Enums
+ * are enforced by the grammar (llm/caching.ts puts back the `enum`s the SDK's zod helper moves into descriptions)
+ * and checked again by parseExtraction, which drops an item holding an out-of-set value rather than the window.
  *
  * One window is read by TWO requests whose answers are merged into one `Extraction` before validation (so a window
  * is still validated, applied and undone as one): ExtractionKnowledge (summary, facts, mentions, relations,
@@ -189,11 +190,6 @@ export const Consolidation = z.object({
 });
 export type Consolidation = z.infer<typeof Consolidation>;
 
-/** Byte-stable JSON Schema text (part of the prompt version). */
-export function schemaJson(schema: z.ZodType): string {
-  return JSON.stringify(z.toJSONSchema(schema));
-}
-
 export const EMPTY_OBLIGATIONS: ExtractionObligations = {
   commitments: [],
   needs_reply: { state: 'n_a', msg: null, reason: null, urgency: 'normal', conf: 0 },
@@ -211,7 +207,7 @@ export const EMPTY_EXTRACTION: Extraction = {
 
 /**
  * The two parts' parsed JSON → one window answer: each part contributes only its own keys; a window that sent no
- * obligations request gets EMPTY_OBLIGATIONS. Not validated here (Extraction.safeParse does that).
+ * obligations request gets EMPTY_OBLIGATIONS. Not validated here (parseExtraction does that).
  */
 export function mergeExtractionParts(knowledge: unknown, obligations: unknown | null): Record<string, unknown> | null {
   const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -219,4 +215,48 @@ export function mergeExtractionParts(knowledge: unknown, obligations: unknown | 
   const k = Object.fromEntries(KNOWLEDGE_KEYS.map((key) => [key, knowledge[key]]));
   const o = obligations ? Object.fromEntries(OBLIGATION_KEYS.map((key) => [key, obligations[key]])) : EMPTY_OBLIGATIONS;
   return { ...k, ...o };
+}
+
+/**
+ * A window's answer as parseExtraction returns it: an Extraction without the items it dropped, counted in `dropped`
+ * (validate.ts carries the counts on; absent = nothing dropped). needs_reply is null when the verdict was dropped.
+ */
+export interface ParsedExtraction extends Omit<Extraction, 'needs_reply'> {
+  needs_reply: NeedsReply | null;
+  dropped?: Record<string, number>;
+}
+
+/** Each item list's prefix in validate.ts's drop counts. */
+const ITEM_DROP_PREFIX: Record<string, string> = { facts: 'fact', commitments: 'commitment', mentions: 'mention', relations: 'relation', self_id: 'self_id' };
+
+const valueAt = (v: unknown, path: readonly PropertyKey[]): unknown =>
+  path.reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<PropertyKey, unknown>)[k] : undefined), v);
+
+/**
+ * A window's merged answer → ParsedExtraction. Strict about structure: a missing key or a wrong type anywhere fails
+ * the window (schema_invalid: one retry, then a dead letter). Item-level about enums: an item whose enum field holds
+ * a string outside its set (a commitment owner "P66", a kind "text") is dropped and counted as `<item>_bad_enum`;
+ * so is the needs_reply verdict (needs_reply_bad_enum, verdict null). The rest of the window still applies.
+ */
+export function parseExtraction(json: unknown): { success: true; data: ParsedExtraction } | { success: false; error: z.ZodError } {
+  const strict = Extraction.safeParse(json);
+  if (strict.success) return { success: true, data: strict.data };
+  const bad = new Map<string, Set<number>>();
+  let badVerdict = false;
+  for (const issue of strict.error.issues) {
+    const [key, index] = issue.path;
+    // zod reports a missing key or a non-string in an enum field as invalid_value too: only a string is out of set.
+    const outOfSet = issue.code === 'invalid_value' && typeof valueAt(json, issue.path) === 'string';
+    if (outOfSet && key === 'needs_reply') badVerdict = true;
+    else if (outOfSet && typeof key === 'string' && ITEM_DROP_PREFIX[key] && typeof index === 'number') bad.set(key, (bad.get(key) ?? new Set()).add(index));
+    else return { success: false, error: strict.error };
+  }
+  const answer: Record<string, unknown> = { ...(json as Record<string, unknown>) };
+  for (const [key, indexes] of bad) answer[key] = (answer[key] as unknown[]).filter((_, i) => !indexes.has(i));
+  if (badVerdict) answer.needs_reply = EMPTY_OBLIGATIONS.needs_reply;
+  const kept = Extraction.safeParse(answer);
+  if (!kept.success) return { success: false, error: kept.error };
+  const dropped: Record<string, number> = Object.fromEntries([...bad].map(([key, indexes]) => [`${ITEM_DROP_PREFIX[key]}_bad_enum`, indexes.size]));
+  if (badVerdict) dropped.needs_reply_bad_enum = 1;
+  return { success: true, data: { ...kept.data, needs_reply: badVerdict ? null : kept.data.needs_reply, dropped } };
 }

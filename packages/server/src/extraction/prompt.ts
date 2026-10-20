@@ -11,12 +11,14 @@
  * answer cut to its own keys. Each prompt is its own cached prefix.
  *
  * prompt_version = sha256(both systems ‖ both schemaJSONs ‖ model ‖ effort)[0:8] — stored on every row this
- * pipeline derives and in every custom_id.
+ * pipeline derives and in every custom_id. The schema JSON is the output format as sent (llm/caching.ts), so a
+ * change to what the API is asked to enforce is a new version too.
  */
 import type { z } from 'zod';
+import { schemaJson } from '../llm/caching';
 import { estimatePromptTokens, ROUTES } from '../llm/models';
 import { routePromptVersion, type LlmEffort } from '../llm/types';
-import { Consolidation, ExtractionKnowledge, ExtractionObligations, schemaJson } from './schema';
+import { Consolidation, ExtractionKnowledge, ExtractionObligations } from './schema';
 
 /** Route defaults (llm/models.ts: Haiku 5.5, effort low, thinking disabled); the client applies overrides. */
 export const EXTRACTION_EFFORT: LlmEffort = ROUTES.extract_steady.effort;
@@ -330,7 +332,7 @@ export function extractionPromptText(knowledge: string = KNOWLEDGE_SYSTEM, oblig
 /**
  * prompt_version of the extraction prompt (steady and historical share it: same systems, model and effort). The
  * two-request split moved it off 7e37e334, the one-request prompt the API refused, so nothing derived from or
- * cached for that prompt mixes with the new one.
+ * cached for that prompt mixes with the new one; enforcing the enums moved it off 73a9fc73.
  */
 export const EXTRACTION_PROMPT_VERSION = routePromptVersion('extract_steady', extractionPromptText().system, extractionPromptText().schemaJson);
 export const CONSOLIDATION_PROMPT_VERSION = routePromptVersion('extract_consolidate', CONSOLIDATION_SYSTEM, CONSOLIDATION_SCHEMA_JSON);

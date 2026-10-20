@@ -15,13 +15,14 @@
  *   mentions    facts about non-participants apply only through a unique resolution at conf ≥0.8, otherwise
  *               they are held (pending_mention_facts, 30 days).
  *   historical  ADD-only; commitments and needs_reply dropped for messages older than 30 days before as_of.
+ *   enums       items schema.ts parseExtraction already dropped for an out-of-set value arrive counted in x.dropped.
  * The confidence gates that pick candidate / tentative / confirmed run at apply time (they need support counts).
  */
 import * as chrono from 'chrono-node';
 import { DAY_MS, localDateEndMs, localDateToMs, localStamp, tzOffsetMinutes } from './env';
 import type { Packet, PacketLine } from './packet';
 import { SUMMARY_MAX_CHARS } from './prompt';
-import type { CommitmentKind, Extraction, ExtractedFact, FactCat, RelationLabel } from './schema';
+import type { CommitmentKind, ExtractedFact, FactCat, ParsedExtraction, RelationLabel } from './schema';
 import { checkQuote, isLifeEventText, isSensitiveText, looksLikeIdentifier, lineText, normValue, truncateAtSentence } from './text';
 
 export const GATES = {
@@ -197,8 +198,8 @@ export function chronoDates(quote: string, at: number, tz: string): { start: str
 
 const dayDiff = (a: string, b: string) => Math.abs(Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10)) - Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10))) / DAY_MS;
 
-export function validateExtraction(x: Extraction, packet: Packet, _o: { now: number } = { now: Date.now() }): ValidatedWindow {
-  const dropped: Record<string, number> = {};
+export function validateExtraction(x: ParsedExtraction, packet: Packet, _o: { now: number } = { now: Date.now() }): ValidatedWindow {
+  const dropped: Record<string, number> = { ...x.dropped };
   const drop = (reason: string) => void (dropped[reason] = (dropped[reason] ?? 0) + 1);
   const historical = packet.mode === 'historical';
   const tz = packet.tz;
@@ -473,7 +474,9 @@ export function validateExtraction(x: Extraction, packet: Packet, _o: { now: num
   const nr = x.needs_reply;
   const newSorted = packet.lines.filter((l) => l.role === 'new').sort((a, b) => a.at - b.at || a.msgId - b.msgId);
   const through = newSorted[newSorted.length - 1];
-  if (tooOld || !through) {
+  if (!nr) {
+    // dropped while parsing (counted there)
+  } else if (tooOld || !through) {
     if (nr.state !== 'n_a') drop('needs_reply_too_old');
   } else if (!okConf(nr.conf)) {
     drop('needs_reply_bad');

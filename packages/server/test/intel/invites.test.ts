@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { uuidv7 } from '@yb/shared';
 import { generators, partyInviteGenerator, wildcardSources } from '../../src/intel/generators';
-import { guestList, hostedEvents, INVITE, organizesAsHost, partyInviteCandidates } from '../../src/intel/invites';
+import { readDigestSelection } from '../../src/delivery/selection';
+import { alreadyInvited, guestCheck, guestList, hostedEvents, INVITE, organizesAsHost, partyInviteCandidates, partyInviteStale } from '../../src/intel/invites';
 import { nullLogger } from '../../src/ops/logger';
 import { allGenerators } from '../../src/pipeline/suggestions/registry';
 import { attributeRewards, guestListAction, recordImpressions } from '../../src/pipeline/suggestions/rewards';
@@ -39,6 +40,15 @@ function calendarOccasion(title: string, start: number, o: { selfOrganizer?: boo
   const id = occasion(w.db, { title, start, end: start + 3 * 3_600_000 });
   calendarCopy(id, { ...o, title, start });
   return id;
+}
+
+/** The Partiful event's guest list as the refresh job leaves it (read 'ok' at `at`). */
+function listRead(eventId: string, at = NOW, status = 'ok'): void {
+  w.db.prepare(
+    `INSERT INTO partiful_event_sync (event_id, guests_fetched_at, guests_status, updated_at)
+     SELECT source_event_id, ?, ?, ? FROM events WHERE id = ?
+     ON CONFLICT (event_id) DO UPDATE SET guests_fetched_at = excluded.guests_fetched_at, guests_status = excluded.guests_status`,
+  ).run(at, status, at, eventId);
 }
 
 function partyInvites(...members: string[]): void {
@@ -79,6 +89,7 @@ beforeEach(() => {
   // Hosted: a Partiful party in 5 days (Bo invited, Dan declined, Gil going) and a game night at his place in 9 days
   // (Fay has the calendar invitation).
   halloween = w.partiful({ title: 'Halloween party', start: at(5, 20), myRole: 'host' });
+  listRead(halloween, NOW - 20 * 60_000);
   w.guest(halloween, bo, 'invited');
   w.guest(halloween, dan, 'declined');
   w.guest(halloween, gil, 'going');
@@ -251,5 +262,89 @@ describe('copy', () => {
       expect(o).toMatch(/^(Hey )?Quinn/);
       expect(o.length).toBeLessThanOrEqual(160);
     }
+  });
+});
+
+describe('never a duplicate invite (cross-checked against who is invited on Partiful)', () => {
+  const ids = () => partyInviteCandidates(w.db, NOW, TZ).map((c) => c.subjectKey);
+  const halloweenPicks = () => partyInviteCandidates(w.db, NOW, TZ).find((c) => c.subjectKey === `event:${halloween}`)?.personIds ?? null;
+  const ref = { type: 'event' as const, id: '', eventId: null };
+  const check = () => guestCheck(w.db, { ...ref, id: halloween });
+  /** Someone on the Halloween list as a separate record (a Partiful guest the matcher hasn't linked). */
+  const separateGuest = (name: string, status = 'invited') => {
+    const [first, last] = name.split(' ');
+    const id = seedPerson(w.db, { display_name: name, first_name: first, last_name: last, status: 'roster_only' });
+    w.guest(halloween, id, status);
+    return id;
+  };
+
+  it('freshness: a Partiful list not read in full within the hour means no item for it (calendar-only events are unaffected)', () => {
+    expect(ids()).toEqual([`event:${halloween}`, `occ:${gameNight}`]);
+    listRead(halloween, NOW - 2 * HOUR);
+    expect(ids()).toEqual([`occ:${gameNight}`]);
+    listRead(halloween, NOW, 'error');
+    expect(ids()).toEqual([`occ:${gameNight}`]);
+    listRead(halloween, NOW, 'partial');
+    expect(ids()).toEqual([`occ:${gameNight}`]);
+    w.db.prepare('DELETE FROM partiful_event_sync').run();
+    expect(ids()).toEqual([`occ:${gameNight}`]);
+  });
+
+  it('identity gaps: a guest on another record sharing a phone, a Gmail address, an @handle, or a maybe-match', () => {
+    const phone = w.db.prepare('SELECT key FROM identities WHERE id = ?').pluck().get(w.phone(ana)) as string;
+    seedIdentity(w.db, separateGuest('Guest One'), 'whatsapp_jid', `${phone.slice(1)}@s.whatsapp.net`);
+    // Gmail folds dots and +tags only on its own domain, so the synthetic addresses are assembled (lint:pii allows
+    // only reserved domains as literals).
+    const gmail = (local: string) => `${local}@${['gmail', 'com'].join('.')}`;
+    seedIdentity(w.db, fay, 'email', gmail('fay.fern'));
+    seedIdentity(w.db, separateGuest('Guest Two'), 'email', gmail('fayfern+parties'));
+    seedIdentity(w.db, dee, 'instagram_username', 'dee.dune');
+    seedIdentity(w.db, separateGuest('Guest Three'), 'beeper_user', 'opaque-3', { raw: '@Dee.Dune' });
+    const four = separateGuest('Guest Four');
+    const [a, b] = four < quinn ? [four, quinn] : [quinn, four];
+    w.db.prepare(`INSERT INTO match_candidates (a_id, b_id, score_bits, p, status, created_at, updated_at) VALUES (?, ?, 9, 0.8, 'pending', ?, ?)`).run(a, b, NOW, NOW);
+    const g = check();
+    expect([ana, fay, dee, quinn].map((p) => alreadyInvited(w.db, g, p))).toEqual([true, true, true, true]);
+    expect(alreadyInvited(w.db, g, pia)).toBe(false);
+    expect(halloweenPicks()).toEqual([pia]);
+    // The matcher (or the owner) said they're different people: no longer a reason.
+    w.db.prepare(`UPDATE match_candidates SET status = 'separate'`).run();
+    expect(alreadyInvited(w.db, check(), quinn)).toBe(false);
+  });
+
+  it('names: a guest with the same first + last name (nicknames too), SMS invitees, calendar invitee names', () => {
+    const smsInvite = (name: string) => w.db.prepare(`INSERT INTO partiful_guest_names (event_id, name, status, updated_at) VALUES (?, ?, 'invited', ?)`).run(halloween, name, NOW);
+    smsInvite('Ana Arbor'); // invited by text, no Partiful account
+    smsInvite('Pia'); // a first name alone is never enough
+    smsInvite('Fay Birch'); // same first name, another family
+    separateGuest('Quinn Quill'); // on Partiful under another record
+    const will = w.person('William', 'Wren', { tie: 60 });
+    smsInvite('Will Wren'); // a nickname of William
+    const g = check();
+    expect([ana, quinn, will].map((p) => alreadyInvited(w.db, g, p))).toEqual([true, true, true]);
+    expect([pia, fay, dee].map((p) => alreadyInvited(w.db, g, p))).toEqual([false, false, false]);
+    expect(halloweenPicks()).toEqual([pia, fay, dee]);
+    // A name the owner put on the calendar invite keeps Bo off the game night list.
+    const cal = w.db.prepare(`SELECT ce.id, ce.attendees FROM occasion_sources s JOIN calendar_events ce ON ce.id = s.source_ref WHERE s.occasion_id = ?`).get(gameNight) as { id: string; attendees: string };
+    const attendees = [...(JSON.parse(cal.attendees) as object[]), { email: 'bo.elsewhere@example.com', name: 'Bo Birch', self: false, organizer: false }];
+    w.db.prepare('UPDATE calendar_events SET attendees = ? WHERE id = ?').run(JSON.stringify(attendees), cal.id);
+    expect(partyInviteCandidates(w.db, NOW, TZ).find((c) => c.subjectKey === `occ:${gameNight}`)!.personIds).not.toContain(bo);
+  });
+
+  it('before the brief goes out: an item whose list went stale, or that names someone invited since, is dropped', async () => {
+    const r = await runSuggestionsStage(w.db, { now: NOW, seed: 3, generators: [partyInviteGenerator], wildcardSources: [] });
+    const item = (now: number) => readDigestSelection(w.db, { localDate: '2026-10-14', now })!;
+    const halloweenItem = (now: number) => item(now).items.find((i) => i.links.eventId === halloween && !i.links.occasionId);
+    expect(r.selectedIds.length).toBeGreaterThan(0);
+    expect(halloweenItem(NOW + 10 * 60_000)).toBeTruthy();
+    // 70 minutes after the last read (the refresh job didn't run, or failed): out.
+    expect(halloweenItem(NOW + 50 * 60_000)).toBeUndefined();
+    expect(item(NOW + 50 * 60_000).droppedStale).toBe(1);
+    // Read again, but Pia got invited between the ranking and the send: out.
+    listRead(halloween, NOW + 55 * 60_000);
+    expect(halloweenItem(NOW + 56 * 60_000)).toBeTruthy();
+    w.guest(halloween, pia, 'invited');
+    expect(halloweenItem(NOW + 56 * 60_000)).toBeUndefined();
+    expect(partyInviteStale(w.db, { occasionId: null, eventId: halloween, personIds: [quinn, ana] }, NOW + 56 * 60_000)).toBe(false);
   });
 });

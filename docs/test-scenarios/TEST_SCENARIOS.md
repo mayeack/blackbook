@@ -1085,6 +1085,149 @@ refused with `me_mismatch`.
 **Platforms**: server only. Verified against a read-only snapshot of the live DB: 3 records of mine, 0 stray
 handles, self detection ~10 ms. The production merge was done with the journaled path; the code itself is not deployed yet.
 
+## 2026-10-18 — Extraction enums: enforced by the grammar, and an out-of-set value costs one item, not the window
+Three backfill windows failed validation (`schema_invalid`) because one commitment had owner `"P66"` / `"P22"` or
+kind `"text"`: the SDK's `zodOutputFormat` moved every `enum` into a description, and one bad value failed the whole
+window. Each was re-sent whole (a paid retry) and applied on attempt 1; a second miss would have dead-lettered it. Now `outputFormat` (llm/caching.ts) puts the enums back into the grammar, and `parseExtraction`
+(extraction/schema.ts) drops only the item holding an out-of-set string (`dropped_<item>_bad_enum`).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1356 tests green. New tests:
+   `test/llm/outputSchemas.test.ts` "enums in the output format" (every zod enum reaches the grammar, $defs / oneOf /
+   nullable, no "{enum:" description left, pinned sizes still 58 / 29); `test/extraction/validate.test.ts`
+   "enums (parseExtraction)"; `test/extraction/parts.test.ts` "an obligations answer with a value outside an enum"
+   (owner "P66" → facts + the other commitment applied, `dropped_commitment_bad_enum: 1`; a missing key next to it
+   still fails the window).
+2. `npm run yb -- llm-smoke --live` (key from ~/Blackbook/.env): 11/11 schemas 200 on Haiku 5.5.
+3. One-off live probe (not committed): asked for owner "P66" / kind "text" with the obligations schema. SDK-only
+   format → 3/3 answers `P66` / `text`; with enums → 3/3 `ME` / `other`. Knowledge schema margin with enums: +16
+   extra fields 200, +17 400 (before: +16 200, +18 400).
+
+### Scenario B — After deploy (owner)
+**Setup**: merge, `git pull` + `scripts/service.sh restart` in ~/Blackbook. Extraction prompt version becomes
+`aa4ba557` (was `73a9fc73`); consolidation `2bed667a`, adjudication `cf134f0a`.
+1. After the next nightly collect, `yb run-job extract-collect` summary / `llm_batch_results`: no new
+   `dead_letter_schema_invalid` for enum values; any `dropped_*_bad_enum` count should be 0 (the grammar enforces them).
+2. `SELECT outcome, count(*) FROM extraction_items WHERE prompt_version = 'aa4ba557' GROUP BY 1` → `ok` dominates,
+   no `schema_invalid`.
+
+**Edge cases**: a missing key or a wrong type (number / null in an enum field) still fails the window (retry, then
+dead letter); a bad `needs_reply` enum drops only the verdict (no verdict, not `n_a`); two bad fields in one
+commitment count as one dropped item. The 3 windows hit on 2026-10-18 were retried and applied (live DB, attempt 1):
+nothing to recover.
+**Platforms**: server only. Not deployed.
+
+## 2026-10-18 — Extraction revive: schema_invalid dead letters under an older prompt get one more try
+`reviveDeadLetters` (extraction/run.ts, was `reviveInvalidRequests`) now also sends back to pending a window whose
+last item was dead-lettered as `schema_invalid` under an older extraction prompt version (as an out-of-enum value
+did before enums were enforced), once per version, at the nightly steady submit and at the backfill step while a
+backfill is running. Counts are per outcome: `revived_invalid_request`, `revived_schema_invalid`. A window at its last
+attempt (`MAX_ATTEMPTS`) is no longer revived (it was set straight back to dead_letter every night).
+
+**Live check (read-only, 2026-10-18 22:45 PDT):** the 3 historical windows that answered `schema_invalid` under
+`73a9fc73` were NOT dead-lettered: each was retried once (attempt 1) and applied. All 3,092 historical windows are
+`applied`, the backfill is `done`, and the only dead letters are the 111 steady `invalid_request` / `7e37e334`
+windows (all at attempt 0) that the existing revive picks up at the next 03:10 submit. So nothing is recovered by this
+change today; it is a safety net for later schema failures.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1,395 tests green. New tests in
+   `test/extraction/parts.test.ts` "windows whose answer failed the schema under an older prompt" (synthetic world):
+   a schema_invalid dead letter under `73a9fc73` is revived (`revived_schema_invalid: 1`), resent at attempt 2 under
+   the current version and applies; a revived window that fails again is dead at once (no second schema retry) and
+   is not revived the next night; one dead-lettered under the current version stays dead; one at its last attempt
+   stays dead; a consolidation item (person, no window) is never revived in either mode.
+2. Mutation check: narrowing the query back to `invalid_request` fails 2 of the new tests; dropping the attempt bound
+   fails 1.
+
+### Scenario B — After deploy (owner, with #69)
+1. After the first 03:10 extract-submit on the new version, the run summary shows `revived_invalid_request` for the
+   111 steady windows and no `revived_schema_invalid` (there are none today).
+2. `SELECT w.mode, i.outcome, i.prompt_version, count(*) FROM windows w JOIN extraction_items i ON i.custom_id =
+   w.last_custom_id WHERE w.status = 'dead_letter' GROUP BY 1, 2, 3` → only rows under the current version remain
+   after the next submit.
+
+**Edge cases**: historical windows are revived only while a backfill is `running` / `budget_exhausted`. After the
+backfill is `done` (as now), a historical dead letter is not picked up by any job. Every later prompt-version change
+gives old dead letters one more try (one window's cost each). Consolidation dead letters are never revived.
+**Platforms**: server only. Not deployed.
+
+## 2026-10-18 — Unambiguous names in Ask answers over iMessage and in log/note/screenshot acks
+
+**What changed**: two more places switch "First L." to first name + full last name when the short form reads the same
+as the owner's own (their Contacts card identity, card fields or merged records; the "Me" placeholder never counts)
+or as another person's in the same reply. Ask answers over iMessage (model answers, people lists one line per
+person, and the plain-search fallback): the longer form is applied locally when the answer is de-tokenized; the
+model still only ever sees tokens and "First L.". Command acks ("✓ Logged coffee with …", "✓ Noted for …",
+including a person from a profile screenshot), their journal titles and the "Undone: …" summary: the same rule
+against the owner and among the people the command names. Web Ask answers already show full names; everything else
+keeps "First L.".
+
+### Scenario A — Automated (Claude verified)
+1. From the repo root: `npm run typecheck && npx vitest run && npm run lint:pii`.
+2. `test/ask/names.test.ts`: `answerNames` default / owner collision / same-short pair; iMessage answers for each
+   case, the model's user turn carrying "Jess K." and never the full last name, a people list naming a same-short
+   pair in full on every line (details too), the web unchanged, and the plain-search fallback over iMessage naming
+   the owner-colliding person in full.
+3. `test/commands/names.test.ts`: `commandLabels` default / owner collision / same-short pair / display-name-only
+   person; a `log:` with an owner-colliding friend (ack, journal title, undo summary), a `log:` naming two "Sam R."s,
+   and either one alone back to "Sam R.".
+4. `test/commands/screenshot.test.ts`: a new person from a profile screenshot whose "First L." is the owner's own →
+   `✓ Noted for <full name> (new, from your screenshot).`, and the note / Party invites journal titles likewise.
+
+### Scenario B — Production after deploy (owner)
+1. Merge, `git pull` in `~/Blackbook`, `bash scripts/service.sh restart`.
+2. In your note-to-self thread, `log: coffee with <first name>` for a friend whose first name and last initial match
+   yours. **Expected**: `🅨 ✓ Logged coffee with <First> <full last name> today.`
+3. `log: dinner with <Friend A> and <Friend B>` for two friends with the same first name and last initial.
+   **Expected**: both named in full. `undo` → `✓ Undone: log for <both full names> (…)`.
+4. `? where does <that friend> work` over iMessage. **Expected**: the answer names them in full; ask about any other
+   friend and the answer reads "<First> <initial>.".
+5. `? who do I know in <a city where both same-initial friends live>`. **Expected**: one line per person, those two
+   in full.
+
+**Edge cases**: two friends with identical full names keep the full name; a friend with no last name stays the
+first name; clarification options ("Which Sam did you mean?") keep their own rule (full last name only when two
+options collide); the plain-search fallback may use the full name when a colliding person was found but cut from the
+text by the length cap.
+**Platforms**: server only. Not checked against live Haiku output or the production DB.
+
+## 2026-10-18 — "Who to invite" never suggests someone already invited (Partiful cross-check)
+
+Owner: "Always cross check who to suggest to invite against currently invited people on partiful, to ensure im not
+told to invite duplicates". Three gaps closed:
+1. **Freshness.** New job `partiful-hosted-guests` (every 30 min) re-reads the guest lists of Partiful events you host
+   in the next 15 days (read-only `getGuests`, same allowlist and rate gate; no hosted event → no calls). A party_invite
+   item for a Partiful event needs a complete read within the last hour; otherwise there is no item. Before the brief
+   sends (and on Today), an item whose list went stale or that now names someone on it is dropped.
+2. **Identity gaps.** Candidates sharing an identity with a guest on another record are left out: a phone inside a
+   WhatsApp id, Gmail addresses differing in dots or +tags, an @handle on a Beeper/Instagram record, the same Partiful
+   user, or an open "maybe the same person" match.
+3. **Name-only guests.** Candidates whose first + last name matches any name on the list (same last name; first names
+   in one nickname family like Will/William) are left out — including SMS invitees with no Partiful account, now kept
+   by name for events you host (migration **024 partiful_guest_names**), and names on the calendar invite.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root, all green.
+2. `test/adapters/partiful/ingest.test.ts` "partiful-hosted-guests" (only hosted lists in the next 15 days are read,
+   SMS invitees kept by name and forgotten when removed, a failed read is marked error, nothing hosted → no calls);
+   `test/intel/invites.test.ts` "never a duplicate invite" (stale / failed / partial / unread list → no item; phone,
+   Gmail, @handle and maybe-match gaps; names incl. nickname, SMS invitee and calendar name; single first names and
+   other families don't count; the brief drops a stale item or one naming someone invited after the ranking).
+
+### Scenario B — Live (owner, after deploy)
+**Setup**: a Partiful event you host 2–14 days out, Party invites people or close party-goers not on it yet.
+1. Next morning, note who "Who to invite to <event>" names. In Partiful, invite one of them (or text-invite them by
+   phone through Partiful) before 07:00 the next day. **Expected**: the next brief doesn't name them.
+2. Invite someone named in today's item between 07:16 and the brief's send time. **Expected**: within 30 minutes the
+   refresh job reads the list and the item is dropped from the brief / Today.
+3. Sign out of Partiful in the sandbox browser (the refresh fails). **Expected**: within an hour no "Who to invite"
+   item for the Partiful event appears; Sources shows Partiful needs a sign-in. Sign back in → items return.
+
+**Edge cases**: calendar-only hosted events (no Partiful) aren't gated on freshness; a guest named only "Sam" (no last
+name) doesn't block anyone; a matcher pair marked separate doesn't block.
+**Platforms**: server only. Not deployed; not run against the live Partiful API.
+
 ---
 
 ## Partiful guest records linked to your contacts ("two records for one person") (2026-10-18)

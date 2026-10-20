@@ -2,6 +2,8 @@
  * Scheduler jobs for Partiful (PLAN "Ingestion → Partiful", read-only function allowlist only):
  *   partiful           daily 02:00; a run missed while the Mac slept or the server was down runs on the next tick
  *   partiful-contacts  weekly, Sunday 03:30 (getContacts / getMutuals)
+ *   partiful-hosted-guests  every 30 min: guest lists of events I host in the next 15 days (no hosted event → no
+ *                      calls), so invite suggestions and the brief check against who is invited right now
  * The session comes from the sandbox browser over CDP and is kept encrypted in the secrets table (session.ts).
  * One auth manager and one rate gate (≤1 call/s) are shared by both jobs; each run gets its own 300-call budget.
  * A failed pass records source_health (auth_required → "Sign in to Partiful in the sandbox browser") and
@@ -9,9 +11,9 @@
  */
 import type { Dispatcher } from 'undici';
 import type { DB } from '../../db/connection';
-import { daily, weekly, type JobContext, type JobDef, type JobOutcome } from '../../scheduler/scheduler';
+import { daily, interval, weekly, type JobContext, type JobDef, type JobOutcome } from '../../scheduler/scheduler';
 import { DEFAULT_MAX_CALLS, DEFAULT_MIN_INTERVAL_MS, PartifulClient, RateGate } from './client';
-import { recordPartifulFailure, syncPartiful, syncPartifulContacts, type SyncLimits, type SyncResult } from './ingest';
+import { recordPartifulFailure, refreshHostedGuests, syncPartiful, syncPartifulContacts, type SyncLimits, type SyncResult } from './ingest';
 import { PartifulAuth, type CdpConnect } from './session';
 
 export interface PartifulJobDeps {
@@ -65,6 +67,13 @@ export function partifulJobs(deps: PartifulJobDeps): JobDef[] {
       leaseMs: 30 * 60_000,
       backoffBaseMs: 30 * 60_000,
       run: (ctx) => guarded(ctx, (client) => syncPartifulContacts(ctx.db, client, opts(ctx))),
+    },
+    {
+      name: 'partiful-hosted-guests',
+      schedule: interval(30 * 60_000),
+      leaseMs: 10 * 60_000,
+      backoffBaseMs: 15 * 60_000,
+      run: (ctx) => guarded(ctx, (client) => refreshHostedGuests(ctx.db, client, opts(ctx))),
     },
   ];
 }

@@ -1,19 +1,22 @@
 /**
  * A window read by two requests (knowledge + obligations) that still lives, fails and applies as one window; and the
- * one more try for windows the API refused as invalid under an older prompt (the one-request schema). Synthetic
- * world only (test/extraction/world.ts).
+ * one more try for windows dead-lettered under an older prompt: the API refused the one-request schema
+ * (invalid_request), or an out-of-enum value failed the whole answer before enums were enforced (schema_invalid).
+ * Synthetic world only (test/extraction/world.ts).
  */
 import { describe, expect, it } from 'vitest';
 import { joinBatchParts, isObligationsCustomId, mergedText, obligationsCustomId, windowCustomId } from '../../src/extraction/parts';
 import { EXTRACTION_PROMPT_VERSION } from '../../src/extraction/prompt';
-import { collect, submitSteady } from '../../src/extraction/run';
+import type { DB } from '../../src/db/connection';
+import { collect, MAX_ATTEMPTS, reviveDeadLetters, submitSteady, type Counts } from '../../src/extraction/run';
 import { EMPTY_OBLIGATIONS, Extraction } from '../../src/extraction/schema';
 import { needsObligations } from '../../src/extraction/validate';
 import type { LlmBatchResult } from '../../src/llm/types';
 import { ZERO_USAGE } from '../../src/llm/types';
+import type { FakeReply } from '../fakes/llm';
 import { DAY, HOUR, MIN, NOW, buildXWorld, deps, extraction, fact, fakes, lineOf, tokenOf, windowsOf } from './world';
 
-const count = (db: import('../../src/db/connection').DB, sql: string, ...p: unknown[]) => db.prepare(sql).pluck().get(...p) as number;
+const count = (db: DB, sql: string, ...p: unknown[]) => db.prepare(sql).pluck().get(...p) as number;
 
 const ok = (customId: string, json: unknown, stopReason: 'end_turn' | 'max_tokens' | 'refusal' = 'end_turn', refusalCategory: string | null = null): LlmBatchResult => ({
   customId,
@@ -81,8 +84,8 @@ function dmWorld() {
   const w = buildXWorld();
   const t0 = NOW - 6 * HOUR;
   const m1 = w.msg(w.dm, w.ids.sam, t0, 'big news, I took the job at Lumen Labs and I am moving to Denver on Nov 1');
-  w.msg(w.dm, null, t0 + 2 * MIN, 'whoa congrats!! we need to celebrate before you go');
-  return { w, m1 };
+  const m2 = w.msg(w.dm, null, t0 + 2 * MIN, 'whoa congrats!! we need to celebrate before you go');
+  return { w, m1, m2 };
 }
 
 async function submitted() {
@@ -120,6 +123,45 @@ describe('a window’s two requests in the pipeline', () => {
   });
 });
 
+describe('an obligations answer with a value outside an enum', () => {
+  const commitment = (P: string, msg: string, over: Record<string, unknown> = {}) => ({
+    owner: 'BOTH',
+    with: [P],
+    kind: 'meet',
+    what: 'celebrate before the move',
+    due: { kind: 'vague', start: null, end: null },
+    status: 'open',
+    closes: null,
+    ev: [{ msg, quote: 'we need to celebrate before you go' }],
+    conf: 0.85,
+    ...over,
+  });
+
+  it('owner "P66" (a person token) drops that commitment only: the window applies its facts and its other commitment', async () => {
+    const { w, f, win, P, L, m1, m2 } = await submitted();
+    f.llm.on(`extract:${win}`, { json: extraction({ facts: [fact(P, 'employer', 'Lumen Labs', [{ msg: L(m1), quote: 'I took the job at Lumen Labs' }], 0.92)] }) });
+    f.llm.on(`obligations:${win}`, { json: extraction({ commitments: [commitment(P, L(m2), { owner: 'P66' }), commitment(P, L(m2))] }) });
+    const rep = await collect(deps(w, f, NOW + 10 * MIN));
+    expect(rep.counts).toMatchObject({ applied: 1, factsAdded: 1, commitments: 1, dropped_commitment_bad_enum: 1 });
+    expect(Object.keys(rep.counts).filter((k) => /schema_invalid|dead_letter|requeued/.test(k))).toEqual([]);
+    expect(w.db.prepare('SELECT type, value FROM facts').all()).toEqual([{ type: 'employer', value: 'Lumen Labs' }]);
+    expect(w.db.prepare('SELECT person_id, owner, kind FROM commitments').all()).toEqual([{ person_id: w.sam, owner: 'both', kind: 'meet' }]);
+    expect(windowsOf(w.db, w.dm)[0]!.status).toBe('applied');
+    expect(count(w.db, `SELECT count(*) FROM extraction_items WHERE window_id = ? AND outcome = 'ok'`, win)).toBe(1);
+  });
+
+  it('a structural error in the same answer still fails the whole window (schema_invalid, retried)', async () => {
+    const { w, f, win, P, L, m1, m2 } = await submitted();
+    f.llm.on(`extract:${win}`, { json: extraction({ facts: [fact(P, 'employer', 'Lumen Labs', [{ msg: L(m1), quote: 'I took the job at Lumen Labs' }], 0.92)] }) });
+    const { kind: _, ...kindless } = commitment(P, L(m2));
+    f.llm.on(`obligations:${win}`, { json: extraction({ commitments: [commitment(P, L(m2), { owner: 'P66' }), kindless] }) });
+    const rep = await collect(deps(w, f, NOW + 10 * MIN));
+    expect(rep.counts).toMatchObject({ requeued_schema_invalid: 1 });
+    expect(rep.counts.applied).toBeUndefined();
+    expect(count(w.db, 'SELECT count(*) FROM facts')).toBe(0);
+  });
+});
+
 describe('windows the API refused under an older prompt', () => {
   async function deadLettered() {
     const { w, f, win } = await submitted();
@@ -146,5 +188,79 @@ describe('windows the API refused under an older prompt', () => {
     const rep = await submitSteady(deps(w, f, NOW + DAY));
     expect(rep.counts.revived_invalid_request).toBeUndefined();
     expect(windowsOf(w.db, w.dm)[0]!.status).toBe('dead_letter');
+  });
+});
+
+describe('windows whose answer failed the schema under an older prompt', () => {
+  const broken: FakeReply = { json: { facts: 'not a list' } };
+  const revivable = (db: DB) => {
+    const counts: Counts = {};
+    reviveDeadLetters(db, 'steady', NOW + DAY, counts);
+    return counts;
+  };
+
+  /** Fails the schema twice (retried once at once, then a dead letter), as under 73a9fc73 before enums were enforced. */
+  async function deadLettered(...then: FakeReply[]) {
+    const { w, f, win } = await submitted();
+    f.llm.on(`extract:${win}`, broken, broken, ...then);
+    await collect(deps(w, f, NOW + 10 * MIN));
+    const rep = await collect(deps(w, f, NOW + 20 * MIN));
+    expect(rep.counts).toMatchObject({ dead_letter_schema_invalid: 1 });
+    expect(windowsOf(w.db, w.dm)[0]!.status).toBe('dead_letter');
+    return { w, f, win };
+  }
+  const olderVersion = (db: DB, win: string) => db.prepare(`UPDATE extraction_items SET prompt_version = '73a9fc73' WHERE window_id = ?`).run(win);
+
+  it('go back to pending once, are sent under the current version at the next nightly submit and apply', async () => {
+    const { w, f, win } = await deadLettered({ json: extraction() });
+    olderVersion(w.db, win);
+    const rep = await submitSteady(deps(w, f, NOW + DAY));
+    expect(rep.counts).toMatchObject({ revived_schema_invalid: 1, submitted: 1 });
+    expect(rep.counts.revived_invalid_request).toBeUndefined();
+    const resent = f.llm.calls.filter((c) => c.method === 'batch').slice(-2);
+    for (const c of resent) expect(c.customId).toMatch(new RegExp(`^x${EXTRACTION_PROMPT_VERSION}-.*-2$`));
+    expect((await collect(deps(w, f, NOW + DAY + 10 * MIN))).counts.applied).toBe(1);
+    expect(windowsOf(w.db, w.dm)[0]!.status).toBe('applied');
+  });
+
+  it('a revived window that fails the schema again is dead at once and is not revived again under the same version', async () => {
+    const { w, f, win } = await deadLettered(broken);
+    olderVersion(w.db, win);
+    expect((await submitSteady(deps(w, f, NOW + DAY))).counts.revived_schema_invalid).toBe(1);
+    const rep = await collect(deps(w, f, NOW + DAY + 10 * MIN));
+    expect(rep.counts).toMatchObject({ dead_letter_schema_invalid: 1 });
+    expect(rep.counts.resubmitted).toBeUndefined(); // no second schema retry: it already had one
+    expect((await submitSteady(deps(w, f, NOW + 2 * DAY))).counts.revived_schema_invalid).toBeUndefined();
+    expect(windowsOf(w.db, w.dm)[0]!.status).toBe('dead_letter');
+  });
+
+  it('a window dead-lettered as schema_invalid under the current version stays dead', async () => {
+    const { w, f } = await deadLettered();
+    expect((await submitSteady(deps(w, f, NOW + DAY))).counts.revived_schema_invalid).toBeUndefined();
+    expect(windowsOf(w.db, w.dm)[0]!.status).toBe('dead_letter');
+  });
+
+  it('a window at its last attempt stays dead (it would only be dead-lettered again every night)', async () => {
+    const { w, win } = await deadLettered();
+    olderVersion(w.db, win);
+    w.db.prepare(`UPDATE extraction_items SET attempt = ? WHERE custom_id = (SELECT last_custom_id FROM windows WHERE id = ?)`).run(MAX_ATTEMPTS, win);
+    expect(revivable(w.db)).toEqual({});
+    expect(windowsOf(w.db, w.dm)[0]!.status).toBe('dead_letter');
+  });
+
+  it('consolidation items (a person, no window) are never revived', async () => {
+    const { w } = await submitted();
+    w.db
+      .prepare(
+        `INSERT INTO extraction_items (custom_id, kind, person_id, attempt, max_tokens, prompt_version, status, outcome, created_at, updated_at)
+         VALUES ('c52f2dc1b-person-1', 'consolidate', ?, 1, 4000, '52f2dc1b', 'dead_letter', 'schema_invalid', ?, ?)`,
+      )
+      .run(w.sam, NOW, NOW);
+    for (const mode of ['steady', 'historical'] as const) {
+      const counts: Counts = {};
+      reviveDeadLetters(w.db, mode, NOW + DAY, counts);
+      expect(counts).toEqual({});
+    }
+    expect(w.db.prepare(`SELECT status, outcome FROM extraction_items WHERE kind = 'consolidate'`).all()).toEqual([{ status: 'dead_letter', outcome: 'schema_invalid' }]);
   });
 });

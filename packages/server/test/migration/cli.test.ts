@@ -31,7 +31,9 @@ describe('yb migrate-legacy', () => {
     const text = e.lines.join('\n');
     expect(text).toMatch(/DRY RUN/);
     expect(text).toMatch(/idempotency: second pass inserted 0 row/);
-    for (const s of ['Rivera', 'Jordan', '555', 'example.com']) expect(text).not.toContain(s);
+    // The snapshot folder is named by the wall clock ("legacy-20261019T055536Z"), so its path can read "555" by chance.
+    const counts = text.replace(/^snapshot: .*$/m, 'snapshot: <path>');
+    for (const s of ['Rivera', 'Jordan', '555', 'example.com']) expect(counts).not.toContain(s);
     expect(fs.existsSync(e.paths.lockPath)).toBe(false);
     expect(fs.readdirSync(path.join(e.paths.dataDir, 'imports'))).toHaveLength(1);
     expect(fs.existsSync(e.paths.dbPath)).toBe(false); // no database yet → dry run used an in-memory one
