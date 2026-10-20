@@ -14,6 +14,7 @@ const SORTS: { value: PeopleSort; label: string }[] = [
   { value: 'last', label: 'Last name' },
   { value: 'recent', label: 'Recent' },
   { value: 'added', label: 'Added' },
+  { value: 'close', label: 'Closest' },
 ];
 const isSort = (s: string | null): s is PeopleSort => SORTS.some((x) => x.value === s);
 
@@ -53,6 +54,9 @@ function PersonRow({ p, sort }: { p: PersonListItem; sort: PeopleSort }) {
       trailing={
         <>
           <SourceBadges sources={p.sources} max={2} />
+          <span className="closeness-score" title={`Closeness ${p.closeness} of 10 (1 acquaintance, 10 closest)`} aria-label={`Closeness ${p.closeness} of 10`}>
+            {p.closeness}
+          </span>
           {p.state && <span className={`state-dot ${p.state}`} title={stateLabel(p.state)} aria-label={stateLabel(p.state)} />}
         </>
       }

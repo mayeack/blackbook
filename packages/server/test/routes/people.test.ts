@@ -132,6 +132,29 @@ describe('GET /api/v1/people', () => {
     const added = await get<PeoplePage>('/api/v1/people?sort=added');
     expect(added.items.map((p) => p.id)).toEqual([w.provisional, w.cher, w.zed, w.emile, w.bea, w.alice]);
   });
+
+  it('scores everyone 1–10 and sorts closest first (most recent contact, then name, within a score)', async () => {
+    const stat = w.db.prepare('INSERT INTO person_stats (person_id, last_at, tie_strength, historical_strength, state, computed_at) VALUES (?, ?, ?, ?, ?, ?)');
+    stat.run(w.zed, T0 + 9 * DAY, 85, 90, 'strong', T0); // 10
+    stat.run(w.bea, T0 + 5 * DAY, 3, 70, 'dormant', T0); // an old friend gone quiet: H/2 = 35 → 6
+    stat.run(w.emile, T0 + 2 * DAY, 41, 30, 'steady', T0); // 7
+    stat.run(w.hidden, T0 + 20 * DAY, 99, 99, 'strong', T0);
+    const close = await get<PeoplePage>('/api/v1/people?sort=close');
+    expect(close.items.map((p) => [p.id, p.closeness])).toEqual([
+      [w.zed, 10],
+      [w.emile, 7],
+      [w.bea, 6],
+      [w.alice, 2],
+      [w.provisional, 2],
+      [w.cher, 2],
+    ]);
+    expectNoHidden(close);
+    const page1 = await get<PeoplePage>('/api/v1/people?sort=close&limit=2');
+    const page2 = await get<PeoplePage>(`/api/v1/people?sort=close&limit=2&cursor=${page1.nextCursor}`);
+    expect([...page1.items, ...page2.items].map((p) => p.id)).toEqual([w.zed, w.emile, w.bea, w.alice]);
+    expect((await get<PersonDetail>(`/api/v1/people/${w.bea}`)).closeness).toBe(6);
+    expect((await get<PersonDetail>(`/api/v1/people/${w.cher}`)).closeness).toBe(2);
+  });
 });
 
 describe('GET /api/v1/people/:id', () => {

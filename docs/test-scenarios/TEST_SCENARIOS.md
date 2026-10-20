@@ -1260,3 +1260,38 @@ apart for good) and counts against the nightly merge cap (25).
 still treats a matching guest name as already invited); a hidden or priority person is never absorbed; with more than
 25 eligible links, the rest follow on later nights.
 **Platforms**: server only. Not deployed.
+
+## 2026-10-18 — Closeness 1–10 instead of shown vs. background
+
+Every person now has a closeness score from 1 (acquaintance) to 10 (closest), computed from the nightly tie numbers:
+1 = the background (seen only: a guest-list or group-roster name — the old "roster-only" — plus hidden, merged and
+service rows), never shown or suggested; shown people get 2–10 from max(T, H/2) (10 ≥ 80, 9 ≥ 65, 8 ≥ 50, 7 ≥ 40,
+6 ≥ 30, 5 ≥ 22, 4 ≥ 15, 3 ≥ 7, else 2). The person page shows "7/10" next to the state, People rows show the number
+and People has a **Closest** sort. Rules follow it (party-invite regulars need 7+), with the owner's own asks as
+exceptions: priority people skip the minimum, and someone named in a text command (a screenshot) is brought out of
+the background at once (journaled; `undo` reverts it).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1454 tests pass.
+2. `test/pipeline/ties/closeness.test.ts` (mapping, background = 1, merged ids, exceptions), `test/routes/people.test.ts`
+   (scores on rows and the person, Closest sort + paging), `test/intel/invites.test.ts` (7+ for regulars, priority
+   exempt), `test/commands/screenshot.test.ts` (roster-only / new / suppressed person named by screenshot → shown),
+   `packages/web/test/person-logic.test.ts` (labels).
+
+### Scenario B — Web (owner, after deploy)
+1. yeackbot.com → People → sort **Closest**. **Expected**: your closest people at the top with 10, 9, …; most of the
+   list at 2–4; each row shows its number left of the state dot.
+2. Open a close friend. **Expected**: the header line reads e.g. "● Strong 9/10 · usually every ~4d · last 2d ago";
+   hovering the ring says "Strong · closeness 9 of 10".
+3. Open someone you used to talk to a lot but haven't in months. **Expected**: a middle score (e.g. 6/10), not 2.
+
+### Scenario C — Exceptions
+1. Text `yb prioritize inviting this person to parties` with an Instagram screenshot of someone yeackbot has only seen
+   on a guest list. **Expected**: they show up in People (New), with closeness 2+, and can be suggested in "Who to
+   invite"; `undo` puts them back in the background.
+2. Mark a party-goer with a low score (under 7) as priority. **Expected**: the next "Who to invite" for a party you
+   host can include them.
+
+**Edge cases**: a person with no stats yet shows 2/10; hidden people never appear in any sort; an old Closest-sort
+cursor from before the deploy still pages (closeness optional in the cursor).
+**Platforms**: server + web. Not visually checked in a browser; not deployed.

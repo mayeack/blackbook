@@ -67,7 +67,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     const ident = w.db.prepare(`SELECT id, person_id, raw, source, status FROM identities WHERE kind = 'instagram_username' AND key = 'yb.eval.rowan'`).get() as Record<string, string>;
     expect(ident).toMatchObject({ raw: '@yb.eval.rowan', source: 'screenshot', status: 'active' });
     const person = ident.person_id!;
-    expect(w.db.prepare('SELECT display_name, status, origin FROM people WHERE id = ?').get(person)).toEqual({ display_name: 'Rowan Testperson', status: 'roster_only', origin: 'screenshot' });
+    expect(w.db.prepare('SELECT display_name, status, origin FROM people WHERE id = ?').get(person)).toEqual({ display_name: 'Rowan Testperson', status: 'provisional', origin: 'screenshot' }); // asked for by name: shown
     expect(w.db.prepare('SELECT type, value, source, status FROM facts WHERE person_id = ?').get(person)).toEqual({ type: 'activity_pref', value: 'great DJ', source: 'user_log', status: 'confirmed' });
     expect(w.db.prepare('SELECT content FROM notes WHERE person_id = ?').pluck().get(person)).toBe(TEXT.replace(/^Yb /, ''));
     expect(w.db.prepare('SELECT count(*) FROM interactions').pluck().get()).toBe(0); // a preference is not a meeting
@@ -80,6 +80,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     const batches = w.db.prepare(`SELECT kind, actor FROM change_batches ORDER BY rowid`).all();
     expect(batches).toEqual([
       { kind: 'create_person', actor: 'user' },
+      { kind: 'person_update', actor: 'user' },
       { kind: 'text_log', actor: 'user' },
       { kind: 'circle', actor: 'user' },
     ]);
@@ -228,9 +229,20 @@ describe('resolveScreenshotPerson', () => {
       `INSERT INTO identities (id, person_id, kind, key, raw, source, match_method, confidence, status, created_at, updated_at)
        VALUES ('i1', ?, 'beeper_user', 'opaque-1', '@Yb.Eval.Rowan', 'beeper', 'deterministic', 1, 'active', ?, ?)`,
     ).run(p, T0, T0);
-    const r = resolveScreenshotPerson(ctx(db), { handle: 'yb.eval.rowan', name: null }, []);
+    const c = ctx(db);
+    const r = resolveScreenshotPerson(c, { handle: 'yb.eval.rowan', name: null }, []);
     expect(r).toEqual({ ok: true, personId: p, created: false });
-    expect(db.prepare('SELECT status FROM people WHERE id = ?').pluck().get(p)).toBe('roster_only');
+    expect(db.prepare('SELECT status FROM people WHERE id = ?').pluck().get(p)).toBe('provisional');
+
+    // Someone only seen so far (roster-only, closeness 1) whom the owner now names by text is brought forward.
+    const seen = seedPerson(db, { display_name: 'Sky Example', first_name: 'Sky', last_name: 'Example', status: 'roster_only' });
+    db.prepare(
+      `INSERT INTO identities (id, person_id, kind, key, raw, source, match_method, confidence, status, created_at, updated_at)
+       VALUES ('i3', ?, 'instagram_username', 'sky.example', '@sky.example', 'partiful', 'deterministic', 1, 'active', ?, ?)`,
+    ).run(seen, T0, T0);
+    expect(resolveScreenshotPerson(c, { handle: 'sky.example', name: null }, [])).toEqual({ ok: true, personId: seen, created: false });
+    expect(db.prepare('SELECT status FROM people WHERE id = ?').pluck().get(seen)).toBe('provisional');
+    expect(db.prepare(`SELECT title FROM change_batches WHERE subject_person_id = ? AND kind = 'person_update'`).pluck().get(seen)).toBe('Showing Sky Example (you asked about them by text)');
 
     const svc = seedPerson(db, { display_name: 'Club Promo', status: 'service', kind: 'business' });
     db.prepare(

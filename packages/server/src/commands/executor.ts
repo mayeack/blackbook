@@ -14,7 +14,7 @@
  *      the command's screenshots when Settings allow), deterministic fallback; item verbs through THE suggestion
  *      feedback entry point; `log:` writes a journaled note + interaction (+ facts from the parser); add_fact and
  *      set_preference write notes + facts, and "prioritize inviting X to parties" puts X in the Party invites circle;
- *      "this person" in a screenshot is matched by Instagram username or added as a roster-only person; `?` asks
+ *      "this person" in a screenshot is matched by Instagram username or added (and shown: you asked); `?` asks
  *      the shared Ask engine; `undo` reverts the last acknowledged command's effect only (no cascade);
  *   7. one reply per command, "🅨 ✓ …", to self only (OutboundSender), quiet hours don't apply; the clientRef is
  *      derived from the command id, so a retry never texts twice.
@@ -492,7 +492,7 @@ class CommandRun {
     return { db: this.db, runId: () => this.ensureRun(), now: this.now, source: 'screenshot', actor: 'user' };
   }
 
-  /** Anyone, visible or not (a roster-only screenshot person; a person picked in a clarification). */
+  /** Anyone, visible or not (a person the screenshot added or brought forward; a person picked in a clarification). */
   private personFor(personId: string): PersonLite | null {
     const known = this.loadPeopleOnce().find((p) => p.id === personId);
     if (known) return known;

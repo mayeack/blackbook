@@ -41,6 +41,8 @@ export const TieStats = z.object({
   label: z.string().nullable(),
   tieStrength: z.number().nullable(),
   historicalStrength: z.number().nullable(),
+  /** 1–10, acquaintance → closest (server pipeline/ties/closeness.ts); a shown person is at least 2. */
+  closeness: z.number().int().min(1).max(10),
   expectedGapD: z.number().nullable(),
   silenceD: z.number().nullable(),
   fadingRatio: z.number().nullable(),

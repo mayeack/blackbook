@@ -6,7 +6,7 @@
  */
 export type { ActivityBatch, ActivityPage, ActivityRun, Me, UndoResult } from '@yb/shared';
 
-export type PeopleSort = 'last' | 'recent' | 'added';
+export type PeopleSort = 'last' | 'recent' | 'added' | 'close';
 /** 'provisional': a new handle not yet confirmed as someone known ("New people"). */
 export type PersonStatus = 'active' | 'provisional';
 
@@ -22,6 +22,8 @@ export interface PersonListItem {
   isPriority: boolean;
   lastAt: number | null;
   state: string | null;
+  /** 1–10, acquaintance → closest. */
+  closeness: number;
   sources: string[];
   createdAt: number;
 }
@@ -65,6 +67,8 @@ export interface PersonDetail {
   updatedAt: number;
   locations: string[];
   tags: string[];
+  /** 1–10, acquaintance → closest. */
+  closeness: number;
   stats: {
     lastAt: number | null;
     state: string | null;

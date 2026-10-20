@@ -4,9 +4,11 @@
  *   1. a username → the identity keyed by it (instagram_username), or any Instagram/Beeper identity whose raw value
  *      is that @handle → its person (canonical); a suppressed person (an undone earlier add) is revived;
  *   2. no username → a unique visible person whose first + last name equal the display name;
- *   3. a username nobody has → a new roster_only person with that instagram_username identity, through
- *      identity/external.ts (one journaled create_person batch in the command's run, so `undo` suppresses it). The
- *      matcher can merge it with a contact later like any other new identity.
+ *   3. a username nobody has → a new person with that instagram_username identity, through identity/external.ts (one
+ *      journaled create_person batch in the command's run, so `undo` suppresses it). The matcher can merge it with a
+ *      contact later like any other new identity.
+ * Whoever it resolves to is someone the owner asked about by name, so a person in the background (roster-only:
+ * closeness 1, never shown) is brought forward as provisional — shown and suggestable — in the same run.
  * Nothing here logs names or handles.
  */
 import { normalizeNamePart } from '@yb/shared';
@@ -30,6 +32,17 @@ interface PersonRow {
 
 const personRow = (ctx: ResolveContext, id: string) =>
   ctx.db.prepare('SELECT id, display_name, kind, status FROM people WHERE id = ?').get(id) as PersonRow | undefined;
+
+/** You asked about them by text: out of the background (closeness ≥ 2), journaled in the command's run. */
+function bringForward(ctx: ResolveContext, p: PersonRow): void {
+  if (p.status !== 'roster_only') return;
+  withBatch(
+    ctx.db,
+    { runId: ctx.runId(), kind: 'person_update', title: `Showing ${p.display_name} (you asked about them by text)`, subjectPersonId: p.id, actor: ctx.actor ?? 'user' },
+    (t) => t.update('people', { id: p.id }, { status: 'provisional' }),
+    { now: ctx.now },
+  );
+}
 
 const nameKey = (s: string): string =>
   s
@@ -69,10 +82,10 @@ export function resolveScreenshotPerson(ctx: ResolveContext, profile: ImageProfi
         withBatch(
           ctx.db,
           { runId: ctx.runId(), kind: 'person_update', title: `Brought back ${p.display_name} (screenshot)`, subjectPersonId: p.id, actor: ctx.actor ?? 'user' },
-          (t) => t.update('people', { id: p.id }, { status: 'roster_only' }),
+          (t) => t.update('people', { id: p.id }, { status: 'provisional' }),
           { now: ctx.now },
         );
-      }
+      } else bringForward(ctx, p);
       return { ok: true, personId: p.id, created: false };
     }
     const identityId = attachExternalIdentity(ctx, {
@@ -87,6 +100,7 @@ export function resolveScreenshotPerson(ctx: ResolveContext, profile: ImageProfi
     const p = personId ? personRow(ctx, canonicalId(ctx.db, personId)) : undefined;
     if (!p) return { ok: false, reason: 'unreadable' };
     if (p.status === 'service') return { ok: false, reason: 'service' };
+    bringForward(ctx, p);
     return { ok: true, personId: p.id, created: true };
   }
   const named = profile.name ? byName(profile.name, people) : null;

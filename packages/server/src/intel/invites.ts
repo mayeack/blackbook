@@ -4,8 +4,9 @@
  *
  *   1. people in the Party invites circle (the owner asked by text: "prioritize inviting Sam to parties"), the
  *      strongest tie first;
- *   2. then strong ties (T ≥ 40) who often come to parties: ≥ 2 social happenings with the owner in the last year,
- *      or one he hosted — ranked 0.6·T/100 + 0.4·min(1, parties/4) + 0.1 if they came to one he hosted.
+ *   2. then close people (closeness ≥ 7 of 10; a priority person whatever their closeness) who often come to parties:
+ *      ≥ 2 social happenings with the owner in the last year, or one he hosted — ranked 0.6·T/100 + 0.4·min(1,
+ *      parties/4) + 0.1 if they came to one he hosted.
  *
  * Hosted = a Partiful event where he is host / co-host (my_role), or an active social calendar occasion he
  * organizes: a calendar copy he is the organizer of, not someone else's ("Sam's birthday", "drinks at Sam's"), whose
@@ -32,6 +33,7 @@ import { selfPeople } from '../identity/self';
 import { preferredPeople } from '../pipeline/circles/preferences';
 import { occasionChain } from '../pipeline/occasions/build';
 import { personState } from '../pipeline/suggestions/learner';
+import { closenessScore, meetsCloseness } from '../pipeline/ties/closeness';
 import type { Candidate } from '../pipeline/suggestions/types';
 import { DAY, addDays, attendedEvents, dayStart, daysBetween, knownAttendees, localDate, statsOf, type SocialEvent } from './common';
 
@@ -40,8 +42,8 @@ export const INVITE = {
   minDaysOut: 2,
   maxDaysOut: 14,
   maxPeople: 5,
-  /** Strong tie for the second group. */
-  minTie: 40,
+  /** Closeness (1–10, pipeline/ties/closeness.ts) for the second group; priority people are exempt. */
+  minCloseness: 7,
   /** "Often comes to parties": counted at this many of the owner's social happenings in the lookback (or one he hosted). */
   minParties: 2,
   lookbackDays: 365,
@@ -369,7 +371,7 @@ export interface InvitePick {
   parties: number;
 }
 
-/** Ranks invitees for one hosted event (Party invites first, then party-going strong ties), at most `limit`. */
+/** Ranks invitees for one hosted event (Party invites first, then close party-goers), at most `limit`. */
 export function invitePicks(
   db: DB,
   e: Pick<SocialEvent, 'type' | 'id' | 'eventId'>,
@@ -388,11 +390,16 @@ export function invitePicks(
     .map((id) => ({ personId: id, reason: 'party_invites' as const, tie: tieOf(id), parties: o.records.get(id)?.parties ?? 0 }))
     .sort((a, b) => (b.tie ?? -1) - (a.tie ?? -1) || b.parties - a.parties || (a.personId < b.personId ? -1 : 1));
   const score = (tie: number, r: PartyRecord) => 0.6 * (tie / 100) + 0.4 * Math.min(1, r.parties / 4) + (r.hosted > 0 ? 0.1 : 0);
+  const priority = db.prepare('SELECT is_priority FROM people WHERE id = ?').pluck();
+  const closeEnough = (id: string) => {
+    const s = statsOf(db, id);
+    return meetsCloseness(closenessScore({ tie: s.tie, historical: s.historical, shown: true }), INVITE.minCloseness, { priority: priority.get(id) === 1 });
+  };
   const regulars = [...o.records.entries()]
     .filter(([id, r]) => !o.preferred.has(id) && visible.has(id) && (r.parties >= INVITE.minParties || r.hosted > 0))
-    .map(([id, r]) => ({ id, r, tie: tieOf(id) }))
-    .filter((x) => x.tie !== null && x.tie >= INVITE.minTie && ok(x.id))
-    .sort((a, b) => score(b.tie!, b.r) - score(a.tie!, a.r) || (a.id < b.id ? -1 : 1))
+    .map(([id, r]) => ({ id, r, tie: tieOf(id) ?? 0 }))
+    .filter((x) => closeEnough(x.id) && ok(x.id))
+    .sort((a, b) => score(b.tie, b.r) - score(a.tie, a.r) || (a.id < b.id ? -1 : 1))
     .map((x): InvitePick => ({ personId: x.id, reason: 'party_regular', tie: x.tie, parties: x.r.parties }));
   return [...first, ...regulars].slice(0, o.limit ?? INVITE.maxPeople);
 }

@@ -22,7 +22,7 @@ export function personTab(params: URLSearchParams): PersonTab {
 const TIE_STATES = new Set<string>(['strong', 'steady', 'cooling', 'fading', 'dormant', 'new']);
 
 /** The base person's stats in TieStats form, for when /ties isn't available (no sparkline or reciprocity). */
-export function tiesFromPerson(p: Pick<PersonDetail, 'id' | 'stats'>): TieStats | null {
+export function tiesFromPerson(p: Pick<PersonDetail, 'id' | 'stats' | 'closeness'>): TieStats | null {
   const s = p.stats;
   if (!s) return null;
   const state = s.state && TIE_STATES.has(s.state) ? (s.state as TieState) : null;
@@ -32,6 +32,7 @@ export function tiesFromPerson(p: Pick<PersonDetail, 'id' | 'stats'>): TieStats 
     label: s.state ? stateLabel(s.state) : null,
     tieStrength: s.tieStrength,
     historicalStrength: null,
+    closeness: p.closeness,
     expectedGapD: s.expectedGapD,
     silenceD: s.silenceD,
     fadingRatio: null,
@@ -111,11 +112,13 @@ export const sparklinePoints = (points: readonly SparkPoint[], width: number, he
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-/** "Strong (T 72)" for the ring's accessible name. */
-export function ringLabel(t: Pick<TieStats, 'label' | 'tieStrength'> | null | undefined): string {
+/** "Closeness 7 of 10" (1 acquaintance … 10 closest). */
+export const closenessText = (c: number): string => `Closeness ${c} of 10`;
+
+/** "Strong · closeness 7 of 10" for the ring's accessible name. */
+export function ringLabel(t: Pick<TieStats, 'label' | 'tieStrength' | 'closeness'> | null | undefined): string {
   if (!t) return 'No tie strength yet';
-  const label = t.label ?? 'Tie strength';
-  return t.tieStrength == null ? label : `${label} · ${Math.round(t.tieStrength)} of 100`;
+  return t.label ? `${t.label} · ${closenessText(t.closeness).toLowerCase()}` : closenessText(t.closeness);
 }
 
 // ---------------------------------------------------------------------------------------------- open loops

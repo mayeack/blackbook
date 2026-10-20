@@ -3,6 +3,7 @@ import type { FactView } from '@yb/shared';
 import type { SessionItem } from '../src/api/types';
 import {
   cadenceLine,
+  closenessText,
   egoLayout,
   evidenceHref,
   evidenceLabel,
@@ -13,9 +14,11 @@ import {
   pairPath,
   personTab,
   ringDash,
+  ringLabel,
   sparklineCoords,
   sparklinePoints,
   stateColorVar,
+  tiesFromPerson,
 } from '../src/pages/person/logic';
 import { nextStep, parseLocateTarget, SCAN_BUDGET } from '../src/pages/person/locate';
 
@@ -190,5 +193,17 @@ describe('locating a cited message', () => {
     expect(nextStep({ messageId: 1, at: null }, { items, hasNextPage: false, pagesLoaded: 1, checked: new Set(['a', 'b']) })).toEqual({ kind: 'give_up' });
     const many = new Set(Array.from({ length: SCAN_BUDGET }, (_, i) => `x${i}`));
     expect(nextStep({ messageId: 1, at: null }, { items, hasNextPage: true, pagesLoaded: 1, checked: many })).toEqual({ kind: 'give_up' });
+  });
+});
+
+describe('closeness', () => {
+  it('labels the ring and header with the 1–10 score', () => {
+    expect(closenessText(7)).toBe('Closeness 7 of 10');
+    expect(ringLabel({ label: 'Strong', tieStrength: 82, closeness: 10 })).toBe('Strong · closeness 10 of 10');
+    expect(ringLabel({ label: null, tieStrength: null, closeness: 2 })).toBe('Closeness 2 of 10');
+    expect(ringLabel(null)).toBe('No tie strength yet');
+    const stats = { lastAt: null, state: 'steady', expectedGapD: 9, silenceD: 3, tieStrength: 45, fadingSuppressed: false };
+    expect(tiesFromPerson({ id: 'p1', closeness: 7, stats })?.closeness).toBe(7);
+    expect(tiesFromPerson({ id: 'p1', closeness: 2, stats: null })).toBeNull();
   });
 });

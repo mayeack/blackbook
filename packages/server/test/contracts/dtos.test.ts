@@ -211,6 +211,7 @@ describe('agent-loop DTO round-trips', () => {
       label: 'Fading',
       tieStrength: 34,
       historicalStrength: 71,
+      closeness: 6,
       expectedGapD: 9,
       silenceD: 41,
       fadingRatio: 4.5,
