@@ -1227,3 +1227,36 @@ told to invite duplicates". Three gaps closed:
 **Edge cases**: calendar-only hosted events (no Partiful) aren't gated on freshness; a guest named only "Sam" (no last
 name) doesn't block anyone; a matcher pair marked separate doesn't block.
 **Platforms**: server only. Not deployed; not run against the live Partiful API.
+
+---
+
+## Partiful guest records linked to your contacts ("two records for one person") (2026-10-18)
+
+**What changed**: a Partiful guest arrives as its own person (a `partiful_user` identity, usually roster-only). When only
+the name tied it to a contact, the matcher kept them apart (a name alone never merges), so the same friend showed up
+twice: in invite suggestions, briefs and on person pages. A new pass in the nightly matcher
+(`identity/partifulLink.ts`) merges the Partiful-only record into your contact when **all** hold: the full name
+(first + last, no initials) belongs to exactly one other person in the whole book and to no other Partiful record; the
+guest was on a Partiful event you hosted or went to; the contact is a real one (Contacts card, 1:1 conversation or a
+logged interaction); and the matcher's guards pass (not both on one guest list, no "not the same" / undo history,
+distinct Contacts cards). Your contact always survives. Each link is a journaled merge (undo splits it and keeps them
+apart for good) and counts against the nightly merge cap (25).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1417 tests, 911 files clean.
+2. `test/identity/partifulLink.test.ts`: link + survivor + evidence + undo/do_not_merge; ambiguous names; a stranger
+   contact, a declined event, a first name alone; same guest list (G2) and a dismissed pair; the nightly cap.
+3. Dry run on a copy of the live database (2026-10-18): 381 Partiful-only guests from your events with a full name →
+   24 linked (all into active contacts with a Contacts card), 19 left apart as ambiguous, 4 whose namesake isn't a
+   real contact.
+
+### Scenario B — After deploy (owner)
+1. The morning after the deploy, open yeackbot.com → Today's activity feed: up to 25 entries like "Merged <name> into
+   <name> (same full name, Partiful guest of yours)".
+2. Open one of those people: their Partiful events now appear on the contact you know.
+3. If one is wrong, undo it from the feed. **Expected**: the two split again and are never re-linked.
+
+**Edge cases**: two contacts with the same name, or a second Partiful record with it → no link (the invite cross-check
+still treats a matching guest name as already invited); a hidden or priority person is never absorbed; with more than
+25 eligible links, the rest follow on later nights.
+**Platforms**: server only. Not deployed.
