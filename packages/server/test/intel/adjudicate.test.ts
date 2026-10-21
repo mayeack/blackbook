@@ -14,7 +14,7 @@ import { createLlmClient } from '../../src/llm/client';
 import type { LlmClient } from '../../src/llm/types';
 import { FakeLlmClient } from '../fakes/llm';
 import { FakeAnthropic, reply, type BatchItemReply, type FakeMessage } from '../llm/fakeAnthropic';
-import { attendeesOf, buildWorld, DAY, HOUR, NOW, occasionOf, TZ, type World } from '../pipeline/occasions/world';
+import { attendeesOf, buildWorld, calEvent, DAY, evening, HOUR, NOW, occasionOf, TZ, type World } from '../pipeline/occasions/world';
 
 let w: World;
 let egress: Egress;
@@ -104,6 +104,16 @@ describe('submit', () => {
     }
   });
 
+  it("the packet lists the owner's other plans around the occasion and whether it is a recurring listing", async () => {
+    w.ev.karaoke = calEvent(w.db, { summary: 'Karaoke', start: evening(-7, 21), end: evening(-7, 23) });
+    runOccasions(w.db, { now: NOW, timeZone: TZ });
+    const llm = new FakeLlmClient();
+    await submit(llm, [occ('concert')]);
+    const text = batchCalls(llm)[0]!.userText;
+    expect(text).toContain('listing: no');
+    expect(text).toContain('### other plans\n- Karaoke · 2026-10-07 21:00 → 2026-10-07 23:00');
+  });
+
   it('the day-after re-run: an occasion adjudicated before its next-day messages could exist is queued again', () => {
     const trivia = occ('trivia');
     const ends = w.db.prepare('SELECT ends_at FROM occasions WHERE id = ?').pluck().get(trivia) as number;
@@ -161,6 +171,16 @@ describe('apply (the real client over a fake API)', () => {
       .get(row('dinner', w.tavi.id)!.id) as string;
     undoBatch(w.db, batch, { actor: 'user', now: LATER });
     expect(row('dinner', w.tavi.id)).toMatchObject({ source: 'calendar_text', confidence: 0.88 });
+  });
+
+  it('a message-only candidate below "possible" moves up one tier at most, whatever the verdict says', async () => {
+    w.ev.sorrel = calEvent(w.db, { summary: 'Dinner at Sorrel', start: evening(-30, 19), end: evening(-30, 21) });
+    w.quillB.dm.say(evening(-29, 10), w.quillB.phone, 'so good catching up');
+    runOccasions(w.db, { now: NOW, timeZone: TZ });
+    const { llm } = realLlm({ sorrel: () => msg(answer([{ who: w.quillB.id, confidence: 0.95 }])) });
+    await submit(llm, [occ('sorrel')]);
+    await collect(llm);
+    expect(row('sorrel', w.quillB.id)).toMatchObject({ status: 'possible', source: 'llm', confidence: 0.74 });
   });
 
   it('flags the effects for re-derivation when attendees changed', async () => {

@@ -236,6 +236,37 @@ export interface AttendeeView {
   tier: AttendeeTier;
 }
 
+/** GET /events/:id/clues/:personId — why yeackbot put someone at an event (routes/events.ts AttendeeClues). */
+export interface ClueMessage {
+  id: number;
+  sentAt: number;
+  fromMe: boolean;
+  sender: string | null;
+  where: 'dm' | 'group';
+  chat: string | null;
+  text: string | null;
+  attachment: boolean;
+}
+
+export interface Clue {
+  /** Signal type (signals.ts), or 'llm' for the adjudicator's verdict. */
+  type: string;
+  weight: number;
+  messages: ClueMessage[];
+  refTitle: string | null;
+}
+
+export interface AttendeeClues {
+  personId: string;
+  displayName: string;
+  status: string;
+  source: string;
+  confidence: number;
+  startsAt: number;
+  endsAt: number | null;
+  clues: Clue[];
+}
+
 export interface OccasionSummary {
   id: string;
   title: string | null;

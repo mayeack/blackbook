@@ -227,6 +227,32 @@ const ATTENDEE_ROLES: Record<string, string> = {
 };
 export const attendeeRoleLabel = (r: string) => ATTENDEE_ROLES[r] ?? humanize(r);
 
+/** What each attendee clue means (pipeline/occasions/signals.ts types), in the owner's words. */
+const CLUE_TYPES: Record<string, string> = {
+  explicit: 'On your calendar invite',
+  explicit_name: 'Named on your calendar invite',
+  title_name: 'Named in the event title',
+  notes_name: 'Named in the event notes',
+  pair_name: 'Named in the title',
+  ticket_holder: 'Has your ticket (from the notes)',
+  partiful_going: 'Going on Partiful',
+  partiful_maybe: 'Maybe on Partiful',
+  partiful_host: 'Hosting on Partiful',
+  group_nickname: 'In the group named in the title',
+  mention_dm: 'Texted you about it',
+  mention_group: 'Brought it up in a group chat',
+  group_discussed: 'In a small group chat that discussed it',
+  date_dm: 'Texted you about that day',
+  tickets_dm: 'Talked tickets with you',
+  logistics_dm: '“On my way / here” texts around the start',
+  logistics_group: '“On my way / here” in a group chat around the start',
+  after_dm: 'Texted you after it',
+  after_group: 'Wrote in a group chat after it',
+  photos_dm: 'Sent you photos during or after it',
+  llm: 'AI review of these messages',
+};
+export const clueLabel = (t: string) => CLUE_TYPES[t] ?? humanize(t);
+
 /** Where an attendee came from: the calendar invite, the Partiful guest list, or yeackbot's inference. */
 const ATTENDEE_SOURCES: Record<string, string> = {
   calendar: 'Calendar',

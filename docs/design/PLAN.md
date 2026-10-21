@@ -368,11 +368,19 @@ Logistics and work are excluded from relationship inference and digests. Medical
 
 Ticket count ("4 tickets") caps how many unnamed companions are assumed.
 
+**3b. A clue belongs to the plan it is about** (added 2026-10-21, `pipeline/occasions/plans.ts`; a "thank you for coming" after a friend's own show had put him at a wine tasting two nights earlier):
+- Time-based clues (omw/here, "great seeing you", photos, a date phrase or tickets talk for the day) are weighed against the owner's other plans that day (timed occasions, Partiful events he went to). They are dropped when another plan names the person (title words, invitees, Partiful guests), and shared (weight / (1 + n)) with plans that explain them as well (ended later, as near the message, same day). They count in full when this occasion names the person, when the person also wrote about this occasion, or when the message says the night ("thank you for last night"). A kind word ("brunch") gives the clue to the plan it names. A party the owner hosted shares only with other hosted ones.
+- A **standing listing** (one week of a recurring entry on a calendar other than the owner's own, e.g. an owned "Recurring Events" calendar; no invitees, no Partiful link) takes no names from its title, needs a message about it before timing clues count, and cedes a mention to the week nearest the message.
+- Title and venue tokens skip days, months, chat words and address parts, use the venue's name rather than its street address, and drop everyday words (in ≥ 0.1% of all messages, at least 50).
+- `yb eval attendance` grades this against confirmed attendance: every past Partiful event the owner went to with a complete guest list is re-run with the list held out. On 2026-10-21 live data: "possible" calls 152 → 36 (correct 15 → 9) and "attended" 25 → 5 (correct 6 → 3). Plus-ones and walk-ins count as wrong, so these precision figures are floors.
+
 **4. Deterministic scoring, then a nightly Haiku batch adjudication** (route `adjudicate`) for occasions with ≥1 candidate.
-- Pseudonymized packet in: title, venue, time, notes, and candidates with their evidence ids.
+- Pseudonymized packet in: title, venue, time, notes, whether it is a standing listing, the owner's other plans from 6 h before to 36 h after, and candidates with their evidence ids.
 - Out: `attendees[{ref, role: companion|host|guest|ticket_holder|mentioned_only, confidence, evidence_ids}]` plus `is_social` and `kind`.
 - **≥0.75**: attendee (counted in ties and edges). **0.5–0.75**: "possible" (shown, not counted).
+- The verdict raises a message-only candidate one tier at most: one the deterministic score kept below 0.5 can become "possible", never counted. The deterministic pass withdraws the adjudicator's rows for people who are no longer candidates.
 - Re-run the day after to pick up confirmations.
+- On the event page, hovering an attendee (or tapping **Clues**) shows each clue with the message behind it (`GET /events/:id/clues/:personId`, fetched on demand; the event detail itself carries no message text).
 
 **5. Effects:**
 - in-person interactions (1.5 units);

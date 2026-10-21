@@ -15,7 +15,7 @@ import { addDays, localDate, uuidv7 } from '@yb/shared';
 import { z } from 'zod';
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
-import type { CalendarTreatment } from './calendars';
+import { primaryCalendars, type CalendarTreatment } from './calendars';
 import { classifyOccasion, type Classification } from './classify';
 import { parseMentions, partifulIdFromUid, partifulIdsIn, plainText, reservationVenue, venueFromTitle, venueKey, ticketCount, words, type Mention } from './text';
 
@@ -70,6 +70,8 @@ export interface CalEvent {
   attendees: ExplicitAttendee[];
   /** On its own, this event classifies as social (a reservation next to it is the same evening). */
   social: boolean;
+  /** The recurring series it is an instance of, when that series is on a calendar other than the owner's own. */
+  series: string | null;
 }
 
 interface CalRow {
@@ -91,6 +93,7 @@ interface CalRow {
   self_response: string | null;
   start_date: string | null;
   end_date: string | null;
+  recurring_event_id: string | null;
 }
 
 const RESPONSE: Record<string, ExplicitAttendee['response']> = {
@@ -146,12 +149,14 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
       `SELECT id, calendar_id, ical_uid, status, summary, description, location, starts_at, ends_at, all_day, creator_email,
               attendees, html_link, partiful_event_id,
               coalesce(${col('event_type', 'NULL')}, CASE WHEN json_valid(raw) THEN json_extract(raw, '$.eventType') END) AS event_type,
-              ${col('self_response', 'NULL')} AS self_response, ${col('start_date', 'NULL')} AS start_date, ${col('end_date', 'NULL')} AS end_date
+              ${col('self_response', 'NULL')} AS self_response, ${col('start_date', 'NULL')} AS start_date, ${col('end_date', 'NULL')} AS end_date,
+              recurring_event_id
        FROM calendar_events
        WHERE starts_at IS NOT NULL AND starts_at BETWEEN ? AND ? AND status <> 'cancelled'
        ORDER BY starts_at, id`,
     )
     .all(from, to) as CalRow[];
+  const own = primaryCalendars(db);
   const out: CalEvent[] = [];
   for (const r of rows) {
     const treatment = treatments.get(r.calendar_id) ?? 'attending';
@@ -204,6 +209,7 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
       selfDeclined,
       attendees: list,
       social,
+      series: r.recurring_event_id && !own.has(r.calendar_id) ? `${r.calendar_id}|${r.recurring_event_id}` : null,
     });
   }
   return out;

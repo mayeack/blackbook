@@ -1330,3 +1330,44 @@ still detected, otherwise retired (undoable from Activity), unless the owner eve
 first names; an event-named circle you renamed, locked or edited is never touched; deleting an interest circle keeps it
 gone; candidate or sensitive interests never make a circle.
 **Platforms**: server + web copy. Web not visually checked; not deployed.
+
+## 2026-10-21 — Attendee clues on hover; clues weighed against the owner's other plans
+
+Hovering an attendee on an event page (or tapping **Clues**) shows why yeackbot listed them: each clue in plain words,
+its strength, and the message behind it with when it was sent relative to the event, plus the AI review's score. The
+deduction now weighs every time-based clue ("thanks for coming", "omw", photos, "tonight?") against the owner's other
+plans that day: a thank-you right after a friend's own show ("Spotlight for <friend>") no longer puts that friend at a
+wine tasting two nights earlier. Recurring listings (weekly entries on the "Recurring Events" calendar) need a message
+about that listing; venue addresses, day names and everyday words no longer count as "talked about it"; the AI review
+can lift a message-only candidate one tier at most; its rows for people who lost all their clues are withdrawn.
+`yb eval attendance` grades the clues against Partiful guest lists of past events (held out).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/pipeline/occasions/plans.test.ts`: thank-you after the friend's own show → no candidate on the listing and the
+   old AI row withdrawn; listing needs a message about it, lands on the nearest week; two plans share a vague
+   "great seeing you", a plan naming the person takes it; "last night" and "brunch" pick the right plan; no other
+   plans → unchanged; everyday words ("sunset") are no mention. 4 of these fail with the plans switched off.
+3. `test/intel/adjudicate.test.ts`: packet has `### other plans` and `listing:`; a 0.45 message-only candidate given
+   0.95 by the model is stored as possible at 0.74. `test/routes/events.test.ts`: clues endpoint (text only there,
+   excluded chats omitted, hidden person 404). `test/eval/attendance.test.ts`, `test/eval/cli.test.ts`.
+4. On a copy of live data: the Oct 1 wine-tasting listing has no attendee; `yb eval attendance` reports
+   possible 36 calls (9 confirmed) vs 152 (15) before, attended 5 (3) vs 25 (6).
+5. Browser (local copy, desktop + 375px): hover card on an event's inferred rows; tap opens it in the list; no horizontal
+   scroll; no console errors.
+
+### Scenario B — Web (owner, after deploy and the next 03:00 occasions run)
+1. yeackbot.com → Events → Past → the wine-tasting listing on Thu, Oct 1. **Expected**: the friend whose own show was the
+   next night is no longer listed.
+2. Open an event with inferred people (e.g. a brunch or dinner). Hover a person's row. **Expected**: a card "Why
+   <name> is listed" with each clue, the quoted message, "You · <date> · 2 h before it", and "AI review … % sure".
+3. On the iPhone, tap **Clues** on a row. **Expected**: the card opens under the row; tapping the row itself still
+   opens the person.
+4. Look at a few weekly "Recurring Events" listings (the jazz and comedy nights). **Expected**: few
+   or no people, and only people who texted about that listing.
+5. Terminal: `npm run yb -- eval attendance`. **Expected**: counts and rates only, no names or message text.
+
+**Edge cases**: a row with no clues has no Clues button; a Partiful-only guest shows "Going on Partiful"; an unsent
+message shows "Unsent message"; an excluded conversation's messages never appear; ties and co_attend edges drop for
+the withdrawn rows after the effects job runs.
+**Platforms**: server + web. Verified locally on a copy of live data; not deployed.
