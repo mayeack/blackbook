@@ -109,7 +109,7 @@ describe('person extras', () => {
     fact(ann, 'pet', 'a cat', { status: 'candidate' });
     const f = PersonFacts.parse((await get(`/people/${ann}/facts`)).body);
     expect(f.active.map((x) => x.value).sort()).toEqual(['Bouldering', 'something private']);
-    expect(f.history.map((x) => x.value)).toEqual(['Lisbon']);
+    expect(f.history.map((x) => x.value)).toEqual(['Lisbon, Portugal']);
     const b = f.active.find((x) => x.value === 'Bouldering')!;
     expect(b.evidence[0]).toMatchObject({ kind: 'message', ref: `m:${msg}`, href: `/p/${ann}?m=${msg}` });
     expect(b.evidence[0]!.quote).not.toContain('555-0199');
@@ -125,6 +125,35 @@ describe('person extras', () => {
     undoBatch(w.db, batchId!, { actor: 'user' });
     expect(w.db.prepare('SELECT status FROM facts WHERE id = ?').pluck().get(climbing)).toBe('confirmed');
     expect(w.db.prepare('SELECT count(*) FROM fact_blocks').pluck().get()).toBe(0);
+  });
+
+  it('facts: places show as place names; an inferred place that names none stays out, the owner’s own stays', async () => {
+    fact(ann, 'location_current', 'LA');
+    fact(ann, 'hometown', 'lives with you as roommate');
+    fact(ann, 'location_next', 'Bay Area', { status: 'invalidated', valid_to: NOW - DAY });
+    fact(ann, 'home_location', 'lives in Australia', { source: 'user_log' });
+    fact(ann, 'travel_plan', 'Lisbon trip');
+    const f = PersonFacts.parse((await get(`/people/${ann}/facts`)).body);
+    expect(f.active.map((x) => [x.type, x.value]).sort()).toEqual([
+      ['home_location', 'lives in Australia'],
+      ['location_current', 'Los Angeles, CA'],
+      ['travel_plan', 'Lisbon trip'],
+    ]);
+    expect(f.history).toEqual([]);
+  });
+
+  it('starters: a place reads as its city; an inferred place that names none gives no starter', async () => {
+    fact(ann, 'location_current', 'LA');
+    fact(ann, 'location_next', 'Brooklyn');
+    let s = Starters.parse((await get(`/people/${ann}/starters`)).body);
+    const texts = s.starters.map((x) => x.text);
+    expect(texts).toContain("Hey Ann, how's life in Los Angeles?");
+    expect(texts).toContain("Ann! How's the move to New York coming along?");
+    expect(s.starters.find((x) => /Los Angeles/.test(x.text))!.basis[0]).toMatchObject({ kind: 'fact', label: 'Los Angeles, CA' });
+    w.db.prepare(`DELETE FROM facts WHERE person_id = ?`).run(ann);
+    fact(ann, 'location_current', 'lives with you as roommate');
+    s = Starters.parse((await get(`/people/${ann}/starters`)).body);
+    expect(s.starters.some((x) => /life in/.test(x.text))).toBe(false);
   });
 
   it('loops: a person’s open loops and everyone’s; an action is journaled', async () => {

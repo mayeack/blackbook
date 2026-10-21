@@ -98,7 +98,7 @@ describe('Ask over iMessage', () => {
     expect((await t.ask('Who climbs?', 'web')).answer).toBe('Sam Rivera and Sam Reyes both climb.');
     const degraded = await t.ask('who do I know in Austin');
     expect(degraded.degraded).toBe(true);
-    expect(degraded.answer).toMatch(/^- Jess Kim — East Austin/m);
+    expect(degraded.answer).toMatch(/^- Jess Kim — Austin, TX/m);
     expect(degraded.answer).toMatch(/^- Sam R\. — Austin/m);
   });
 });

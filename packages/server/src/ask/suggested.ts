@@ -3,6 +3,7 @@
  * city and interest among visible people). Never a person's name.
  */
 import type { DB } from '../db/connection';
+import { placeName } from '../intel/placeNames';
 
 const usable = (s: string | null | undefined): string | null => {
   const v = s?.replace(/\s+/g, ' ').trim();
@@ -24,8 +25,28 @@ function topValue(db: DB, types: string[], now: number): string | null {
   return null;
 }
 
+/** The city most visible people live in, by place name ("LA" and "Los Angeles, CA" are one city). */
+function topCity(db: DB, now: number): string | null {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT f.value, coalesce(pc.canonical_id, f.person_id) AS pid
+       FROM facts f LEFT JOIN person_canon pc ON pc.person_id = f.person_id
+       JOIN person_visible pv ON pv.id = coalesce(pc.canonical_id, f.person_id)
+       WHERE f.type IN ('location_current','home_location') AND f.status IN ('tentative','confirmed') AND f.sensitive = 0
+         AND f.retracted_at IS NULL AND f.superseded_at IS NULL AND (f.valid_to IS NULL OR f.valid_to >= ?)`,
+    )
+    .all(now) as { value: string; pid: string }[];
+  const people = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const city = placeName(r.value)?.city;
+    if (city) people.set(city, (people.get(city) ?? new Set()).add(r.pid));
+  }
+  const [top] = [...people].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]));
+  return top && top[1].size >= 2 ? usable(top[0]) : null;
+}
+
 export function suggestedPrompts(db: DB, now = Date.now()): string[] {
-  const city = topValue(db, ['location_current', 'home_location'], now);
+  const city = topCity(db, now);
   const interest = topValue(db, ['interest', 'activity_pref'], now);
   return [
     city ? `Who do I know in ${city}?` : 'Who are my closest friends right now?',

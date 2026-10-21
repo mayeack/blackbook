@@ -66,6 +66,7 @@ import {
 import type { DB } from '../db/connection';
 import { badRequest, HttpError, notFound } from '../http/errors';
 import { metAtLinksForPerson, targetKeys as metTargetKeys, rejectMetAtLinks } from '../intel/metAt/store';
+import { isPlaceFactType, placeFactValue, placeName } from '../intel/placeNames';
 import { withBatch, type JournalTx } from '../journal/batch';
 import { withRun } from '../journal/runs';
 import { undoBatch } from '../journal/undo';
@@ -209,7 +210,7 @@ export function personFacts(db: DB, id: string, now = Date.now()): PersonFacts {
   const view = (f: FactRow): FactView => ({
     id: f.id,
     type: f.type,
-    value: maskText(f.value),
+    value: maskText(placeFactValue(f.type, f.value)),
     status: f.status,
     sensitive: f.sensitive === 1,
     confidence: f.confidence,
@@ -221,8 +222,11 @@ export function personFacts(db: DB, id: string, now = Date.now()): PersonFacts {
     source: f.source,
     evidence: messageEvidence(db, 'fact', f.id, p.id, f.sensitive === 1, tz, now),
   });
-  const active = rows.filter((f) => isCurrent(f, now));
-  const history = rows.filter((f) => !isCurrent(f, now)).slice(0, 50);
+  // Places are place names only: an inferred place fact that names no place ("lives with you", "Bay Area") stays out
+  // even before places-tidy closes it; what the owner entered shows as written when it names none.
+  const shown = rows.filter((f) => !(isPlaceFactType(f.type) && f.source === 'llm' && !placeName(f.value)));
+  const active = shown.filter((f) => isCurrent(f, now));
+  const history = shown.filter((f) => !isCurrent(f, now)).slice(0, 50);
   return {
     active: active.sort((a, b) => (a.type < b.type ? -1 : a.type > b.type ? 1 : b.confidence - a.confidence)).map(view),
     history: history.map(view),
@@ -261,12 +265,13 @@ interface StarterFact {
   type: string;
   value: string;
   confidence: number;
+  source: string;
 }
 
 const factRef = (personId: string, f: StarterFact): EvidenceRef => ({
   kind: 'fact',
   ref: `F${f.id}`,
-  label: maskText(f.value),
+  label: maskText(placeFactValue(f.type, f.value)),
   at: null,
   quote: null,
   source: null,
@@ -284,7 +289,10 @@ function fragment(v: string, max = 40): string | null {
 }
 
 function factStarter(first: string, f: StarterFact): string | null {
-  const v = fragment(f.value);
+  // A place reads as its city in a text ("how's life in Los Angeles?"); an inferred one that names no place is skipped.
+  const place = isPlaceFactType(f.type) ? placeName(f.value) : null;
+  if (isPlaceFactType(f.type) && !place && f.source === 'llm') return null;
+  const v = place ? place.city : fragment(f.value);
   if (!v) return null;
   switch (f.type) {
     case 'interest':
@@ -294,6 +302,7 @@ function factStarter(first: string, f: StarterFact): string | null {
     case 'home_location':
       return `Hey ${first}, how's life in ${v}?`;
     case 'location_next':
+      return `${first}! How's the move to ${v} coming along?`;
     case 'travel_plan':
       return `${first}! Is the ${v} trip still on? Would love to hear about it.`;
     case 'job':
@@ -353,7 +362,7 @@ export function personStarters(db: DB, id: string, now = Date.now()): Starters {
   // 2. Templates grounded in what you know (non-sensitive, current facts) and the last event together.
   const facts = db
     .prepare(
-      `SELECT id, type, value, confidence FROM facts
+      `SELECT id, type, value, confidence, source FROM facts
        WHERE person_id IN (SELECT value FROM json_each(?)) AND status IN ('tentative','confirmed') AND sensitive = 0
          AND retracted_at IS NULL AND superseded_at IS NULL AND (valid_to IS NULL OR valid_to > ?) AND confidence >= 0.6
          AND type IN (SELECT value FROM json_each(?))

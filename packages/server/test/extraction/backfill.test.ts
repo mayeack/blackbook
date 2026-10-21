@@ -87,8 +87,8 @@ describe('historical backfill', () => {
     expect(count(w, 'SELECT count(*) FROM reply_verdicts')).toBe(0);
     // Chronology: Denver (Aug) closes Austin (Jul), whatever order the windows were applied in.
     expect(w.db.prepare(`SELECT value, status FROM facts ORDER BY value`).all()).toEqual([
-      { value: 'Austin', status: 'invalidated' },
-      { value: 'Denver', status: 'confirmed' },
+      { value: 'Austin, TX', status: 'invalidated' },
+      { value: 'Denver, CO', status: 'confirmed' },
     ]);
     // Nobody has ≥8 facts → no consolidation; the backfill is done after the next step.
     expect(c1.counts.backfill_done).toBe(1);

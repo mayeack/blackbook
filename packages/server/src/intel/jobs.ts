@@ -10,6 +10,10 @@
  *   intel-effects     every 5 min: re-derives occasion interactions + co_attend edges after adjudicated attendees
  *                     changed (cheap no-op otherwise), so the 06:50/06:55 graph and ties passes see them.
  *   pre-event-push    every 15 min: the generic push 3 h before a same-day event with a brief (intel/events.ts).
+ *   places-tidy       daily 03:05 (before the 03:10 extraction submit, so tonight's packets show place names): the
+ *                     agent's place facts written as place names, non-places closed (intel/placeTidy.ts).
+ *   places-tidy-owner MANUAL ONLY (`yb run-job places-tidy-owner`, once the owner agreed): the same for the facts
+ *                     and Places collections the owner entered. Scheduled ticks are no-ops.
  * Long passes yield the event loop between chunks and stop early on ctx.signal.
  */
 import { daily, interval, type JobDef } from '../scheduler/scheduler';
@@ -18,15 +22,17 @@ import { resolveServices } from '../services';
 import { pushSenderFor } from '../delivery/pushResolve';
 import { ADJUDICATE_AT, registerAdjudicationConsumer, submitAdjudications } from './adjudicate';
 import { preEventPushTick } from './events';
+import { tidyPlaces, type PlaceTidyStats } from './placeTidy';
 import { deriveEffectsIfDirty, runIntel } from './run';
 
 export type IntelJobDeps = AgentJobDeps;
 
 const MIN = 60_000;
-export const INTEL_TIMES = { intel: AGENT_TIMES.intel, adjudicate: ADJUDICATE_AT, effectsEveryMs: 5 * MIN, preEventPushEveryMs: 15 * MIN } as const;
+export const INTEL_TIMES = { intel: AGENT_TIMES.intel, adjudicate: ADJUDICATE_AT, effectsEveryMs: 5 * MIN, preEventPushEveryMs: 15 * MIN, placesTidy: '03:05' } as const;
 
 const counts = (o: Record<string, unknown>): Record<string, number> =>
   Object.fromEntries(Object.entries(o).filter((e): e is [string, number] => typeof e[1] === 'number' && e[1] !== 0));
+const tidyResult = (s: PlaceTidyStats) => (s.batchId ? { stats: counts({ ...s }) } : { status: 'skipped' as const, stats: counts({ ...s }) });
 
 export function intelJobs(deps: IntelJobDeps): JobDef[] {
   // The llm-collect job (same process) hands adjudication results to this consumer.
@@ -70,6 +76,21 @@ export function intelJobs(deps: IntelJobDeps): JobDef[] {
         const push = pushSenderFor(jobServices(deps, ctx.db));
         const r = await preEventPushTick(ctx.db, push, { now: ctx.now(), log: ctx.log });
         return r.status === 'skipped' ? { status: 'skipped' } : { stats: counts({ considered: r.considered, pushed: r.pushed, devices: r.devices }) };
+      },
+    },
+    {
+      name: 'places-tidy',
+      schedule: daily(INTEL_TIMES.placesTidy),
+      run(ctx) {
+        return tidyResult(tidyPlaces(ctx.db, { now: ctx.now(), jobRunId: ctx.jobRunId }));
+      },
+    },
+    {
+      name: 'places-tidy-owner',
+      schedule: interval(24 * 60 * MIN),
+      run(ctx) {
+        if (ctx.trigger !== 'manual') return { status: 'skipped' };
+        return tidyResult(tidyPlaces(ctx.db, { now: ctx.now(), owner: true, jobRunId: ctx.jobRunId }));
       },
     },
   ];
