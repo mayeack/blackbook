@@ -74,6 +74,10 @@ export const SettingsValues = z.object({
   /** Privacy → LLM exclusions: never sent to the model (people / conversations by id). */
   'llm.excluded_person_ids': z.array(z.string().min(1).max(64)).max(500),
   'llm.excluded_conversation_ids': z.array(z.string().min(1).max(64)).max(500),
+  /** Free-text commands are read by a local model (Ollama, on this Mac) first; Claude only when it can't tell. */
+  'llm.local_enabled': z.boolean(),
+  /** The Ollama model that reads them ("qwen3:4b"); it must be pulled (`ollama pull <model>`). */
+  'llm.local_model': z.string().min(1).max(100).regex(/^[a-z0-9][a-z0-9._/-]*(?::[a-z0-9._-]+)?$/i, 'an Ollama model name, e.g. qwen3:4b'),
   /**
    * Advanced: per-route model/effort overrides, route → {model?, effort?}. The server checks route names and that the
    * model is on its allowlist (Claude Haiku 5.5 / Sonnet 5.5; Opus is not selectable). {} = every route on its default.

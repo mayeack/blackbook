@@ -60,6 +60,8 @@ const values = (o: Partial<SettingsValues> = {}): SettingsValues => ({
   'llm.backfill_budget_usd': 150,
   'llm.excluded_person_ids': [],
   'llm.excluded_conversation_ids': [],
+  'llm.local_enabled': true,
+  'llm.local_model': 'qwen3:4b',
   'llm.route_overrides': {},
   'commands.enabled': true,
   'commands.read_images': true,

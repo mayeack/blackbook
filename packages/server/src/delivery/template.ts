@@ -71,16 +71,17 @@ function circleName(db: DB, item: SelectedItem): string | null {
   return safeFragment(n ?? str(item.payload.circleName), 30);
 }
 
-function commitmentOf(db: DB, item: SelectedItem): { what: string | null; owner: string; kind: string; dueAt: number | null } | null {
+function commitmentOf(db: DB, item: SelectedItem): { what: string | null; owner: string; kind: string; dueAt: number | null; reminder: boolean } | null {
   if (!item.links.commitmentId) return null;
-  const r = db.prepare('SELECT what, owner, kind, due_at, due_end, due_precision, sensitive FROM commitments WHERE id = ?').get(item.links.commitmentId) as
-    | { what: string; owner: string; kind: string; due_at: number | null; due_end: number | null; due_precision: string | null; sensitive: number }
+  const r = db.prepare('SELECT what, owner, kind, due_at, due_end, due_precision, sensitive, origin FROM commitments WHERE id = ?').get(item.links.commitmentId) as
+    | { what: string; owner: string; kind: string; due_at: number | null; due_end: number | null; due_precision: string | null; sensitive: number; origin: string }
     | undefined;
   if (!r) return null;
   // A vague promise ("sometime") has no date to show.
   const vague = r.due_precision === 'vague' || r.due_precision === 'none';
   // A sensitive promise's text never goes into copy (the item is sensitive too; this is the belt to its braces).
-  return { what: r.sensitive === 1 ? null : r.what, owner: r.owner, kind: r.kind, dueAt: vague ? null : (r.due_at ?? r.due_end) };
+  // origin 'command': a reminder he set by text ("remind me to call Sam Friday"); nobody was promised anything.
+  return { what: r.sensitive === 1 ? null : r.what, owner: r.owner, kind: r.kind, dueAt: vague ? null : (r.due_at ?? r.due_end), reminder: r.origin === 'command' };
 }
 
 /** Commitment kinds one person owes the other (never worded as a shared plan). */
@@ -145,7 +146,10 @@ export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy
       // Who owes what decides the wording; "send the trail map" fits "you'd …", "the restaurant list" needs a colon.
       const verbLed = what !== null && ACTION_START.test(what);
       const shared = owner === 'both' || kind === 'meet' || kind === 'plan' || (!ONE_SIDED.has(kind) && what !== null && !verbLed);
-      if (shared) {
+      if (c?.reminder) {
+        headline = what ? `Reminder for ${who}: ${what}` : `Your reminder about ${who}`;
+        body = due ? (past ? `You meant to do it by ${due}.` : `You wanted to do it ${due}.`) : null;
+      } else if (shared) {
         headline = what ? `Your plan with ${who}: ${what}` : `Follow up on your plans with ${who}`;
         body = due ? (past ? `That was planned for ${due}. Did it happen?` : `It's planned for ${due}.`) : null;
       } else if (owner === 'them') {

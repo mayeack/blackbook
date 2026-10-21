@@ -16,12 +16,15 @@ import { createPushSender } from './delivery/push';
 import type { OutboundSender, PushSender } from './delivery/types';
 import { createLlmClient } from './llm/client';
 import { createEgress } from './llm/egress';
+import { createOllamaClient, type LocalLlm } from './llm/local';
 import type { Egress, LlmClient } from './llm/types';
 import type { Logger } from './ops/logger';
 
 export interface AgentServices {
   llm: LlmClient;
   egress: Egress;
+  /** Ollama on loopback: reads free-text commands first (absent = Claude only, e.g. in tests). */
+  local?: LocalLlm;
   outbound: OutboundSender;
   push: PushSender;
   /** Self-thread command screenshots from the collector (absent = commands are text-only). */
@@ -30,7 +33,7 @@ export interface AgentServices {
 
 export type ServicesProvider = (db: DB) => AgentServices;
 
-export type ServicesConfig = Partial<Pick<AppConfig, 'anthropicApiKey' | 'vapid' | 'collectorUrl' | 'collectorTokenFile'>>;
+export type ServicesConfig = Partial<Pick<AppConfig, 'anthropicApiKey' | 'ollamaUrl' | 'vapid' | 'collectorUrl' | 'collectorTokenFile'>>;
 
 const cache = new WeakMap<DB, AgentServices>();
 
@@ -42,6 +45,8 @@ export function servicesFor(db: DB, config?: ServicesConfig, log?: Logger): Agen
     s = {
       egress,
       llm: createLlmClient({ db, apiKey: config?.anthropicApiKey ?? null, egress, log }),
+      // Only where the config names Ollama (the server's own config always does; scratch CLIs and tests don't).
+      ...(config?.ollamaUrl ? { local: createOllamaClient({ url: config.ollamaUrl }) } : {}),
       outbound: createOutboundSender({
         db,
         collector: config?.collectorUrl && config.collectorTokenFile ? { url: config.collectorUrl, tokenFile: config.collectorTokenFile } : null,

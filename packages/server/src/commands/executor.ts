@@ -21,7 +21,7 @@
  * Tapbacks on bot rows are recorded as "seen" feedback only. Everything that changes data is journaled
  * (undoable from Today) in one 'command' run per command.
  */
-import { localParts, type SuggestionFeedback } from '@yb/shared';
+import { addDays, localParts, uuidv7, type SuggestionFeedback } from '@yb/shared';
 import { setImmediate as yieldLoop } from 'node:timers/promises';
 import { commandImageRefs } from '../adapters/imessage/attachments';
 import { canonicalId } from '../db/canon';
@@ -37,7 +37,9 @@ import { withBatch } from '../journal/batch';
 import { finishRun, startRun } from '../journal/runs';
 import type { LlmImage } from '../llm/types';
 import { nullLogger, type Logger } from '../ops/logger';
-import { addToPreference, PREFERENCES, type PreferenceKind } from '../pipeline/circles/preferences';
+import { ACTION_EFFECTS, applyPreference, legacyAction, PREFERENCES, preferenceTitle, type PreferenceAction } from '../pipeline/circles/preferences';
+import { resolveDue } from '../pipeline/obligations/dates';
+import { whatNorm } from '../pipeline/obligations/text';
 import type { FeedbackContext } from '../pipeline/suggestions/feedback';
 import { resolveServices, type AgentServices, type ServicesConfig, type ServicesProvider } from '../services';
 import { settingsSnapshot, writeSettings, type SettingsSnapshot } from '../settings/registry';
@@ -58,7 +60,7 @@ import {
 import { draftOpeners } from './draft';
 import { safeWhy, sendFeedback, undoLastCommandEffect } from './feedback';
 import { isImplicitItemClause, ITEM_VERBS, parseCommand, selectionNums, type Clause, type Parsed } from './grammar';
-import { parseIntent, type IntentResult, type LogKind } from './intent';
+import { parseIntent, type IntentReminder, type IntentResult, type LogKind, type ReminderKind } from './intent';
 import { applyLog, deterministicKind, logKindTitle, type LogFact } from './log';
 import { commandLabels, distinctLabels, findMentions, intentCandidates, loadPeople, resolveSurface, type PersonLite } from './people';
 import { resolveScreenshotPerson } from './screenshot';
@@ -102,6 +104,8 @@ const SCREENSHOT_PROBLEM = {
   ambiguous: 'More than one person has that name. Send the profile with the @username visible.',
   service: "That profile is a business or service account, so I didn't note anything.",
 } as const;
+/** A reminder's kind as a commitment kind. */
+const REMINDER_COMMITMENT_KIND: Readonly<Record<ReminderKind, string>> = { call: 'call', meet: 'meet', send: 'send', reply: 'reply_later', other: 'other' };
 const CANCEL = new Set(['cancel', 'no', 'none', 'neither', 'nevermind', 'never mind', 'nvm', 'stop', 'no one', 'nobody', 'skip it']);
 
 export interface CommandsOptions {
@@ -125,6 +129,8 @@ export interface CommandsStats {
   replies: number;
   replies_failed: number;
   llm_intents: number;
+  /** Of those, read by the local model (Ollama) without Claude. */
+  local_intents: number;
   seen_reactions: number;
   clarifications_expired: number;
   replies_recovered: number;
@@ -141,6 +147,7 @@ const emptyStats = (): CommandsStats => ({
   replies: 0,
   replies_failed: 0,
   llm_intents: 0,
+  local_intents: 0,
   seen_reactions: 0,
   clarifications_expired: 0,
   replies_recovered: 0,
@@ -217,6 +224,7 @@ async function onePass(db: DB, o: CommandsOptions): Promise<CommandsStats> {
     else if (status === 'error') stats.errors++;
     if (ex.rateLimited) stats.rate_limited++;
     if (ex.usedLlm) stats.llm_intents++;
+    if (ex.usedLocal) stats.local_intents++;
     if (ex.replyOutcome === 'sent') stats.replies++;
     else if (ex.replyOutcome === 'failed') stats.replies_failed++;
     await yieldLoop(); // keep the 10 s iMessage tail responsive
@@ -290,6 +298,8 @@ interface Exec {
 class CommandRun {
   rateLimited = false;
   usedLlm = false;
+  /** The local model (Ollama) read it; Claude didn't. */
+  usedLocal = false;
   replyOutcome: 'sent' | 'failed' | 'none' = 'none';
   private runId: string | null = null;
   private readonly tz: string;
@@ -453,24 +463,31 @@ class CommandRun {
     if (excludedPeople.size && findMentions(text, people).some((m) => m.candidates.some((c) => excludedPeople.has(c.id)))) return null;
     const candidates = intentCandidates(text, people.filter((p) => !excludedPeople.has(p.id)));
     const images = await this.commandImages(msg);
+    const local = this.settings['llm.local_enabled'] && this.services.local ? { client: this.services.local, model: this.settings['llm.local_model'] } : null;
     const r = await parseIntent(
-      { llm: this.services.llm, egress: this.services.egress, timeZone: this.tz, log: this.log, signal: this.o.signal },
+      { llm: this.services.llm, egress: this.services.egress, timeZone: this.tz, local, log: this.log, signal: this.o.signal },
       { commandId: this.cmd.id, text, sentAt: msg.sentAt, candidates, addressed, images },
     );
-    if (r) this.usedLlm = true;
+    if (r) {
+      this.usedLlm = true;
+      this.usedLocal = r.engine === 'local';
+      this.parsedMeta.engine = r.engine;
+      this.parsedMeta.model = r.model;
+    }
     return r;
   }
 
   /**
    * The screenshots this command carries (its own image attachments, else ones sent just before it), fetched once
-   * from the collector. None when Settings → "Read screenshots in commands" is off, there is no collector, or the
-   * AI can't be used anyway.
+   * from the collector. None when Settings → "Read screenshots in commands" is off, there is no collector, or no
+   * model (local or Claude) can be used anyway.
    */
   private async commandImages(msg: MessageInfo): Promise<LlmImage[]> {
     if (this.images) return this.images;
     this.images = [];
     const source = this.services.attachments;
-    if (!this.services.llm.canSpend('steady').ok) return this.images;
+    const readable = this.services.llm.canSpend('steady').ok || (this.settings['llm.local_enabled'] && !!this.services.local);
+    if (!readable) return this.images;
     const refs = commandImageRefs(this.db, msg.id);
     if (!refs.length) return this.images;
     if (!this.settings['commands.read_images'] || !source?.configured) {
@@ -598,6 +615,7 @@ class CommandRun {
         case 'log_interaction':
         case 'add_fact':
         case 'set_preference':
+        case 'reminder':
           await this.logText(parsed.body, msg, ex, intent);
           return ex;
         case 'question':
@@ -849,10 +867,10 @@ class CommandRun {
       const cands = id ? [] : resolveSurface(p.surface, people);
       const chosen = id ?? (cands.length === 1 ? cands[0]!.id : null);
       if (chosen) {
-        prefs.push({ personId: chosen, surface: p.surface, kind: p.kind });
+        prefs.push({ personId: chosen, surface: p.surface, action: p.action });
         resolved.push(chosen);
       } else if (cands.length > 1) {
-        prefs.push({ personId: null, surface: p.surface, kind: p.kind });
+        prefs.push({ personId: null, surface: p.surface, action: p.action });
         if (!ambiguous.some((a) => a.surface === p.surface)) ambiguous.push({ surface: p.surface, options: cands });
       } else if (!unresolved.includes(p.surface)) unresolved.push(p.surface);
     }
@@ -861,7 +879,7 @@ class CommandRun {
     const facts: LogFact[] = (llmLog?.facts ?? [])
       .map((f) => ({ personId: f.image ? shot : f.personId, cat: f.cat, value: f.value }))
       .filter((f): f is LogFact => !!f.personId && visible.has(f.personId));
-    const remember = intent?.intent === 'add_fact' || intent?.intent === 'set_preference';
+    const remember = intent?.intent === 'add_fact' || intent?.intent === 'set_preference' || intent?.intent === 'reminder';
     const payload: ClarifyPayload = {
       text,
       kind,
@@ -875,6 +893,7 @@ class CommandRun {
       unresolved: unresolved.filter((u) => !ambiguous.some((a) => a.surface === u)),
       llm: !!intent,
       ...(prefs.length ? { prefs } : {}),
+      ...(intent?.intent === 'reminder' && intent.reminder ? { reminder: intent.reminder } : {}),
       ...(created.length ? { created } : {}),
     };
     if (ambiguous.length) {
@@ -933,6 +952,7 @@ class CommandRun {
     const applied = applyLog(this.db, plan, { runId: this.ensureRun(), now: this.now, messageId: msg.id, title });
     if (applied.batchId) ex.batchIds.push(applied.batchId);
     const prefAcks = this.applyPrefs(payload, ex, labelFor);
+    const reminderAck = payload.reminder ? this.applyReminder(payload.reminder, payload.resolved, msg, ex, labelFor) : null;
     ex.effect = ex.effect === 'none' || ex.effect === 'log' ? 'log' : 'mixed';
     const day = relativeDay(payload.date, localParts(this.now, this.tz).date, payload.at, this.tz);
     const what = kind === 'other' ? 'note' : logKindTitle(kind).toLowerCase();
@@ -944,33 +964,97 @@ class CommandRun {
     const created = new Set(payload.created ?? []);
     const who = listJoin(payload.resolved.map((id) => `${labelFor(id) ?? 'someone'}${created.has(id) ? ' (new, from your screenshot)' : ''}`));
     const when = day === 'today' || day === 'yesterday' ? day : `on ${day}`;
-    const head = payload.interaction ? `✓ Logged ${LOG_PHRASE[kind]} ${who} ${when}.` : endSentence(`✓ Noted for ${who}`);
-    const prefLines = prefAcks.map((a) => endSentence(a[0]!.toUpperCase() + a.slice(1)));
-    ex.lines.push([head, ...(shown.length ? [`Noted: ${shown.join(', ')}`] : []), ...prefLines, ...missing].join('\n'));
-    const prefNote = prefAcks.length ? ` + ${prefAcks.join(', ')}` : '';
+    // A preference or reminder with nothing else to report is the whole ack ("✓ Deprioritized Jake M."); under a head
+    // that already names them ("✓ Noted for Sam R.") each is its short line ("Prioritized for party invites.").
+    const standalone = !payload.interaction && (prefAcks.length > 0 || !!reminderAck) && !shown.length && !created.size;
+    const actions = standalone
+      ? [...prefAcks.map((a) => a.full), ...(reminderAck ? [reminderAck] : [])].map((a) => endSentence(a))
+      : [...prefAcks.map((a) => a.short), ...(reminderAck ? [reminderAck] : [])].map((a) => endSentence(a[0]!.toUpperCase() + a.slice(1)));
+    const head = payload.interaction ? `✓ Logged ${LOG_PHRASE[kind]} ${who} ${when}.` : standalone ? `✓ ${actions.shift()!}` : endSentence(`✓ Noted for ${who}`);
+    ex.lines.push([head, ...(shown.length ? [`Noted: ${shown.join(', ')}`] : []), ...actions, ...missing].join('\n'));
+    const done = [...prefAcks.map((a) => a.short), ...(reminderAck ? ['reminder'] : [])];
+    const prefNote = done.length ? ` + ${done.join(', ')}` : '';
     ex.summaries.push(payload.interaction ? `log for ${listJoin(names)} (${what} ${day})${prefNote}` : `note for ${listJoin(names)}${prefNote}`);
   }
 
-  /** Standing preferences: each kind's circle gets its people, one journaled batch per kind. Returns the acks. */
-  private applyPrefs(payload: ClarifyPayload, ex: Exec, labelFor: (personId: string) => string | null): string[] {
-    const byKind = new Map<PreferenceKind, string[]>();
+  /**
+   * Standing preferences: one journaled batch per action (circles in/out, the priority and hidden flags;
+   * pipeline/circles/preferences.ts). Returns each action's acks: the full one names them ("Deprioritized Jake M.
+   * and took them off Party invites"), the short one doesn't ("deprioritized").
+   */
+  private applyPrefs(payload: ClarifyPayload, ex: Exec, labelFor: (personId: string) => string | null): { full: string; short: string }[] {
+    const byAction = new Map<PreferenceAction, string[]>();
     for (const p of payload.prefs ?? []) {
-      if (!p.personId || !payload.resolved.includes(p.personId)) continue;
-      byKind.set(p.kind, [...new Set([...(byKind.get(p.kind) ?? []), p.personId])]);
+      const action = legacyAction(p);
+      if (!action || !p.personId || !payload.resolved.includes(p.personId)) continue;
+      byAction.set(action, [...new Set([...(byAction.get(action) ?? []), p.personId])]);
     }
-    const acks: string[] = [];
-    for (const [kind, ids] of byKind) {
+    const acks: { full: string; short: string }[] = [];
+    for (const [action, ids] of byAction) {
       const names = listJoin(ids.map((id) => labelFor(id) ?? 'someone'));
-      const { batchId, changes } = withBatch(
+      const effect = ACTION_EFFECTS[action];
+      const { batchId, changes, result } = withBatch(
         this.db,
-        { runId: this.ensureRun(), kind: 'circle', title: `${names}: ${PREFERENCES[kind].ack} (text)`, subjectPersonId: ids[0], actor: 'user' },
-        (t) => addToPreference(t, kind, ids),
+        {
+          runId: this.ensureRun(),
+          kind: effect.priority !== undefined || effect.hidden ? 'person_update' : 'circle',
+          title: preferenceTitle(action, names),
+          subjectPersonId: ids[0],
+          actor: 'user',
+        },
+        (t) => applyPreference(t, action, ids),
         { now: this.now },
       );
       if (changes) ex.batchIds.push(batchId);
-      acks.push(PREFERENCES[kind].ack);
+      const off = action === 'deprioritize' && result.removed.party_invites ? ` off ${PREFERENCES.party_invites.name}` : '';
+      acks.push({ full: `${effect.done(names)}${off ? ` and took ${ids.length === 1 ? 'them' : 'them all'}${off}` : ''}`, short: `${effect.short}${off ? `, taken${off}` : ''}` });
     }
     return acks;
+  }
+
+  /**
+   * "Remind me to call Sam Friday": a commitment of his (origin 'command', journaled) about the first person named,
+   * due at the end of that day (tomorrow when he gave no day); the brief brings it up when it is due. Returns the ack.
+   */
+  private applyReminder(r: IntentReminder, personIds: readonly string[], msg: MessageInfo, ex: Exec, labelFor: (personId: string) => string | null): string | null {
+    const [personId, ...others] = personIds;
+    if (!personId) return null;
+    const today = localParts(msg.sentAt, this.tz).date;
+    const date = r.date && r.date >= today ? r.date : addDays(today, 1);
+    const due = resolveDue({ precision: 'date', start: date, end: date }, this.tz);
+    const what = truncate(scrub(r.what), 120);
+    if (!what) return null;
+    const { batchId, changes } = withBatch(
+      this.db,
+      { runId: this.ensureRun(), kind: 'commitment', title: `Reminder: ${what} (text)`, subjectPersonId: personId, actor: 'user' },
+      (t) =>
+        t.insert('commitments', {
+          id: uuidv7(t.now),
+          person_id: personId,
+          other_person_ids: JSON.stringify(others),
+          owner: 'me',
+          kind: REMINDER_COMMITMENT_KIND[r.kind],
+          what,
+          what_norm: whatNorm(what),
+          due_at: due.end,
+          due_start: due.start,
+          due_end: due.end,
+          due_precision: due.precision,
+          conversation_id: null,
+          confidence: 1,
+          status: 'open',
+          run_id: this.ensureRun(),
+          prompt_version: null,
+          origin: 'command',
+          made_at: msg.sentAt,
+          source_msg: msg.id,
+          sensitive: 0,
+        }),
+      { now: this.now },
+    );
+    if (changes) ex.batchIds.push(batchId);
+    const who = listJoin(personIds.map((id) => labelFor(id) ?? 'someone'));
+    return `I'll remind you about ${who} ${due.start !== null ? `on ${formatDay(due.start, this.tz, true)}` : 'soon'}: ${what}`;
   }
 
   private async answerClarification(clar: ClarificationRow, answer: ClarAnswer, msg: MessageInfo): Promise<Exec> {

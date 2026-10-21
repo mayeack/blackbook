@@ -378,8 +378,11 @@ export function invitePicks(
   o: { preferred: ReadonlySet<string>; records: ReadonlyMap<string, PartyRecord>; now: number; limit?: number },
 ): InvitePick[] {
   const onList = guestCheck(db, e);
+  // Asked by text (pipeline/circles/preferences.ts): never suggest them, or never as a party invite.
+  const never = new Set([...preferredPeople(db, 'no_suggestions'), ...preferredPeople(db, 'no_party_invites')]);
+  const deprioritized = preferredPeople(db, 'deprioritized');
   const ok = (id: string) => {
-    if (alreadyInvited(db, onList, id)) return false;
+    if (never.has(id) || alreadyInvited(db, onList, id)) return false;
     const s = personState(db, id);
     return !s.muted && !s.mutedKinds.includes('party_invite') && !(s.cooldownUntil !== null && s.cooldownUntil > o.now);
   };
@@ -396,7 +399,7 @@ export function invitePicks(
     return meetsCloseness(closenessScore({ tie: s.tie, historical: s.historical, shown: true }), INVITE.minCloseness, { priority: priority.get(id) === 1 });
   };
   const regulars = [...o.records.entries()]
-    .filter(([id, r]) => !o.preferred.has(id) && visible.has(id) && (r.parties >= INVITE.minParties || r.hosted > 0))
+    .filter(([id, r]) => !o.preferred.has(id) && !deprioritized.has(id) && visible.has(id) && (r.parties >= INVITE.minParties || r.hosted > 0))
     .map(([id, r]) => ({ id, r, tie: tieOf(id) ?? 0 }))
     .filter((x) => closeEnough(x.id) && ok(x.id))
     .sort((a, b) => score(b.tie, b.r) - score(a.tie, a.r) || (a.id < b.id ? -1 : 1))

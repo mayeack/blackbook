@@ -471,7 +471,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 | `circle_neglect` | 0.4 | 0.40 | 30 days |
 | `dormant` (S>365, H was ≥50) | 0.3 | 0.30 | 90 days |
 
-**Score:** `s = base · w_kind · fb_kind · (1 + 0.3·priority) · (1 + 0.3·party) · fatigue_p`, where `fatigue_p = 0.5` if the person appeared in any digest in the last 3 days and `party = 1` for a pre-event brief, event follow-up, party invite or intro about someone in the Party invites circle (the owner's standing "prioritize inviting X to parties" texts; the same people lead the event brief and follow-up lists).
+**Score:** `s = base · w_kind · fb_kind · (1 + 0.3·priority) · (1 + 0.3·party) · fatigue_p · depri_p`, where `fatigue_p = 0.5` if the person appeared in any digest in the last 3 days, `party = 1` for a pre-event brief, event follow-up, party invite or intro about someone in the Party invites circle (the owner's standing "prioritize inviting X to parties" texts; the same people lead the event brief and follow-up lists), and `depri_p = 0.35` (with `priority = 0`) for someone in the Deprioritized circle ("deprioritize X" by text). Someone in the Don't suggest circle ("stop suggesting X") is never eligible (§6 social intents).
 
 **Selection:**
 1. Time-critical items (pre-event within 36h, travel within 48h) are forced in.
@@ -577,14 +577,35 @@ pause  := pause dur? | resume | status | help | more
 - An inline reply (`thread_originator_guid`) binds to that specific digest.
 - A 👍 tapback (2001) on a digest applies `done` only if the digest has exactly 1 open item; otherwise the bot replies asking for numbers.
 
-**Intent parser** for `log:` and unparsed text. Sync call on route `intent` (Haiku 5.5, effort low, thinking off). Candidate people come from local fuzzy search (top 8 by name × recency, passed as tokens). Output:
+**Intent parser** for `log:` and unparsed text, **local first** (2026-10-21, after "deprioritize Jake M" came back "Prioritized for party invites": the schema had no way to say deprioritize, so the model forced the only preference there was).
+1. A local model reads it first: Ollama on loopback (`OLLAMA_URL`, settings `llm.local_enabled` default on, `llm.local_model` default `qwen3:4b`; llm/local.ts). Nothing leaves the Mac and nothing is billed, so it sees candidates' full names and the note verbatim. The schema goes to Ollama as `format` (a grammar), temperature 0, `think: false` on thinking models, keep_alive 30 min.
+2. Claude (route `intent`: Haiku 5.5, effort low, thinking off, pseudonymized through egress) reads it only when the local model can't: Ollama down, model not pulled, timeout, a bound broken, `sure: false`, or `unknown`. Without Claude (no key, budget) an unsure local answer still stands. A screenshot goes to Claude unless the local model reads images.
+3. Same instructions, same schema, same code-side bounds for both; `inbound_commands.parsed` records `engine` (local/claude) and `model`. `yb eval intent --engine local|auto|claude` grades either.
+
+Candidate people come from local fuzzy search (top 8 by name × recency, passed as tokens). Output (`gist` first, so the model states the meaning before it classifies; the prompt says to read for meaning: fragments, caps, corrections like "No - DEPRIORITIZE Jake M", and words that flip it):
 ```ts
-{ intent: "log_interaction"|"add_fact"|"question"|"command"|"note"|"unknown",
+{ gist: string, intent: "log_interaction"|"add_fact"|"set_preference"|"reminder"|"question"|"command"|"note"|"unknown",
+  sure: boolean, image: {handle, name} | null,
   command: {verb, nums: number[], dur: string|null} | null,
   log: { people: {surface, ref: string|null}[], kind: "coffee"|"meal"|"drinks"|"call"|"party"|"met"|"other",
          date: string /*resolved vs msg ts*/, facts: {ref, cat, value}[], note: string|null } | null,
+  preferences: {surface, ref, action: "invite_first"|"stop_inviting"|"prioritize"|"deprioritize"|"mute"|"unmute"|"hide"}[],
+  reminder: {what, kind: "call"|"meet"|"send"|"reply"|"other", date: string|null} | null,
   question: string|null }
 ```
+**Social intents** (pipeline/circles/preferences.ts; each is one journaled batch, `undo` reverts it). Preferences are reserved user circles found by signature `pref:<kind>` (they show on /circles; removal is sticky) plus the person's flags:
+
+| action | circles | flags | effect |
+|---|---|---|---|
+| invite_first | + Party invites, − Not for party invites | | invited first; ×1.3 on party/event/intro items |
+| stop_inviting | + Not for party invites, − Party invites | | never a "Who to invite" pick |
+| prioritize | − Deprioritized, − Don't suggest | priority on | priority boost; closeness minimums waived |
+| deprioritize | + Deprioritized, − Party invites | priority off | items about them ×0.35, no priority lift; never a party regular |
+| mute | + Don't suggest | | no suggestions about them at all |
+| unmute | − Don't suggest | | suggested again |
+| hide | | hidden | gone everywhere but Settings → Hidden contacts (the journal title never names them) |
+
+A **reminder** ("remind me to call Sam Friday") is a commitment of mine (`origin 'command'`, confidence 1) about the first person named, due at the end of that day (tomorrow when no day is given); the brief words it "Reminder for Sam R.: call", never as a promise.
 - Ambiguous people → the bot replies "Sam R. or Sam K.? reply 1/2". The clarification state lasts 1h.
 - `log:` writes an interaction (U=1.5) and facts with conf 0.95 and source `user_log`.
 - Every effect gets one confirmation reply: `[yb] ✓ done: Reply to Sam · undo`.

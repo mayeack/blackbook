@@ -33,9 +33,9 @@ http.globalAgent = new http.Agent({ keepAlive: false });
 // ------------------------------------------------------------------------------------------------- egress guard
 // Fail closed: tests talk only to mocks and to their own throwaway servers on 127.0.0.1. A connection to anything
 // that isn't loopback, or to the real local services on this Mac (yeackbot 4320, the collector 4321, the sandbox
-// browser's CDP 4331, Beeper Desktop 23373), is refused before a packet leaves, and fails the test file even when
-// the code under test swallowed the error. Unix sockets (the admin socket tests) pass.
-const FORBIDDEN_LOOPBACK_PORTS = new Set([4320, 4321, 4331, 23373]);
+// browser's CDP 4331, Beeper Desktop 23373, Ollama 11434), is refused before a packet leaves, and fails the test file
+// even when the code under test swallowed the error. Unix sockets (the admin socket tests) pass.
+const FORBIDDEN_LOOPBACK_PORTS = new Set([4320, 4321, 4331, 23373, 11434]);
 const isLoopback = (host: string) => host === 'localhost' || host === '::1' || host === '::ffff:127.0.0.1' || /^127\.\d+\.\d+\.\d+$/.test(host);
 
 type GuardState = { blocked: string[] };

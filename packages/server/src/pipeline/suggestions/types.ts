@@ -134,6 +134,8 @@ export const SELECTION = {
   priorityBoost: 0.3,
   /** ×1.3 for a party / event / invite / intro item about someone in the Party invites circle (set by text). */
   partyBoost: 0.3,
+  /** ×0.35 for an item about someone in the Deprioritized circle (set by text); they lose the priority boost too. */
+  deprioritizedFactor: 0.35,
   /** Forced in: pre-event within 36 h, travel within 48 h. */
   preEventForceMs: 36 * H,
   travelForceMs: 48 * H,
