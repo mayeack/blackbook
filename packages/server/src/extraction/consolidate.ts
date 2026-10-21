@@ -7,6 +7,7 @@
  */
 import type { DB } from '../db/connection';
 import { tx } from '../db/tx';
+import { isPlaceFactType, placeName } from '../intel/placeNames';
 import { withBatch } from '../journal/batch';
 import { startRun, finishRun } from '../journal/runs';
 import { estimatePromptTokens, estimateRouteUsd, resolveRoute, type RouteParams } from '../llm/models';
@@ -144,9 +145,12 @@ export function applyConsolidation(
             support: db.prepare(`SELECT count(*) FROM evidence WHERE subject_type = 'fact' AND subject_id = ?`).pluck().get(keep.factId) as number,
             prompt_version: pv,
           };
-          const value = m.value ? lineText(m.value, 200).trim() : '';
+          const said = m.value ? lineText(m.value, 200).trim() : '';
+          // A place keeps a place name: a rename that names none leaves the value alone.
+          const value = said && isPlaceFactType(keep.cat) ? (placeName(said)?.name ?? '') : said;
           if (value && value.length <= 60 && !looksLikeIdentifier(value) && !isLifeEventText(value) && !isSensitiveText(value)) {
-            patch.value = ctx.egress.detokenize(value, {}).slice(0, 200);
+            // A place name holds no tokens ("Portland, ME" is Maine, not the owner's ref).
+            patch.value = isPlaceFactType(keep.cat) ? value : ctx.egress.detokenize(value, {}).slice(0, 200);
             patch.value_norm = normValue(value, keep.cat);
             stats.renamed++;
           }

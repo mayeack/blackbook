@@ -15,6 +15,7 @@ import { openLoopsByPerson } from '../pipeline/obligations/loops';
 import { survivingOccasion } from '../pipeline/occasions/build';
 import { hiddenNameRedactor, maskText } from '../routes/people';
 import { byTie } from './events';
+import { isPlaceFactType, placeFactValue, placeName } from './placeNames';
 import { knownAttendees, statsOf, unknownGuestNames, type KnownAttendee } from './common';
 
 /** Edge strength for "knows" (the "know each other" tier). */
@@ -91,17 +92,18 @@ function chips(db: DB, ids: readonly string[]): Map<string, PersonChip> {
   return out;
 }
 
-/** One recent, non-sensitive, live fact about the person. */
+/** One recent, non-sensitive, live fact about the person (an inferred place that names no place is skipped). */
 export function recentFact(db: DB, personId: string, now: number): BriefAttendee['recentFact'] {
-  const r = db
+  const rows = db
     .prepare(
-      `SELECT f.id, f.type, f.value FROM facts f JOIN person_canon pc ON pc.person_id = f.person_id
+      `SELECT f.id, f.type, f.value, f.source FROM facts f JOIN person_canon pc ON pc.person_id = f.person_id
        WHERE pc.canonical_id = ? AND f.status IN ('tentative','confirmed') AND f.sensitive = 0 AND f.retracted_at IS NULL
          AND (f.valid_to IS NULL OR f.valid_to > ?) AND f.type IN (SELECT value FROM json_each(?))
-       ORDER BY f.recorded_at DESC, f.id DESC LIMIT 1`,
+       ORDER BY f.recorded_at DESC, f.id DESC LIMIT 5`,
     )
-    .get(personId, now, JSON.stringify(FACT_TYPES)) as { id: string; type: string; value: string } | undefined;
-  return r ? { id: r.id, type: r.type, value: maskText(r.value).slice(0, 200) } : null;
+    .all(personId, now, JSON.stringify(FACT_TYPES)) as { id: string; type: string; value: string; source: string }[];
+  const r = rows.find((f) => !(isPlaceFactType(f.type) && f.source === 'llm' && !placeName(f.value)));
+  return r ? { id: r.id, type: r.type, value: maskText(placeFactValue(r.type, r.value)).slice(0, 200) } : null;
 }
 
 /** Known people who know ≥ 2 of the attendees (strength ≥ 0.4), most connected first. */

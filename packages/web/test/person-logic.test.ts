@@ -110,6 +110,18 @@ describe('open loops, facts, evidence', () => {
     expect(g[0]!.facts.map((f) => f.id)).toEqual(['3', '2']);
   });
 
+  it('Places holds place names; a trip sits in its own group after it', () => {
+    const g = groupFacts([
+      fact({ id: '1', type: 'travel_plan', value: 'Lisbon trip' }),
+      fact({ id: '2', type: 'location_current', value: 'Los Angeles, CA' }),
+      fact({ id: '3', type: 'hometown', value: 'Berlin, Germany' }),
+    ]);
+    expect(g.map((x) => [x.group, x.facts.map((f) => f.id).sort()])).toEqual([
+      ['Places', ['2', '3']],
+      ['Trips', ['1']],
+    ]);
+  });
+
   it('evidence links stay in-app and messages carry the time hint', () => {
     expect(evidenceHref({ kind: 'message', href: '/p/x?m=5', at: 77 })).toBe('/p/x?m=5&at=77');
     expect(evidenceHref({ kind: 'event', href: '/e/1', at: 77 })).toBe('/e/1');

@@ -1295,3 +1295,49 @@ the background at once (journaled; `undo` reverts it).
 **Edge cases**: a person with no stats yet shows 2/10; hidden people never appear in any sort; an old Closest-sort
 cursor from before the deploy still pages (closeness optional in the cursor).
 **Platforms**: server + web. Not visually checked in a browser; not deployed.
+
+## 2026-10-21 — Places are place names ("Los Angeles, CA", "Berlin, Germany")
+
+A person's Places (Overview → Facts & interests) show only real cities and towns in one form: "City, ST" in the US,
+"City, Country" elsewhere. Nicknames are spelled out ("LA" → "Los Angeles, CA"), neighborhoods fold into their city
+("Silver Lake" → "Los Angeles, CA", "Brooklyn" → "New York, NY"), and venues, homes, addresses, vague areas ("Bay
+Area"), states or countries alone and "where they are not" never show. Trips moved to their own **Trips** group.
+Extraction writes place names from now on (prompt + a deterministic normalizer, no extra LLM call); the
+`places-tidy` job (daily 03:05) fixes what the agent stored before, as one undoable batch. Facts and Places
+collections the owner entered change only through `places-tidy-owner`, after the owner agrees.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1471 tests pass, lint clean.
+2. `test/intel/placeNames.test.ts` (nicknames, neighborhoods, namesakes, unlisted towns with a state, non-places,
+   first names and street names never read as cities, every gazetteer name reads back as itself),
+   `test/intel/placeTidy.test.ts` (rename / fold / close in one batch, undo, owner data untouched, owner run manual
+   only), `test/extraction/validate.test.ts` + `pipeline.test.ts` (normalized at extraction, `fact_not_a_place`, old
+   "la" block still blocks, "Portland, OR" ≠ "Portland, ME", "ME" in a place is Maine), `test/routes/personExtras.test.ts`
+   (chips, hidden non-places, starters), Ask/`log:` tests (place names in answers and acks),
+   `packages/web/test/person-logic.test.ts` (Trips group).
+3. `npm run yb -- llm-smoke`: schemas unchanged (ExtractionKnowledge 58 nodes ≤ 64).
+4. Dry run on a read-only copy of the live DB: 131 of the agent's place facts renamed, 13 duplicates folded, 84
+   non-places closed; apply → second run (no-op) → undo restores all.
+
+### Scenario B — Web (owner, after deploy and one `places-tidy` run)
+1. **Setup**: `npm run yb -- run-job places-tidy` (or wait for 03:05).
+2. Today → activity feed. **Expected**: one line "Wrote places as place names: … renamed, … duplicates folded, …
+   that weren't places closed" with Undo.
+3. Open a friend whose Places said "Currently in LA" (an inferred fact). **Expected**: "Currently in Los Angeles, CA".
+4. Open someone whose Places showed a home or a vague area ("lives with you as roommate", "Bay Area"). **Expected**:
+   it's gone from Places and from History.
+5. Overview → Conversation starters for someone in LA. **Expected**: "Hey <name>, how's life in Los Angeles?"; for a
+   move: "How's the move to <city> coming along?".
+6. Ask "who do I know in LA?". **Expected**: people listed with "Los Angeles, CA".
+
+### Scenario C — Your own entries (only after you say yes)
+1. `npm run yb -- run-job places-tidy-owner`.
+2. **Expected**: your legacy "Currently in LA" facts read "Los Angeles, CA" in the data too; Places collections named
+   after a city ("LA", "SF", "NYC") get place names; ones named after a state or country stay exactly as they are. One
+   undoable feed line.
+
+**Edge cases**: until the owner run, the owner's legacy "LA" facts already *display* as "Los Angeles, CA" (nothing stored
+changes); "Venice" alone is the LA neighborhood ("Venice, Italy" stays Venice, Italy); a friend named like a city
+("lives with Charlotte") or a street ("Hollywood Blvd") is never a place; a two-city value ("Calabasas or Santa
+Monica") is not a place.
+**Platforms**: server + web. Not visually checked in a browser; not deployed; no live LLM run of the new prompt.
