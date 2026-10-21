@@ -607,6 +607,8 @@ logger.info("Step: \(String(describing: result.nextStep))")
 
 ## CI/CD — GitHub Actions & Fastlane
 
+> The TestFlight deploy was archived on 2026-10-20 and moved to `.github/archived-workflows/testflight.yml`. `ci.yml` now only builds and tests. The Fastlane, signing and secrets notes below apply again if you re-enable it.
+
 ### Xcode Version Must Match Project Format
 
 The project uses Xcode 26 format (version 77). CI runners must use a compatible Xcode. The `macos-15` runner provides Xcode 26.3. Always keep the CI Xcode version in sync with the local development version:
@@ -732,7 +734,7 @@ If the Xcode project references a file (e.g., `amplifyconfiguration.json`), that
 
 ## Pre-Push Checklist
 
-Before pushing to `main` (which triggers the full CI/CD pipeline):
+Before pushing to `main` (which triggers CI, plus the TestFlight deploy when it is enabled):
 
 1. **Local build succeeds:** `xcodebuild build -scheme Blackbook -destination 'generic/platform=iOS Simulator'`
 2. **No new compiler warnings** in files you touched

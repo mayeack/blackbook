@@ -77,7 +77,7 @@ base64 -i AuthKey_XXXXXXXXXX.p8
 
 ### Deploy to TestFlight
 
-- **CI (recommended):** Push to `main`. The workflow in `.github/workflows/ci.yml` runs tests, then builds and uploads both iOS and macOS to TestFlight. Ensure all GitHub Actions secrets (Phase 2) are set.
+- **CI (archived 2026-10-20):** Pushes to `main` no longer deploy. The TestFlight workflow is saved at `.github/archived-workflows/testflight.yml`, and its README explains how to re-enable it. Once re-enabled, it tests the app and then builds and uploads both iOS and macOS to TestFlight. Ensure all GitHub Actions secrets (Phase 2) are set.
 - **Local:** From the project root, run `./scripts/deploy-testflight.sh` (or `fastlane ios beta` / `fastlane mac beta` individually). Requires ASC API key and Match credentials in the environment (or in `.env`).
 
 ### Test on TestFlight

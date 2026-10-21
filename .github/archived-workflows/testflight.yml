@@ -1,0 +1,115 @@
+# ARCHIVED: GitHub only runs workflows that sit directly in .github/workflows/, so this file never runs.
+# It is the native app's TestFlight pipeline, retired from ci.yml on 2026-10-20. See README.md here to re-enable.
+name: TestFlight
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never cancel an upload in flight: back-to-back merges used to cancel each other's TestFlight runs.
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Build & Test (iOS + macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+
+      - name: Build & test (iOS)
+        run: |
+          set -o pipefail
+          xcodebuild build test \
+            -project Blackbook.xcodeproj \
+            -scheme Blackbook \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -configuration Debug \
+            -resultBundlePath TestResults-iOS \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            | xcpretty
+
+      # The generated TEST_HOST is the iOS bundle layout; the macOS app keeps its binary in Contents/MacOS.
+      - name: Build & test (macOS)
+        run: |
+          set -o pipefail
+          xcodebuild build test \
+            -project Blackbook.xcodeproj \
+            -scheme Blackbook \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -resultBundlePath TestResults-macOS \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            'TEST_HOST=$(BUILT_PRODUCTS_DIR)/Blackbook.app/Contents/MacOS/Blackbook' \
+            | xcpretty
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: |
+            TestResults-iOS.xcresult
+            TestResults-macOS.xcresult
+
+  deploy-testflight:
+    name: Deploy to TestFlight
+    runs-on: macos-15
+    needs: [test]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+
+      - name: Install Fastlane
+        run: gem install fastlane
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project Blackbook.xcodeproj -scheme Blackbook
+
+      # run_number restarts at 1 in a new workflow. ci.yml's last upload was iOS build 133 / macOS 100133
+      # (its run_number reached 188), so offset past both; the mac lane adds its own 100000.
+      - name: Build number
+        run: echo "BUILD_NUMBER=$((GITHUB_RUN_NUMBER + 200))" >> "$GITHUB_ENV"
+
+      - name: Install App Store Connect API Key
+        env:
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          echo "$ASC_KEY_CONTENT" | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Deploy iOS to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
+        run: fastlane ios beta
+
+      - name: Deploy macOS to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          XCODEBUILD_AUTHENTICATION_KEY_PATH: ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          XCODEBUILD_AUTHENTICATION_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          XCODEBUILD_AUTHENTICATION_KEY_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 120
+        run: fastlane mac beta
