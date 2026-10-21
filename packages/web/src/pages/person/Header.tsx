@@ -1,9 +1,11 @@
-import type { SparkPoint, TieStats } from '@yb/shared';
+import { Link } from 'react-router';
+import type { MetAtList, SparkPoint, TieStats } from '@yb/shared';
 import type { PersonDetail } from '../../api/types';
 import { Avatar } from '../../components/Avatar';
 import { PersonLink } from '../../components/PersonLink';
 import { roleLine } from '../../lib/format';
 import { stateLabel } from '../../lib/labels';
+import { metAtHeader } from '../../lib/tickets';
 import { cadenceLine, closenessText, initiativeLine, ringDash, ringLabel, sparklineCoords, stateColorVar, tiesFromPerson } from './logic';
 
 /** Avatar inside a ring whose arc is tie strength T (0–100), colored by state. Links to the person. */
@@ -57,11 +59,13 @@ export function Sparkline({ points, width = 96, height = 24, label }: { points: 
 }
 
 /**
- * Header: tie ring + name (+ priority star, New), role, places, then "Strong · 7/10 · usually every ~9d · last 41d ago",
- * a trend sparkline and who usually starts. Tie stats come from /ties when it's available, else the base person.
+ * Header: tie ring + name (+ priority star, New), role, places, "Met at <event> · <date> · via <signal>" when yeackbot
+ * placed where you met, then "Strong · 7/10 · usually every ~9d · last 41d ago", a trend sparkline and who usually starts. Tie
+ * stats come from /ties when it's available, else the base person.
  */
-export function PersonHeader({ p, ties }: { p: PersonDetail; ties: TieStats | null }) {
+export function PersonHeader({ p, ties, metAt }: { p: PersonDetail; ties: TieStats | null; metAt?: MetAtList | null }) {
   const role = roleLine(p.jobTitle, p.company);
+  const met = metAtHeader(metAt);
   const t = ties ?? tiesFromPerson(p);
   const cadence = cadenceLine(t);
   const state = t?.state ?? null;
@@ -88,6 +92,11 @@ export function PersonHeader({ p, ties }: { p: PersonDetail; ties: TieStats | nu
         {p.nickname && <div className="ph-line">“{p.nickname}”</div>}
         {role && <div className="ph-line">{role}</div>}
         {p.locations.length > 0 && <div className="ph-line">{p.locations.join(' · ')}</div>}
+        {met && (
+          <div className="ph-line ph-met">
+            Met at <Link to={met.href}>{met.title}</Link> · {met.when} · via {met.via}
+          </div>
+        )}
         <div className="ph-line ph-cadence">
           {stateText && (
             <span className={`state-pill state-${state ?? 'none'}`}>

@@ -12,6 +12,7 @@ import { PersonCollectionsSection } from './Collections';
 import { FactsSection } from './Facts';
 import { OpenLoopsSection } from './Loops';
 import { MergeHistorySection } from './Merges';
+import { MetAtSection } from './MetAt';
 import { NotesSection } from './Notes';
 import { StartersSection } from './Starters';
 
@@ -79,8 +80,9 @@ export function LinkedAccounts({ p }: { p: PersonDetail }) {
 }
 
 /**
- * Overview, in order: open loops, conversation starters (copy-only), facts & interests, linked accounts, circles /
- * tags / places, notes, merge history. Each section loads on its own; one that isn't available yet stays out.
+ * Overview, in order: open loops, conversation starters (copy-only), facts & interests, where you met (when known),
+ * linked accounts, circles / tags / places, notes, merge history. Each section loads on its own; one that isn't
+ * available yet stays out.
  */
 export function PersonOverview({ p }: { p: PersonDetail }) {
   return (
@@ -88,6 +90,7 @@ export function PersonOverview({ p }: { p: PersonDetail }) {
       <OpenLoopsSection personId={p.id} />
       <StartersSection personId={p.id} />
       <FactsSection personId={p.id} />
+      <MetAtSection personId={p.id} />
 
       <section className="person-section">
         <h2 className="section-title">Linked accounts</h2>

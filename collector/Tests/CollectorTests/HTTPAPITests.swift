@@ -18,7 +18,8 @@ final class APIHarness {
     /// Stands in for ~/Library/Messages/Attachments.
     let attachmentsRoot: URL
 
-    init(port: UInt16 = APIHarness.port, compiledHandles: [String] = ["+15555550100"]) throws {
+    init(port: UInt16 = APIHarness.port, compiledHandles: [String] = ["+15555550100"],
+         ocr: TextRecognizer = sharedOCR) throws {
         world = try SyntheticWorld()
         dataDir = TestPaths.tempDir("ybdata")
         whatsappSource = dataDir.appendingPathComponent("wa-source", isDirectory: true)
@@ -38,7 +39,7 @@ final class APIHarness {
         let tok = token
         api = CollectorAPI(port: port, dependencies: .init(token: { tok }, reader: reader, contacts: contacts,
                                                            whatsapp: whatsapp, send: send, attachments: attachments,
-                                                           health: health, now: { refDate }))
+                                                           ocr: ocr, health: health, now: { refDate }))
     }
 
     deinit { try? FileManager.default.removeItem(at: dataDir) }
@@ -117,6 +118,40 @@ struct HTTPParserTests {
         let huge = "GET /x HTTP/1.1\r\nX-Pad: " + String(repeating: "a", count: 70_000)
         #expect(status(huge) == 431)
         #expect(status(huge + "\r\n\r\n") == 431)
+    }
+
+    /// 8 MiB for POST /v1/vision/ocr only (the path decides, the query doesn't), 1 MiB for everything else.
+    @Test func bodyLimitIsPerRoute() {
+        func head(_ method: String, _ target: String, _ length: Int) -> String {
+            "\(method) \(target) HTTP/1.1\r\nHost: 127.0.0.1:4321\r\nContent-Length: \(length)\r\n\r\n"
+        }
+        func failure(_ s: String) -> (Int, String, String)? {
+            if case let .failure(status, code, message) = parse(s) { return (status, code, message) }
+            return nil
+        }
+        let sixMiB = 6 << 20
+        if case .needMore = parse(head("POST", "/v1/vision/ocr", sixMiB)) {} else { Issue.record("6 MiB OCR body refused") }
+        guard case let .complete(r) = HTTPRequestParser.parse(Data((head("POST", "/v1/vision/ocr?trace=1", sixMiB)).utf8) + Data(count: sixMiB),
+                                                             limits: limits) else {
+            Issue.record("6 MiB OCR body incomplete"); return
+        }
+        #expect(r.path == "/v1/vision/ocr")
+        #expect(r.body.count == sixMiB)
+        if case .needMore = parse(head("POST", "/v1/vision/ocr", 8 << 20)) {} else { Issue.record("exactly 8 MiB refused") }
+
+        let overOCR = failure(head("POST", "/v1/vision/ocr", (8 << 20) + 1))
+        #expect(overOCR?.0 == 413)
+        #expect(overOCR?.1 == "payload_too_large")
+        #expect(overOCR?.2 == "body exceeds 8 MiB")
+        for (method, target) in [("POST", "/v1/imessage/send"), ("POST", "/v1/whatsapp/snapshot"), ("PUT", "/v1/vision/ocr"),
+                                 ("GET", "/v1/vision/ocr"), ("POST", "/v1/vision/ocr/"), ("POST", "/v1/vision")] {
+            let over = failure(head(method, target, (1 << 20) + 1))
+            #expect(over?.0 == 413, "\(method) \(target)")
+            #expect(over?.2 == "body exceeds 1 MiB", "\(method) \(target)")
+        }
+        if case .needMore = parse(head("POST", "/v1/imessage/send", 1 << 20)) {} else { Issue.record("exactly 1 MiB refused") }
+        #expect(HTTPLimits().bodyLimit(method: "POST", path: "/v1/vision/ocr") == 8 << 20)
+        #expect(HTTPLimits().bodyLimit(method: "POST", path: "/v1/contacts") == 1 << 20)
     }
 
     @Test func statusTexts() {
@@ -265,6 +300,7 @@ struct CollectorAPITests {
                               clock: FakeClock()),
             attachments: AttachmentService(reader: missing, allowlist: RecipientAllowlist(compiledHandles: [], ownAddresses: { [] }),
                                            root: h.attachmentsRoot),
+            ocr: FakeRecognizer(),
             health: HealthReporter(reader: missing, whatsapp: WhatsAppSnapshotter(sourceDir: h.whatsappSource, destRoot: h.dataDir),
                                    probe: FakeProbe(), startedAt: refDate),
             now: { refDate }))
@@ -370,6 +406,26 @@ struct LoopbackServerTests {
         #expect(rebound.contains("bad_host"))
         let noLength = raw(port, "POST /v1/whatsapp/snapshot HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nAuthorization: Bearer \(h.token.value)\r\n\r\n")
         #expect(noLength.hasPrefix("HTTP/1.1 411 Length Required"))
+    }
+
+    /// Over a real socket: ~6 MiB reaches the OCR route's handler; any other POST still gets 413 above 1 MiB.
+    @Test func ocrRouteTakesSixMiBOthersStopAtOne() throws {
+        let port = Self.freePort()
+        let server = try startServer(port: port, handler: { r in
+            .json(200, .object([("path", .string(r.path)), ("bytes", .num(r.body.count))]))
+        })
+        defer { server.stop() }
+        let size = 6 << 20
+        let big = raw(port, "POST /v1/vision/ocr HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nContent-Length: \(size)\r\n\r\n"
+                        + String(repeating: "A", count: size), wait: 20)
+        #expect(big.hasPrefix("HTTP/1.1 200 OK"))
+        #expect(big.contains("\"bytes\":\(size)"))
+
+        let other = raw(port, "POST /v1/imessage/send HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nContent-Length: \((1 << 20) + 512 * 1024)\r\n\r\n")
+        #expect(other.hasPrefix("HTTP/1.1 413 Payload Too Large"))
+        #expect(other.contains("payload_too_large"))
+        let tooBig = raw(port, "POST /v1/vision/ocr HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nContent-Length: \((8 << 20) + 1)\r\n\r\n")
+        #expect(tooBig.hasPrefix("HTTP/1.1 413 Payload Too Large"))
     }
 
     @Test func idleConnectionsTimeOut() throws {

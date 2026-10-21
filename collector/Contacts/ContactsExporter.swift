@@ -37,12 +37,23 @@ struct ContactCard: Equatable {
     var birthday: (y: Int?, m: Int, d: Int)?
     var social: [SocialItem] = []
     var urls: [LabeledValue] = []
+    /// When the card was created in the AddressBook store (ZCREATIONDATE; CNContact has no such field). Nil when the
+    /// store couldn't be read.
+    var createdAt: Date?
 
     static func == (a: ContactCard, b: ContactCard) -> Bool {
         a.json == b.json
     }
 
+    /// The wire card: the content fields plus `created_at` (null when unknown).
     var json: JSON {
+        guard case let .object(pairs) = contentJSON else { return contentJSON }
+        return .object(pairs + [("created_at", .iso(createdAt))])
+    }
+
+    /// Everything but `created_at`: what the dump hash covers, so a creation-date read that fails one hour and works
+    /// the next never makes Node re-diff an unchanged address book (Node fills created_at on every pass anyway).
+    var contentJSON: JSON {
         func labeled(_ items: [LabeledValue]) -> JSON {
             .array(items.map { .object([("label", .str($0.label)), ("value", .string($0.value))]) })
         }
@@ -89,18 +100,23 @@ protocol ContactsSource: AnyObject {
 }
 
 enum ContactsExport {
-    /// Items sorted by id, plus a SHA-256 (hex) over their canonical JSON so Node can skip
-    /// unchanged dumps.
+    /// Items sorted by id, plus a SHA-256 (hex) over their canonical content JSON (`created_at` excluded) so Node
+    /// can skip unchanged dumps.
     static func payload(_ cards: [ContactCard]) -> (hash: String, items: [JSON]) {
-        let items = cards.sorted { $0.id < $1.id }.map(\.json)
-        let digest = SHA256.hash(data: JSON.array(items).serialized())
-        return (digest.map { String(format: "%02x", $0) }.joined(), items)
+        let sorted = cards.sorted { $0.id < $1.id }
+        let digest = SHA256.hash(data: JSON.array(sorted.map(\.contentJSON)).serialized())
+        return (digest.map { String(format: "%02x", $0) }.joined(), sorted.map(\.json))
     }
 }
 
-/// CNContactStore reader. Never writes to Contacts.
+/// CNContactStore reader, plus each card's creation date from the AddressBook stores. Never writes to Contacts.
 final class SystemContactsSource: ContactsSource {
     private let store = CNContactStore()
+    private let creationDates: ContactCreationDates
+
+    init(creationDates: ContactCreationDates = ContactCreationDates()) {
+        self.creationDates = creationDates
+    }
 
     func authorization() -> ContactsAuthorization {
         switch CNContactStore.authorizationStatus(for: .contacts) {
@@ -125,17 +141,19 @@ final class SystemContactsSource: ContactsSource {
         ] as [CNKeyDescriptor]
         let request = CNContactFetchRequest(keysToFetch: keys)
         request.unifyResults = true
+        let created = creationDates.load()
         var cards: [ContactCard] = []
         try store.enumerateContacts(with: request) { contact, _ in
-            cards.append(Self.card(from: contact))
+            cards.append(Self.card(from: contact, createdAt: created.date(for: contact.identifier)))
         }
         return cards
     }
 
-    static func card(from c: CNContact) -> ContactCard {
+    static func card(from c: CNContact, createdAt: Date? = nil) -> ContactCard {
         var card = ContactCard(id: c.identifier, given: nilIfEmpty(c.givenName), family: nilIfEmpty(c.familyName),
                                nickname: nilIfEmpty(c.nickname), org: nilIfEmpty(c.organizationName),
                                job: nilIfEmpty(c.jobTitle))
+        card.createdAt = createdAt
         card.phones = c.phoneNumbers.map { LabeledValue(label: label($0.label), value: $0.value.stringValue) }
         card.emails = c.emailAddresses.map { LabeledValue(label: label($0.label), value: $0.value as String) }
         card.postal = c.postalAddresses.map {

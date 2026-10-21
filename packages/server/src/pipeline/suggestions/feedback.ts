@@ -11,7 +11,9 @@
  *   skip    reward 0 (w 1.5); that (person, kind) rests 4× its cooldown; a 3rd fading skip mutes fading for that
  *           person for 90 days
  *   wrong   reward 0 (w 2); the basis is retracted (reply debt / promise tombstoned, cited basis facts rejected
- *           + blocked, an inferred follow-up attendance rejected); cadence kinds rest 90 days for the person
+ *           + blocked, an inferred follow-up attendance rejected, the met-at links behind a one-person event
+ *           invite rejected — one person as its card or text showed it: intel/eventInvites.ts); cadence kinds rest
+ *           90 days for the person
  *   why     neutral; returns WhyThis
  *   draft   neutral; two more openers (sync LLM call on route draft_openers, through the egress choke point; template
  *           fallback) — DRAFTS ONLY, nothing here or anywhere sends them
@@ -25,6 +27,7 @@ import { uuidv7, type SuggestionFeedback, type SuggestionFeedbackResult, type Su
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
 import { badRequest, HttpError, notFound } from '../../http/errors';
+import { eventInviteLinkIds, eventInviteShown, rejectEventInviteLinks } from '../../intel/eventInvites';
 import { withBatch, type JournalTx } from '../../journal/batch';
 import { withRun } from '../../journal/runs';
 import { undoBatch } from '../../journal/undo';
@@ -70,6 +73,8 @@ interface FeedbackPayload {
   note?: string;
   prev?: PrevState;
   batchId?: string | null;
+  /** Every journal batch the feedback wrote when there was more than one (undone together, newest first). */
+  batchIds?: string[];
   cooldowns?: { scope: string; prev: { until: number; reason: CooldownReason } | null }[];
   outcome?: boolean;
   mutedPerson?: { personId: string; kinds: SuggestionKind[] | null };
@@ -125,8 +130,8 @@ function closeLoop(db: DB, r: SuggestionRow, ctx: FeedbackContext): string | nul
   });
 }
 
-/** Journaled retraction of what a `wrong` item rested on. */
-function retractBasis(db: DB, r: SuggestionRow, ctx: FeedbackContext): string | null {
+/** Journaled retraction of what a `wrong` item rested on: the batches written (none when there was nothing). */
+function retractBasis(db: DB, r: SuggestionRow, ctx: FeedbackContext): string[] {
   const ops: ((t: JournalTx) => void)[] = [];
   const titles: string[] = [];
   let kind = 'user_edit';
@@ -180,15 +185,30 @@ function retractBasis(db: DB, r: SuggestionRow, ctx: FeedbackContext): string | 
       if (titles.length === 1) kind = 'attendee';
     }
   }
-  if (!ops.length) return null;
+  // An event invite about one person: the met-at links it rested on (several people: only the cooldown). One person
+  // as the owner saw it: Today's card leaves out people who joined since; a text names everyone the item was shown
+  // with (when in doubt, only the cooldown).
+  const invitees =
+    r.kind !== 'event_invite'
+      ? []
+      : ctx.channel === 'web'
+        ? eventInviteShown(db, { occasionId: r.occasion_id, eventId: r.event_id, personIds: personIdsOf(r), payload }, ctx.now)
+        : personIdsOf(r);
+  const metAt = r.kind === 'event_invite' && eventInviteLinkIds(db, { personIds: invitees, payload }).length > 0;
+  if (!ops.length && !metAt) return [];
   return inRun(db, ctx, (runId) => {
-    const b = withBatch(
-      db,
-      { runId, kind, title: titles.length === 1 ? titles[0]! : `Retracted ${titles.length} things (marked wrong)`, subjectPersonId: primaryOf(db, r), actor: 'user' },
-      (t) => ops.forEach((op) => op(t)),
-      { now: ctx.now },
-    );
-    return b.changes ? b.batchId : null;
+    const out: string[] = [];
+    if (ops.length) {
+      const b = withBatch(
+        db,
+        { runId, kind, title: titles.length === 1 ? titles[0]! : `Retracted ${titles.length} things (marked wrong)`, subjectPersonId: primaryOf(db, r), actor: 'user' },
+        (t) => ops.forEach((op) => op(t)),
+        { now: ctx.now },
+      );
+      if (b.changes) out.push(b.batchId);
+    }
+    if (metAt) out.push(...rejectEventInviteLinks(db, { personIds: invitees, payload }, { runId, now: ctx.now }).batchIds);
+    return out;
   });
 }
 
@@ -357,14 +377,22 @@ export async function applySuggestionFeedback(
       return resultFor(db, r, null);
     }
     case 'wrong': {
-      const batchId = retractBasis(db, r, ctx);
+      const batchIds = retractBasis(db, r, ctx);
+      const batchId = batchIds[0] ?? null;
       tx(db, () => {
         recordOutcome(db, { suggestionId: r.id, ...REWARDS.wrong, arms: arms(), now });
         const cooldowns = CADENCE_KINDS.includes(r.kind)
           ? restCooldowns(db, r, 1, 'wrong', now, WRONG_REST_DAYS)
           : restCooldowns(db, r, LEARNER.dismissCooldownMultiplier, 'wrong', now);
         db.prepare(`UPDATE suggestions SET status = 'wrong', decided_at = ?, snoozed_until = NULL, updated_at = ? WHERE id = ?`).run(now, now, r.id);
-        recordFeedback(db, r, 'wrong', ctx, { prev: prevOf(r), batchId, cooldowns, outcome: true, ...(feedback.note ? { note: feedback.note } : {}) });
+        recordFeedback(db, r, 'wrong', ctx, {
+          prev: prevOf(r),
+          batchId,
+          ...(batchIds.length > 1 ? { batchIds } : {}),
+          cooldowns,
+          outcome: true,
+          ...(feedback.note ? { note: feedback.note } : {}),
+        });
       });
       return resultFor(db, r, batchId);
     }
@@ -442,9 +470,9 @@ export function undoSuggestionFeedback(db: DB, feedbackId: string, ctx: { now: n
   if (!r) throw notFound('Suggestion');
   const p = JSON.parse(fb.payload ?? '{}') as FeedbackPayload;
   let undoBatchId: string | null = null;
-  if (p.batchId) {
-    const res = undoBatch(db, p.batchId, { actor: 'user', now: ctx.now, cascade: false });
-    undoBatchId = res.undone[0]?.undoBatchId ?? null;
+  for (const id of [...(p.batchIds ?? (p.batchId ? [p.batchId] : []))].reverse()) {
+    const res = undoBatch(db, id, { actor: 'user', now: ctx.now, cascade: false });
+    if (id === p.batchId) undoBatchId = res.undone[0]?.undoBatchId ?? null;
   }
   tx(db, () => {
     if (p.outcome) removeOutcome(db, r.id, 'explicit', ctx.now);

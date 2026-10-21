@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { fieldId, NumberField, SectionTitle, SettingRow, SettingsFrame, Toggle, useSettingsForm, type SettingsForm } from './form';
-import { pct } from './logic';
+import { parseSenderDomains, pct } from './logic';
 
 function WildcardRow({ form }: { form: SettingsForm }) {
   const v = form.values['learner.wildcard_epsilon'];
@@ -44,6 +44,29 @@ function HomeCityRow({ form }: { form: SettingsForm }) {
           setText(e.target.value);
           const t = e.target.value.trim();
           form.set('travel.home_city', t ? t : null);
+        }}
+      />
+    </SettingRow>
+  );
+}
+
+/** gmail.extra_senders: e.g. a members' club or a promoter whose event mail should count as tickets. */
+function ExtraSendersRow({ form }: { form: SettingsForm }) {
+  const v = form.values['gmail.extra_senders'];
+  const joined = v.join(', ');
+  const [text, setText] = useState(joined);
+  useEffect(() => setText((t) => (parseSenderDomains(t).join(', ') === joined ? t : joined)), [joined]);
+  return (
+    <SettingRow form={form} k="gmail.extra_senders" formatDefault={() => 'none'}>
+      <input
+        id={fieldId('gmail.extra_senders')}
+        className="input input-sm st-text-input"
+        value={text}
+        maxLength={1000}
+        placeholder="e.g. club.example, tickets.venue.example"
+        onChange={(e) => {
+          setText(e.target.value);
+          form.set('gmail.extra_senders', parseSenderDomains(e.target.value));
         }}
       />
     </SettingRow>
@@ -120,6 +143,7 @@ function AgentForm({ form }: { form: SettingsForm }) {
           <Toggle id={fieldId('commands.read_images')} checked={v['commands.read_images']} onChange={(x) => form.set('commands.read_images', x)} />
         </SettingRow>
         <HomeCityRow form={form} />
+        <ExtraSendersRow form={form} />
       </div>
     </>
   );

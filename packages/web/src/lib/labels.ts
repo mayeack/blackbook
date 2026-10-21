@@ -26,6 +26,10 @@ const SOURCES: Record<string, string> = {
   inference: 'Inferred',
   llm: 'Inferred',
   manual: 'You',
+  ticket: 'Ticket',
+  gmail: 'Gmail',
+  gphotos: 'Google Photos',
+  screenshot: 'Screenshot',
 };
 export const sourceLabel = (s: string) => SOURCES[s] ?? humanize(s);
 
@@ -47,6 +51,10 @@ const SOURCE_SHORT: Record<string, string> = {
   x: 'X',
   linkedin: 'in',
   inference: 'AI',
+  ticket: 'Tk',
+  gmail: 'Gm',
+  gphotos: 'GP',
+  screenshot: 'Sc',
 };
 export const sourceShort = (s: string) => SOURCE_SHORT[s] ?? s.slice(0, 2).replace(/^./, (c) => c.toUpperCase());
 
@@ -61,7 +69,7 @@ const CHANNELS: Record<string, string> = {
 /** The network a source name belongs to: beeper → instagram, gcal → calendar, others unchanged. */
 export const channelOf = (source: string) => CHANNELS[source] ?? source;
 
-const CHANNEL_ORDER = ['addressbook', 'imessage', 'whatsapp', 'instagram', 'partiful', 'calendar'];
+const CHANNEL_ORDER = ['addressbook', 'imessage', 'whatsapp', 'instagram', 'partiful', 'calendar', 'ticket'];
 /** Distinct networks for badges, in a fixed order (Contacts first). */
 export function channelsOf(sources: readonly string[]): string[] {
   const rank = (c: string) => {
@@ -77,6 +85,8 @@ const CARD_LABELS: Record<string, string> = {
   instagram_dyi: 'Instagram export',
   gcal: 'Google Calendar',
   addressbook: 'Contacts',
+  gmail: 'Gmail (tickets)',
+  gphotos: 'Google Photos (screenshots)',
 };
 export const sourceCardLabel = (s: string) => CARD_LABELS[s] ?? sourceLabel(s);
 
@@ -262,3 +272,38 @@ const TREATMENTS: Record<string, { label: string; hint: string }> = {
 export const treatmentLabel = (t: string) => TREATMENTS[t]?.label ?? humanize(t);
 export const treatmentHint = (t: string) => TREATMENTS[t]?.hint ?? null;
 export const DEFAULT_TREATMENTS = Object.keys(TREATMENTS);
+
+/** Ticket ledger status pills (ticket_events.status). */
+const TICKET_STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'bad' | 'neutral' }> = {
+  holding: { label: 'Holding', tone: 'ok' },
+  unconfirmed: { label: 'Unconfirmed', tone: 'neutral' },
+  gave_away: { label: 'Gave away', tone: 'neutral' },
+  sold: { label: 'Sold', tone: 'neutral' },
+  refunded: { label: 'Refunded', tone: 'warn' },
+  cancelled: { label: 'Cancelled', tone: 'bad' },
+};
+export const ticketStatus = (s: string) => TICKET_STATUS[s] ?? { label: humanize(s), tone: 'neutral' as const };
+
+const TICKET_CATEGORIES: Record<string, string> = {
+  concert: 'Concert',
+  club: 'Club night',
+  festival: 'Festival',
+  comedy: 'Comedy',
+  theater: 'Theater',
+  sports: 'Sports',
+  party: 'Party',
+  talk: 'Talk',
+  member_event: 'Members’ event',
+  other: 'Event',
+};
+export const ticketCategoryLabel = (c: string) => TICKET_CATEGORIES[c] ?? humanize(c);
+
+/** How yeackbot placed someone at an event ("via …"). */
+const MET_SIGNALS: Record<string, string> = {
+  instagram_follow: 'an Instagram follow',
+  instagram_dm: 'a first Instagram DM',
+  contact_added: 'a new contact card',
+  contact_screenshot: 'a contact screenshot',
+  user: 'you',
+};
+export const metSignalLabel = (s: string) => MET_SIGNALS[s] ?? humanize(s).toLowerCase();

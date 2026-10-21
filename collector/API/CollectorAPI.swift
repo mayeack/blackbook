@@ -18,6 +18,7 @@ final class CollectorAPI {
         var whatsapp: WhatsAppSnapshotter
         var send: SendService
         var attachments: AttachmentService
+        var ocr: TextRecognizer
         var health: HealthReporter
         var now: () -> Date
     }
@@ -112,6 +113,9 @@ final class CollectorAPI {
         case "/v1/whatsapp/snapshot":
             try expect("POST")
             return try whatsappSnapshot(r)
+        case "/v1/vision/ocr":
+            try expect("POST")
+            return try visionOCR(r)
         default:
             throw APIError.notFound
         }
@@ -212,6 +216,29 @@ final class CollectorAPI {
         let result = try deps.whatsapp.snapshot(force: body.bool("force") ?? false)
         guard case let .object(fields) = result.json else { throw APIError.internalError("encode") }
         return envelope(fields)
+    }
+
+    // MARK: Vision
+
+    /// On-device OCR of one image the caller holds (`{data_base64, max_lines?}` → `{width, height, lines}`). The only
+    /// route with an 8 MiB body (HTTPLimits.routeBodyBytes); the image is never written to disk, its text never logged.
+    private func visionOCR(_ r: LoopbackRequest) throws -> JSON {
+        let body = try Params.jsonBody(r)
+        guard let encoded = body.string("data_base64"), !encoded.isEmpty else {
+            throw APIError.badRequest("`data_base64` is required")
+        }
+        guard encoded.utf8.count <= VisionOCRService.maxBase64Chars else {
+            throw APIError.payloadTooLarge("`data_base64` exceeds \(HTTPLimits.describe(VisionOCRService.maxBase64Chars))")
+        }
+        var maxLines = VisionOCRService.maxLines
+        if body.has("max_lines") {
+            guard let n = body.int("max_lines"), (1...VisionOCRService.maxLines).contains(n) else {
+                throw APIError.badRequest("`max_lines` must be an integer from 1 to \(VisionOCRService.maxLines)")
+            }
+            maxLines = n
+        }
+        guard let data = Base64Payload.decode(encoded) else { throw APIError.badRequest("`data_base64` must be base64") }
+        return envelope(try deps.ocr.recognize(imageData: data, maxLines: maxLines).fields)
     }
 }
 

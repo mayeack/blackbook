@@ -2,8 +2,9 @@
  * Scheduler jobs for Partiful (PLAN "Ingestion → Partiful", read-only function allowlist only):
  *   partiful           daily 02:00; a run missed while the Mac slept or the server was down runs on the next tick
  *   partiful-contacts  weekly, Sunday 03:30 (getContacts / getMutuals)
- *   partiful-hosted-guests  every 30 min: guest lists of events I host in the next 15 days (no hosted event → no
- *                      calls), so invite suggestions and the brief check against who is invited right now
+ *   partiful-hosted-guests  every 30 min: guest lists of events I host in the next 15 days and of the Partiful
+ *                      events behind a show I hold tickets to in the next 3 weeks (none → no calls), so invite
+ *                      suggestions and the brief check against who is invited right now
  * The session comes from the sandbox browser over CDP and is kept encrypted in the secrets table (session.ts).
  * One auth manager and one rate gate (≤1 call/s) are shared by both jobs; each run gets its own 300-call budget.
  * A failed pass records source_health (auth_required → "Sign in to Partiful in the sandbox browser") and

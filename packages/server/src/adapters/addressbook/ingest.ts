@@ -15,6 +15,9 @@
  *   4. the Contacts card is the highest-precedence name source: name, nickname, company, job title and birthday
  *      (display data only) follow the person's primary card unless the user locked that field in yeackbot.
  * A card that leaves the dump detaches its addressbook_id identity (journaled), unless the dump looks truncated.
+ * Every pass, the unchanged-dump and unchanged-card fast paths included, fills addressbook_cards.created_at from the
+ * dump (the AddressBook creation date the collector reads) with one batched UPDATE that never overwrites a known
+ * value. It sits outside content_hash, so it never re-applies a card (met-at's contact_added signal reads it).
  * Never writes to Contacts. Logs and stats carry counts only.
  */
 import type { ContactsResponse } from '@yb/shared/collector/v1';
@@ -56,6 +59,8 @@ export interface AddressBookStats {
   keys_held: number;
   shared_marked: number;
   people_updated: number;
+  /** Stored cards whose creation date was filled this pass. */
+  created_at_filled: number;
 }
 
 const emptyStats = (): AddressBookStats => ({
@@ -75,6 +80,7 @@ const emptyStats = (): AddressBookStats => ({
   keys_held: 0,
   shared_marked: 0,
   people_updated: 0,
+  created_at_filled: 0,
 });
 
 interface PersonRow {
@@ -464,6 +470,22 @@ class CardPass {
   }
 }
 
+/**
+ * `created_at = coalesce(created_at, card.created_at)` for every card of the dump that has a stored row, in one
+ * statement. A creation date never changes, so a known value is kept; content_hash is untouched. Returns the rows set.
+ */
+export function fillCreatedAt(db: DB, cards: readonly ParsedCard[]): number {
+  const pairs = cards.filter((c) => c.createdAt !== null).map((c) => [c.id, c.createdAt]);
+  if (!pairs.length) return 0;
+  return db
+    .prepare(
+      `UPDATE addressbook_cards SET created_at = d.created_at
+         FROM (SELECT value ->> 0 AS card_id, value ->> 1 AS created_at FROM json_each(?)) AS d
+        WHERE addressbook_cards.card_id = d.card_id AND addressbook_cards.created_at IS NULL`,
+    )
+    .run(JSON.stringify(pairs)).changes;
+}
+
 export interface ApplyOptions {
   now?: number;
   jobRunId?: number | null;
@@ -475,7 +497,7 @@ export interface ApplyOptions {
 export function applyContacts(db: DB, resp: ContactsResponse, o: ApplyOptions = {}): AddressBookStats {
   const now = o.now ?? Date.now();
   const byId = new Map<string, ParsedCard>();
-  for (const item of resp.items) if (!byId.has(item.id)) byId.set(item.id, parseCard(item));
+  for (const item of resp.items) if (!byId.has(item.id)) byId.set(item.id, parseCard(item, now));
   const cards = [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
   const health = (stats: AddressBookStats) =>
     recordSourceHealth(db, SOURCE, now, 'ok', {
@@ -490,6 +512,7 @@ export function applyContacts(db: DB, resp: ContactsResponse, o: ApplyOptions = 
     stats.dump_unchanged = 1;
     tx(db, () => {
       db.prepare('UPDATE addressbook_cards SET last_seen_at = ? WHERE removed_at IS NULL').run(now);
+      stats.created_at_filled = fillCreatedAt(db, cards);
       writeCursor(db, SOURCE, DUMP_SCOPE, resp.hash, now);
     });
     health(stats);
@@ -531,6 +554,7 @@ export function applyContacts(db: DB, resp: ContactsResponse, o: ApplyOptions = 
       db.prepare(
         `UPDATE addressbook_cards SET last_seen_at = ? WHERE removed_at IS NULL AND card_id IN (SELECT value FROM json_each(?))`,
       ).run(now, inSet(cards.map((c) => c.id)));
+      stats.created_at_filled = fillCreatedAt(db, cards);
       writeCursor(db, SOURCE, DUMP_SCOPE, resp.hash, now, { meta: { cards: cards.length } });
     });
     run.finish('ok', { cards: cards.length });

@@ -62,6 +62,8 @@ export const AGENT_ROUTES: readonly RouteSpec[] = [
   r('GET', '/people/:a/with/:b', 'routes/personExtras.ts', 'PairView'),
   r('GET', '/loops', 'routes/personExtras.ts', 'OpenLoopList'),
   r('POST', '/loops/:type/:id', 'routes/personExtras.ts', 'BatchRef', 'LoopAction'),
+  r('GET', '/people/:id/met', 'routes/personExtras.ts', 'MetAtList'),
+  r('POST', '/people/:id/met/:linkId/wrong', 'routes/personExtras.ts', 'BatchRef'),
   // network
   r('GET', '/network', 'routes/network.ts', 'NetworkGraph', 'NetworkQuery'),
   // circles / tags / locations
@@ -97,6 +99,8 @@ export const AGENT_ROUTES: readonly RouteSpec[] = [
   // event & travel intel
   r('GET', '/events/:id/brief', 'routes/intel.ts', 'EventBrief'),
   r('GET', '/trips', 'routes/intel.ts', 'TripsResponse', 'TripsQuery'),
+  // tickets (Gmail ticket ledger)
+  r('GET', '/tickets', 'routes/tickets.ts', 'TicketList', 'TicketsQuery'),
 ];
 
 /** Routes served by one module. */

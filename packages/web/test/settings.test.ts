@@ -65,6 +65,8 @@ const values = (o: Partial<SettingsValues> = {}): SettingsValues => ({
   'commands.read_images': true,
   'intros.enabled': true,
   'travel.home_city': null,
+  'gmail.backfill_days': 1095,
+  'gmail.extra_senders': [],
   tz: 'UTC',
   ...o,
 });
@@ -277,5 +279,14 @@ describe('push on this device', () => {
     });
     expect(await subscribeThisDevice(null, { ...base, requestPermission: async () => 'granted' })).toEqual({ ok: false, reason: 'no_key' });
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe('extra ticket senders (gmail.extra_senders)', () => {
+  it('keeps valid, lowercased, de-duplicated domains from comma or space separated text', async () => {
+    const { parseSenderDomains } = await import('../src/pages/settings/logic');
+    expect(parseSenderDomains('Club.Example, tickets.venue.example  @promo.example;club.example')).toEqual(['club.example', 'tickets.venue.example', 'promo.example']);
+    expect(parseSenderDomains('not a domain, x, -bad.example, ok.example')).toEqual(['ok.example']);
+    expect(parseSenderDomains('')).toEqual([]);
   });
 });

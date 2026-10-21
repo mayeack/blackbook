@@ -1,5 +1,16 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type {
+  GmailDisconnectResult,
+  GmailStatus,
+  GphotosDisconnectResult,
+  GphotosSessionStart,
+  GphotosSessionView,
+  GphotosStatus,
+  TicketList,
+} from '@yb/shared';
 import { normalizeEventsPage, normalizeGoogleStatus, normalizeOccasionDetail } from '../lib/events';
+import { gmailNotConfigured, gphotosNotConfigured, sessionActive } from '../lib/googleProducts';
+import type { TicketsWhen } from '../lib/tickets';
 import { api, ApiError, isApiError, qs } from './client';
 import type {
   ActivityPage,
@@ -28,6 +39,10 @@ export const keys = {
   events: (when: EventsWhen) => ['events', when] as const,
   event: (id: string) => ['event', id] as const,
   google: ['google', 'status'] as const,
+  tickets: (when: TicketsWhen) => ['tickets', when] as const,
+  gmail: ['gmail', 'status'] as const,
+  gphotos: ['gphotos', 'status'] as const,
+  gphotosSession: (id: string) => ['gphotos', 'session', id] as const,
 };
 
 /** 501 = that API hasn't landed on this server yet: show "not available", don't retry. */
@@ -188,6 +203,113 @@ export function useGoogleDisconnect() {
   return useMutation({
     mutationFn: (o: { deleteData?: boolean } = {}) => api.post<unknown>('/google/disconnect', o.deleteData ? { deleteData: true } : {}),
     meta: { silent: true },
-    onSuccess: () => invalidateCalendar(qc),
+    onSuccess: () => {
+      invalidateCalendar(qc);
+      // When nothing else held a Google token the grant was revoked: Gmail and Photos read as disconnected too.
+      void qc.invalidateQueries({ queryKey: keys.gmail });
+      void qc.invalidateQueries({ queryKey: keys.gphotos });
+    },
   });
 }
+
+// ---------------------------------------------------------------------------------------------- tickets
+
+/** The ticket ledger from Gmail (GET /tickets), keyset-paged. */
+export function useTickets(when: TicketsWhen) {
+  return useInfiniteQuery({
+    queryKey: keys.tickets(when),
+    queryFn: ({ pageParam }) => api.get<TicketList>(`/tickets${qs({ when, cursor: pageParam })}`),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+    retry: retryOnce,
+  });
+}
+
+// ---------------------------------------------------------------------------------------------- Gmail & Google Photos
+
+/** Like /google/status: 503 GOOGLE_NOT_CONFIGURED is a status ("set up the OAuth client"), not an error. */
+async function orNotConfigured<T>(get: () => Promise<T>, fallback: () => T): Promise<T> {
+  try {
+    return await get();
+  } catch (e) {
+    if (isApiError(e) && e.code === 'GOOGLE_NOT_CONFIGURED') return fallback();
+    throw e;
+  }
+}
+
+export const useGmailStatus = () =>
+  useQuery({
+    queryKey: keys.gmail,
+    queryFn: () => orNotConfigured(() => api.get<GmailStatus>('/gmail/status'), gmailNotConfigured),
+    retry: retryOnce,
+    staleTime: 60_000,
+  });
+
+export const useGphotosStatus = () =>
+  useQuery({
+    queryKey: keys.gphotos,
+    queryFn: () => orNotConfigured(() => api.get<GphotosStatus>('/gphotos/status'), gphotosNotConfigured),
+    retry: retryOnce,
+    staleTime: 60_000,
+  });
+
+/**
+ * After a Gmail / Photos disconnect. When nothing else held a Google token the server revoked the grant and
+ * disconnected every product (even when Google refused the revocation, so `revoked` alone can't tell): Calendar too.
+ */
+const invalidateProduct = (qc: ReturnType<typeof useQueryClient>, key: readonly unknown[]) => {
+  void qc.invalidateQueries({ queryKey: key });
+  void qc.invalidateQueries({ queryKey: keys.sources });
+  void qc.invalidateQueries({ queryKey: keys.google });
+};
+
+/** Disconnects Gmail; `deleteData` also deletes the ticket emails and events yeackbot recorded. */
+export function useGmailDisconnect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (o: { deleteData?: boolean } = {}) => api.post<GmailDisconnectResult>('/gmail/disconnect', o.deleteData ? { deleteData: true } : {}),
+    meta: { silent: true },
+    onSuccess: () => {
+      invalidateProduct(qc, keys.gmail);
+      void qc.invalidateQueries({ queryKey: ['tickets'] });
+    },
+  });
+}
+
+/** Disconnects Google Photos (files and open picks are always cleared); `deleteData` also deletes screenshot records. */
+export function useGphotosDisconnect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (o: { deleteData?: boolean } = {}) => api.post<GphotosDisconnectResult>('/gphotos/disconnect', o.deleteData ? { deleteData: true } : {}),
+    meta: { silent: true },
+    onSuccess: () => invalidateProduct(qc, keys.gphotos),
+  });
+}
+
+/** Starts a Google Photos Picker session (the caller opens its page). */
+export function useStartPick() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<GphotosSessionStart>('/gphotos/session'),
+    meta: { silent: true },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.gphotos }),
+  });
+}
+
+/**
+ * One picker session's progress, polled while it is still moving: every 3 s while picking and downloading, every 15 s
+ * while the Mac reads the screenshots (the gphotos job runs once a minute).
+ */
+export const useGphotosSession = (id: string | null) =>
+  useQuery({
+    queryKey: keys.gphotosSession(id ?? ''),
+    queryFn: () => api.get<GphotosSessionView>(`/gphotos/session/${encodeURIComponent(id!)}`),
+    enabled: !!id,
+    retry: retryOnce,
+    refetchInterval: (q) => {
+      const s = q.state.data;
+      if (!s) return 3_000;
+      if (!sessionActive(s)) return false;
+      return s.status === 'done' ? 15_000 : 3_000;
+    },
+  });

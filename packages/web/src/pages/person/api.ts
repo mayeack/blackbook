@@ -1,6 +1,7 @@
 /**
  * Person page extensions (routes/personExtras.ts): tie stats, facts (+ Wrong), open loops (+ Done), starters,
- * connections (+ Wrong), notes CRUD, merge history (+ Split), collection membership, and the pair page. Paths and
+ * connections (+ Wrong), notes CRUD, merge history (+ Split), collection membership, where you met them (+ Wrong),
+ * and the pair page. Paths and
  * shapes: AGENT_ROUTES / @yb/shared. A route that hasn't landed answers 501 (`isNotImplemented`): never retried,
  * and each section shows "not available yet" on its own instead of failing the page.
  *
@@ -14,6 +15,7 @@ import type {
   ConnectionWrong,
   LoopAction,
   MergeHistory,
+  MetAtList,
   NoteList,
   NoteWriteResult,
   OpenLoopList,
@@ -38,6 +40,7 @@ export const personKeys = {
   notes: (id: string) => ['person', id, 'notes'] as const,
   merges: (id: string) => ['person', id, 'merges'] as const,
   collections: (id: string) => ['person', id, 'collections'] as const,
+  met: (id: string) => ['person', id, 'met'] as const,
   pair: (a: string, b: string) => ['pair', a, b] as const,
 };
 
@@ -85,6 +88,10 @@ export const usePersonCollections = (id: string) =>
     retry: retryOnce,
     enabled: !!id,
   });
+
+/** Where the owner met them (active met-at links; usually none). */
+export const useMetAt = (id: string) =>
+  useQuery({ queryKey: personKeys.met(id), queryFn: get<MetAtList>(`/people/${enc(id)}/met`), retry: retryOnce, enabled: !!id });
 
 export const usePair = (a: string, b: string) =>
   useQuery({ queryKey: personKeys.pair(a, b), queryFn: get<PairView>(`/people/${enc(a)}/with/${enc(b)}`), retry: retryOnce, enabled: !!a && !!b });
@@ -197,6 +204,20 @@ export function useEditPersonCollections(personId: string) {
       void qc.invalidateQueries({ queryKey: personKeys.all(personId) });
       void qc.invalidateQueries({ queryKey: ['collections'] });
       void qc.invalidateQueries({ queryKey: ['network'] });
+      touchActivity(qc);
+    },
+  });
+}
+
+/** "Not where I met them": rejects the link for good (journaled, undoable from Today). Tickets show "met here" too. */
+export function useMetAtWrong(personId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (linkId: string) => api.post<BatchRef>(`/people/${enc(personId)}/met/${enc(linkId)}/wrong`),
+    meta: { silent: true },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: personKeys.met(personId) });
+      void qc.invalidateQueries({ queryKey: ['tickets'] });
       touchActivity(qc);
     },
   });

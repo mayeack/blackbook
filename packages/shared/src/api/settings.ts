@@ -92,6 +92,20 @@ export const SettingsValues = z.object({
   /** Home city for travel intel (falls back to the owner's location fact); free text, matched to a metro. */
   'travel.home_city': z.string().min(1).max(80).nullable(),
 
+  // ---- gmail (the read-only ticket source, adapters/gmail; group features)
+  /** How far back the first Gmail pass looks for ticket mail (days). */
+  'gmail.backfill_days': days(30, 3650),
+  /** Sender domains to read as ticket vendors besides the built-in list ("tickets.venue.example"). */
+  'gmail.extra_senders': z
+    .array(
+      z
+        .string()
+        .min(3)
+        .max(100)
+        .regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/),
+    )
+    .max(50),
+
   // ---- locale
   /** IANA zone for digests, day boundaries and LLM windows; defaults to the system zone. */
   tz: TimeZoneName,

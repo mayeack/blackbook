@@ -6,18 +6,22 @@
  *   - a reservation next to an own event that has no venue;
  *   - the same Partiful id (a partiful.com/e/<id> link, or the subscribed feed's UID), which also links the
  *     occasion to events(source='partiful').
+ * Ticket copies (tickets.ts: ticket_events rows the owner holds) join after the calendar copies cluster, at most
+ * one per cluster; an unmatched one is a ticket-only occasion (occasion_sources.source 'ticket').
  * occasions and occasion_sources are derived (rebuilt every run) but ids are stable: a cluster keeps the occasion
- * its calendar events already belong to, two occasions that turn out to be one are pointer-merged
- * (merged_into_id), and an occasion whose events disappear is cancelled/excluded rather than deleted, so the
- * journaled attendee rows that point at it never dangle.
+ * its calendar events or ticket already belong to (copies are keyed by (source, id) everywhere), two occasions
+ * that turn out to be one are pointer-merged (merged_into_id), and an occasion whose copies disappear (or whose
+ * ticket was sold, given away or cancelled) is cancelled/excluded rather than deleted, so the journaled attendee
+ * rows that point at it never dangle.
  */
 import { addDays, localDate, uuidv7 } from '@yb/shared';
 import { z } from 'zod';
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
 import type { CalendarTreatment } from './calendars';
-import { classifyOccasion, type Classification } from './classify';
+import { classifyOccasion, type Classification, type OccasionKind } from './classify';
 import { parseMentions, partifulIdFromUid, partifulIdsIn, plainText, reservationVenue, venueFromTitle, venueKey, ticketCount, words, type Mention } from './text';
+import type { TicketCopy } from './tickets';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -48,8 +52,13 @@ export interface ExplicitAttendee {
   calEventId: string;
 }
 
+export type CopySource = 'calendar' | 'ticket';
+
 export interface CalEvent {
+  /** calendar_events.id, or the surviving ticket_events.id of a ticket copy. */
   id: string;
+  source: CopySource;
+  /** '' for a ticket copy. */
   calendarId: string;
   treatment: Exclude<CalendarTreatment, 'excluded'>;
   title: string;
@@ -66,11 +75,20 @@ export interface CalEvent {
   dates: { start: string; end: string } | null;
   partifulIds: string[];
   reservation: boolean;
+  /** Google put it on the calendar from a Gmail message (eventType 'fromGmail'). */
+  fromGmail: boolean;
   selfDeclined: boolean;
   attendees: ExplicitAttendee[];
   /** On its own, this event classifies as social (a reservation next to it is the same evening). */
   social: boolean;
+  /** Its own rule kind (a ticket copy is 'social'). */
+  kind: OccasionKind;
+  /** The ledger row behind a ticket copy; null for calendar copies. */
+  ticket: TicketCopy | null;
 }
+
+/** A copy's key in claims, roles and keep-sets: ids of different sources never collide. */
+export const copyKey = (e: Pick<CalEvent, 'source' | 'id'>): string => `${e.source}:${e.id}`;
 
 interface CalRow {
   id: string;
@@ -172,7 +190,7 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
     const allDay = r.all_day === 1;
     const endsAt = r.ends_at && r.ends_at > r.starts_at ? r.ends_at : r.starts_at + (allDay ? DAY : DEFAULT_LENGTH);
     const partifulIds = [...new Set(ids)];
-    const social = classifyOccasion({
+    const own = classifyOccasion({
       titles: [title],
       notes: [notes],
       location: location || null,
@@ -183,9 +201,10 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
       hasReservation: false,
       mentions: parseMentions(title, notes),
       explicitAttendees: list.length,
-    }).isSocial;
+    });
     out.push({
       id: r.id,
+      source: 'calendar',
       calendarId: r.calendar_id,
       treatment,
       title,
@@ -201,9 +220,12 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
       dates: allDay && r.start_date && r.end_date ? { start: r.start_date, end: r.end_date } : null,
       partifulIds,
       reservation: resVenue !== null || r.event_type === 'fromGmail',
+      fromGmail: r.event_type === 'fromGmail',
       selfDeclined,
       attendees: list,
-      social,
+      social: own.isSocial,
+      kind: own.kind,
+      ticket: null,
     });
   }
   return out;
@@ -273,6 +295,7 @@ export type SourceRole = 'primary' | 'duplicate' | 'reservation' | 'feed_copy';
 export interface OccasionDraft {
   events: CalEvent[];
   primary: CalEvent;
+  /** By copyKey (source:id). */
   roles: Map<string, SourceRole>;
   treatment: Exclude<CalendarTreatment, 'excluded'>;
   title: string;
@@ -288,14 +311,24 @@ export interface OccasionDraft {
   selfDeclined: boolean;
   mentions: Mention[];
   attendees: ExplicitAttendee[];
+  /** The calendar text's count, else the ticket copy's (bought + received − sold − refunded). */
   ticketCount: number | null;
   classification: Classification;
+  /** The ticket the owner holds for it (a cluster has at most one ticket copy). */
+  ticket: TicketCopy | null;
+  /** Gmail-made copies of a show whose tickets he sold, gave away or lost: the occasion is 'excluded'. */
+  ticketReleased: boolean;
 }
 
 const TREATMENT_RANK: Record<string, number> = { attending: 3, feed: 2, candidate: 1 };
+/** A ticket copy ranks under the owner's own event and over feed copies, shared calendars and reservations. */
+const TICKET_RANK = 2.9;
 
 function primaryOf(events: CalEvent[]): CalEvent {
-  const score = (e: CalEvent) => (TREATMENT_RANK[e.treatment] ?? 0) - (e.reservation ? 2.5 : 0) + (e.notes ? 0.5 : 0) + (e.partifulIds.length ? 0.25 : 0);
+  const score = (e: CalEvent) =>
+    e.source === 'ticket'
+      ? TICKET_RANK
+      : (TREATMENT_RANK[e.treatment] ?? 0) - (e.reservation ? 2.5 : 0) + (e.notes ? 0.5 : 0) + (e.partifulIds.length ? 0.25 : 0);
   return [...events].sort((a, b) => score(b) - score(a) || a.startsAt - b.startsAt || (a.id < b.id ? -1 : 1))[0]!;
 }
 
@@ -303,7 +336,8 @@ function mergeMentions(events: CalEvent[]): Mention[] {
   const out: Mention[] = [];
   const seen = new Map<string, number>();
   for (const e of events) {
-    if (e.reservation) continue;
+    // a vendor's title names performers ("Fern & The Lanterns"), never the owner's companions
+    if (e.reservation || e.source === 'ticket') continue;
     for (const m of parseMentions(e.title, e.notes)) {
       const k = `${m.norm}|${m.role}`;
       const at = seen.get(k);
@@ -316,11 +350,13 @@ function mergeMentions(events: CalEvent[]): Mention[] {
   return out;
 }
 
-export function draftOccasion(db: DB, events: CalEvent[]): OccasionDraft {
+export function draftOccasion(db: DB, events: CalEvent[], o: { ticketReleased?: boolean } = {}): OccasionDraft {
   const primary = primaryOf(events);
   const sorted = [primary, ...events.filter((e) => e !== primary).sort((a, b) => a.startsAt - b.startsAt || (a.id < b.id ? -1 : 1))];
   const roles = new Map<string, SourceRole>();
-  for (const e of sorted) roles.set(e.id, e === primary ? 'primary' : e.reservation ? 'reservation' : e.treatment === 'feed' ? 'feed_copy' : 'duplicate');
+  for (const e of sorted) roles.set(copyKey(e), e === primary ? 'primary' : e.reservation ? 'reservation' : e.treatment === 'feed' ? 'feed_copy' : 'duplicate');
+  const ticket = sorted.find((e) => e.ticket !== null)?.ticket ?? null;
+  const calendarCopies = sorted.filter((e) => e.source === 'calendar');
   const treatment = sorted.some((e) => e.treatment === 'attending') ? 'attending' : sorted.some((e) => e.treatment === 'feed') ? 'feed' : 'candidate';
   const partifulId = sorted.flatMap((e) => e.partifulIds)[0] ?? null;
   const ev = partifulId
@@ -345,6 +381,7 @@ export function draftOccasion(db: DB, events: CalEvent[]): OccasionDraft {
     hasReservation: sorted.some((e) => e.reservation),
     mentions,
     explicitAttendees: attendees.size,
+    ...(ticket ? { ticketCategory: ticket.category } : {}),
   });
   return {
     events: sorted,
@@ -363,8 +400,10 @@ export function draftOccasion(db: DB, events: CalEvent[]): OccasionDraft {
     selfDeclined: attending.length > 0 && attending.every((e) => e.selfDeclined),
     mentions,
     attendees: [...attendees.values()],
-    ticketCount: ticketCount(...sorted.flatMap((e) => [e.title, e.notes])),
+    ticketCount: ticketCount(...calendarCopies.flatMap((e) => [e.title, e.notes])) ?? ticket?.count ?? null,
     classification,
+    ticket,
+    ticketReleased: o.ticketReleased === true,
   };
 }
 
@@ -452,13 +491,20 @@ export function occasionChain(db: DB, id: string): string[] {
   return out;
 }
 
+/** occasion_sources refs that stand for a copy: its id, plus (ticket copies) the ledger rows merged into it. */
+const refsOf = (e: CalEvent): string[] => (e.ticket ? [e.id, ...e.ticket.aliases] : [e.id]);
+
 /**
  * Writes the drafts: stable ids, pointer merges, occasion_sources rewritten per cluster, changed columns only
- * (a re-run over unchanged calendars writes nothing). Occasions in [from, to] whose events are gone become
- * 'cancelled' (or 'excluded' when their calendar is now excluded, or its synced events were deleted: the calendar
- * adapter never deletes an event Google cancelled, only an excluded or removed calendar's events, and on
- * disconnect). The status of a live occasion is settled by the
- * run (corroboration needs messages); a new one starts 'active', 'candidate' or 'excluded' (the owner declined).
+ * (a re-run over unchanged calendars and tickets writes nothing). Copies are keyed by (source, id) everywhere;
+ * a ticket copy also claims through the ledger rows merged into it, and those stale refs are rewritten to the
+ * survivor. Occasions in [from, to] whose copies are gone become 'cancelled' (or 'excluded' when their calendar is
+ * now excluded, or its synced events were deleted: the calendar adapter never deletes an event Google cancelled,
+ * only an excluded or removed calendar's events, and on disconnect). A ticket-only occasion whose ticket was sold,
+ * given away, refunded or cancelled is 'cancelled' that way; one still backed by a calendar copy stays. The status
+ * of a live occasion is settled by the run (corroboration needs messages); a new one starts 'active', 'candidate'
+ * or 'excluded' (the owner declined, or a released ticket retired its Gmail-made copy). A live ticket source lets
+ * the rules override an LLM classification (never the user's).
  */
 export function syncOccasions(
   db: DB,
@@ -467,23 +513,29 @@ export function syncOccasions(
 ): { occasions: SyncedOccasion[]; stats: SyncStats } {
   return tx(db, () => {
     const stats: SyncStats = { created: 0, updated: 0, merged: 0, retired: 0 };
-    const sourceOf = db.prepare(`SELECT occasion_id FROM occasion_sources WHERE source = 'calendar' AND source_ref = ?`).pluck();
-    const roleOf = db.prepare(`SELECT role FROM occasion_sources WHERE source = 'calendar' AND source_ref = ?`).pluck();
+    const sourceOf = db.prepare(`SELECT occasion_id FROM occasion_sources WHERE source = ? AND source_ref = ?`).pluck();
+    const roleOf = db.prepare(`SELECT role FROM occasion_sources WHERE source = ? AND source_ref = ?`).pluck();
     const getOcc = db.prepare('SELECT * FROM occasions WHERE id = ?');
 
     // 1. which existing occasions each cluster claims (through merge chains): overlap, and whether it holds the
-    //    occasion's primary event (on a split, that half keeps the id)
+    //    occasion's primary copy (on a split, that half keeps the id)
     const claims: { cluster: number; occ: string; overlap: number; primary: number; createdAt: number }[] = [];
     drafts.forEach((d, cluster) => {
       const counts = new Map<string, { overlap: number; primary: number }>();
       for (const e of d.events) {
-        const occ = sourceOf.get(e.id) as string | undefined;
-        if (!occ) continue;
-        const s = survivingOccasion(db, occ);
-        const c = counts.get(s) ?? { overlap: 0, primary: 0 };
-        c.overlap++;
-        if (roleOf.get(e.id) === 'primary') c.primary = 1;
-        counts.set(s, c);
+        const mine = new Map<string, number>();
+        for (const ref of refsOf(e)) {
+          const occ = sourceOf.get(e.source, ref) as string | undefined;
+          if (!occ) continue;
+          const s = survivingOccasion(db, occ);
+          mine.set(s, Math.max(mine.get(s) ?? 0, roleOf.get(e.source, ref) === 'primary' ? 1 : 0));
+        }
+        for (const [s, primary] of mine) {
+          const c = counts.get(s) ?? { overlap: 0, primary: 0 };
+          c.overlap++;
+          if (primary) c.primary = 1;
+          counts.set(s, c);
+        }
       }
       for (const [occ, c] of counts) claims.push({ cluster, occ, ...c, createdAt: (getOcc.get(occ) as OccasionRow).created_at });
     });
@@ -519,6 +571,7 @@ export function syncOccasions(
     const out: SyncedOccasion[] = [];
     drafts.forEach((d, cluster) => {
       const c = d.classification;
+      const excluded = d.selfDeclined || d.ticketReleased;
       let id = idOf.get(cluster);
       const created = !id;
       const base = {
@@ -542,14 +595,14 @@ export function syncOccasions(
           corroborated: d.treatment === 'candidate' ? 0 : 1,
           classification_confidence: c.confidence,
           classification_rule: c.rule,
-          status: d.selfDeclined ? 'excluded' : d.treatment === 'candidate' ? 'candidate' : 'active',
+          status: excluded ? 'excluded' : d.treatment === 'candidate' ? 'candidate' : 'active',
           ...base,
           now: o.now,
         });
         stats.created++;
       } else {
         const cur = getOcc.get(id) as OccasionRow;
-        const ruled = cur.classified_by === null || cur.classified_by === 'rule';
+        const ruled = cur.classified_by === null || cur.classified_by === 'rule' || (cur.classified_by === 'llm' && d.ticket !== null);
         const patch: Record<string, unknown> = { ...base, merged_into_id: null };
         if (ruled) {
           Object.assign(patch, {
@@ -564,12 +617,15 @@ export function syncOccasions(
         if (updateChanged(db, id, cur, patch, o.now)) stats.updated++;
       }
 
-      // sources: this cluster's calendar events (moved from wherever they were) + the linked Partiful event
+      // sources: this cluster's calendar events and ticket (moved from wherever they were; a merged ticket row's
+      // ref becomes its survivor's) + the linked Partiful event
       const before = JSON.stringify(existingSources.all(id));
       for (const e of d.events) {
-        const owner = sourceOf.get(e.id) as string | undefined;
-        if (owner && owner !== id) delSources.run('calendar', e.id);
-        insSource.run(id, 'calendar', e.id, d.roles.get(e.id)!, o.now);
+        for (const ref of refsOf(e)) {
+          const owner = sourceOf.get(e.source, ref) as string | undefined;
+          if (owner && (owner !== id || ref !== e.id)) delSources.run(e.source, ref);
+        }
+        insSource.run(id, e.source, e.id, d.roles.get(copyKey(e))!, o.now);
       }
       if (d.eventId) {
         const owner = partifulOwner.get(d.eventId) as string | undefined;
@@ -578,10 +634,11 @@ export function syncOccasions(
           insSource.run(id, 'partiful', d.eventId, 'duplicate', o.now);
         }
       }
-      // calendar rows of this occasion that are no longer in the cluster go (their event moved or vanished)
-      const keep = new Set(d.events.map((e) => e.id));
+      // calendar and ticket rows of this occasion that are no longer in the cluster go (their event moved or
+      // vanished, or the owner no longer holds the ticket)
+      const keep = new Set(d.events.map(copyKey));
       for (const s of existingSources.all(id) as { source: string; source_ref: string }[]) {
-        if (s.source === 'calendar' && !keep.has(s.source_ref)) delSources.run('calendar', s.source_ref);
+        if ((s.source === 'calendar' || s.source === 'ticket') && !keep.has(`${s.source}:${s.source_ref}`)) delSources.run(s.source, s.source_ref);
         if (s.source === 'partiful' && s.source_ref !== d.eventId) delSources.run('partiful', s.source_ref);
       }
       if (!created && JSON.stringify(existingSources.all(id)) !== before) touch(db, id, o.now);
@@ -599,7 +656,8 @@ export function syncOccasions(
       stats.merged++;
     }
 
-    // occasions in range that no cluster claimed: their events were cancelled, deleted or excluded
+    // occasions in range that no cluster claimed: their events were cancelled, deleted or excluded, or the owner
+    // no longer holds the ticket (excluded_src counts calendar rows only, so a ticket-only one is 'cancelled')
     const live = new Set(out.map((x) => x.id));
     const orphans = db
       .prepare(
@@ -608,7 +666,7 @@ export function syncOccasions(
                         AND (ce.id IS NULL OR ce.calendar_id IN (SELECT value FROM json_each(@ex)))) AS excluded_src
          FROM occasions o
          WHERE o.merged_into_id IS NULL AND o.starts_at BETWEEN @from AND @to AND o.status NOT IN ('cancelled')
-           AND EXISTS (SELECT 1 FROM occasion_sources s WHERE s.occasion_id = o.id AND s.source = 'calendar')`,
+           AND EXISTS (SELECT 1 FROM occasion_sources s WHERE s.occasion_id = o.id AND s.source IN ('calendar', 'ticket'))`,
       )
       .all({ from: o.from, to: o.to, ex: JSON.stringify([...o.excludedCalendars]) }) as (OccasionRow & { excluded_src: number })[];
     for (const occ of orphans) {

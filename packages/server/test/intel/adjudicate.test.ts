@@ -14,7 +14,8 @@ import { createLlmClient } from '../../src/llm/client';
 import type { LlmClient } from '../../src/llm/types';
 import { FakeLlmClient } from '../fakes/llm';
 import { FakeAnthropic, reply, type BatchItemReply, type FakeMessage } from '../llm/fakeAnthropic';
-import { attendeesOf, buildWorld, DAY, HOUR, NOW, occasionOf, TZ, type World } from '../pipeline/occasions/world';
+import { ticketEvent } from '../pipeline/occasions/ticketFixtures';
+import { attendeesOf, buildWorld, DAY, evening, HOUR, NOW, occasionOf, TZ, type World } from '../pipeline/occasions/world';
 
 let w: World;
 let egress: Egress;
@@ -212,6 +213,42 @@ describe('apply (the real client over a fake API)', () => {
     runOccasions(w.db, { now: LATER, timeZone: TZ });
     expect(w.db.prepare('SELECT kind, is_social FROM occasions WHERE id = ?').get(occ('games'))).toEqual({ kind: 'work', is_social: 0 });
     expect(row('games', w.ines.id)).toMatchObject({ status: 'withdrawn' });
+  });
+
+  it('"not a get-together" never turns an occasion the owner holds a ticket to non-social', async () => {
+    ticketEvent(w.db, { title: 'Fernhollow', venue: 'Copperline Hall', start: evening(-8, 20) });
+    runOccasions(w.db, { now: NOW + 1, timeZone: TZ });
+    expect(w.db.prepare(`SELECT count(*) FROM occasion_sources WHERE occasion_id = ? AND source = 'ticket'`).pluck().get(occ('concert'))).toBe(1);
+    const { llm } = realLlm({ concert: () => msg(answer([], { is_social: false, kind: 'work' })) });
+    await submit(llm, [occ('concert')]);
+    await collect(llm);
+    expect(w.db.prepare('SELECT kind, is_social, classified_by, status FROM occasions WHERE id = ?').get(occ('concert'))).toEqual({
+      kind: 'social',
+      is_social: 1,
+      classified_by: 'rule',
+      status: 'active',
+    });
+    expect(w.db.prepare(`SELECT status FROM occasion_adjudications WHERE occasion_id = ?`).pluck().get(occ('concert'))).toBe('applied');
+    // like a Partiful-linked occasion, the verdict then only settles attendees the normal way (an undoable llm row)
+    expect(row('concert', w.tavi.id)).toMatchObject({ status: 'withdrawn', source: 'llm' });
+    // and the next pass keeps the ticket's classification
+    runOccasions(w.db, { now: LATER, timeZone: TZ });
+    expect(w.db.prepare('SELECT kind, is_social, classification_rule FROM occasions WHERE id = ?').get(occ('concert'))).toEqual({ kind: 'social', is_social: 1, classification_rule: 'ticket' });
+  });
+
+  it('a ticket he no longer holds does not keep the occasion social', async () => {
+    const t = ticketEvent(w.db, { title: 'Fernhollow', venue: 'Copperline Hall', start: evening(-8, 20) });
+    runOccasions(w.db, { now: NOW + 1, timeZone: TZ });
+    // sold after the last occasions pass: the 'ticket' source row is still there, but it is not live
+    w.db.prepare(`UPDATE ticket_events SET status = 'sold', qty_sold = 2, held = 0 WHERE id = ?`).run(t);
+    expect(w.db.prepare(`SELECT count(*) FROM occasion_sources WHERE occasion_id = ? AND source = 'ticket'`).pluck().get(occ('concert'))).toBe(1);
+    const { llm } = realLlm({ concert: () => msg(answer([], { is_social: false, kind: 'work' })) });
+    await submit(llm, [occ('concert')]);
+    await collect(llm);
+    expect(w.db.prepare('SELECT kind, is_social, classified_by FROM occasions WHERE id = ?').get(occ('concert'))).toEqual({ kind: 'work', is_social: 0, classified_by: 'llm' });
+    // and the next pass (no live ticket) leaves the LLM's word alone
+    runOccasions(w.db, { now: LATER, timeZone: TZ });
+    expect(w.db.prepare('SELECT kind, is_social, classified_by FROM occasions WHERE id = ?').get(occ('concert'))).toEqual({ kind: 'work', is_social: 0, classified_by: 'llm' });
   });
 
   it('a refusal is final on Haiku (no server-side fallback): the request fails without a re-run or touching attendees', async () => {

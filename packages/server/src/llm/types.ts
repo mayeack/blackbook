@@ -77,7 +77,8 @@ export type LlmKind =
   | 'circle_name'
   | 'brief'
   | 'calendar'
-  | 'intent';
+  | 'intent'
+  | 'ticket';
 
 /** One letter per kind for custom_id (`{letter}{ver}-{subject}-{attempt}`). */
 export const CUSTOM_ID_LETTER: Readonly<Record<LlmKind, string>> = {
@@ -92,6 +93,7 @@ export const CUSTOM_ID_LETTER: Readonly<Record<LlmKind, string>> = {
   command: 'k',
   brief: 'b',
   intent: 'i',
+  ticket: 'g',
 };
 
 /** Ask loop limits (intelligence §7). */

@@ -172,9 +172,14 @@ export interface SourceCounts {
   calendarEvents?: number;
   occasions?: number;
   contactCards?: number;
+  emailsScanned?: number;
+  ticketEmails?: number;
+  tickets?: number;
+  screenshots?: number;
+  screenshotsLinked?: number;
 }
 
-/** The server's fix kinds, plus 'google_secrets_missing', which the client derives from /google/status. */
+/** The server's fix kinds, plus 'google_secrets_missing', which the client derives from the Google status routes. */
 export type SourceFixKind =
   | 'connect_google'
   | 'google_not_configured'
@@ -186,7 +191,9 @@ export type SourceFixKind =
   | 'drop_instagram_export'
   | 'allow_contacts'
   | 'collector_setup'
-  | 'contract_broken';
+  | 'contract_broken'
+  | 'connect_gmail'
+  | 'connect_gphotos';
 
 export interface SourceFix {
   kind: SourceFixKind;

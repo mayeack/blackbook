@@ -4,7 +4,7 @@ import { isApiError } from '../../api/client';
 import { usePerson } from '../../api/hooks';
 import { Empty, PageState } from '../../components/PageState';
 import { personPath } from '../../components/PersonLink';
-import { useTies } from './api';
+import { useMetAt, useTies } from './api';
 import { personTab, type PersonTab } from './logic';
 import { PersonHeader } from './Header';
 import { PersonConnections } from './PersonConnections';
@@ -27,6 +27,7 @@ export function PersonPage() {
   const person = usePerson(id);
   const resolvedId = person.data?.id ?? '';
   const ties = useTies(resolvedId && resolvedId === id ? resolvedId : '');
+  const met = useMetAt(resolvedId && resolvedId === id ? resolvedId : '');
 
   // A merged-away id resolves to the survivor: move the URL there.
   useEffect(() => {
@@ -64,7 +65,7 @@ export function PersonPage() {
 
   return (
     <>
-      <PersonHeader p={p} ties={ties.data ?? null} />
+      <PersonHeader p={p} ties={ties.data ?? null} metAt={met.data ?? null} />
       <div className="segmented" role="tablist" aria-label="Person sections">
         {TABS.map((t) => (
           <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>

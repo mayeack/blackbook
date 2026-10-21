@@ -24,6 +24,7 @@ export const COLLECTOR_ROUTES = {
   imessageAttachment: '/v1/imessage/attachment',
   whatsappSnapshot: '/v1/whatsapp/snapshot',
   contacts: '/v1/contacts',
+  visionOcr: '/v1/vision/ocr',
 } as const;
 
 // ---------- primitives ----------
@@ -57,6 +58,8 @@ export const CollectorErrorCode = z.enum([
   'attachment_not_found',
   'attachment_not_allowed',
   'attachment_unreadable',
+  'image_unreadable',
+  'payload_too_large',
 ]);
 export type CollectorErrorCode = z.infer<typeof CollectorErrorCode>;
 
@@ -325,6 +328,8 @@ export const ContactCard = z.object({
     .nullish()
     .transform((v) => v ?? []),
   modified_at: opt(Timestamp),
+  /** When the card was created in the AddressBook store (ZCREATIONDATE, read with FDA); absent on older collectors. */
+  created_at: opt(Timestamp),
 });
 export type ContactCard = z.output<typeof ContactCard>;
 
@@ -335,3 +340,36 @@ export const ContactsResponse = z.object({
   items: z.array(ContactCard),
 });
 export type ContactsResponse = z.output<typeof ContactsResponse>;
+
+// ---------- POST /v1/vision/ocr ----------
+
+/**
+ * POST /v1/vision/ocr: on-device text recognition (Apple Vision, accurate level, language correction on) of one
+ * image the caller already holds (a Google Photos screenshot the owner picked). JPEG/PNG/HEIC/WebP; data_base64 may
+ * be up to 6 MiB of characters and the HTTP body up to 8 MiB (the collector's per-route cap; every other route: 1 MiB). The collector keeps nothing: no file is written, the text is never logged. Lines come top to
+ * bottom; coordinates are normalized to 0–1 with the origin at the TOP-left (Vision's bottom-left origin flipped).
+ */
+export const OcrRequest = z.object({
+  data_base64: z.string().min(1).max(6 * 1024 * 1024).regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  max_lines: z.number().int().min(1).max(400).optional(),
+});
+export type OcrRequest = z.input<typeof OcrRequest>;
+
+export const OcrLine = z.object({
+  text: z.string(),
+  confidence: z.number().min(0).max(1),
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  w: z.number().min(0).max(1),
+  h: z.number().min(0).max(1),
+});
+export type OcrLine = z.output<typeof OcrLine>;
+
+export const OcrResponse = z.object({
+  api: z.literal(COLLECTOR_API_VERSION),
+  generated_at: Timestamp,
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  lines: z.array(OcrLine),
+});
+export type OcrResponse = z.output<typeof OcrResponse>;

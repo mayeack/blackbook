@@ -110,8 +110,17 @@ export function liveRow(db: DB, dedupeKey: string): SuggestionRow | undefined {
 }
 
 /**
- * Inserts or refreshes the live row for a candidate (signals, base, links, expiry, the emitting run). A snoozed
- * row whose snooze has passed becomes a candidate again. Returns the row id.
+ * Kinds whose row, once shown (selected, delivered, or still snoozed), keeps the people, payload, evidence and base it
+ * was shown with: a later "Wrong" acts on what the owner saw (an event invite rejects the met-at links named in it:
+ * intel/eventInvites.ts), never on people a later night picked. Links, expiry and the emitting run still refresh.
+ */
+const KEEP_SHOWN_KINDS: ReadonlySet<SuggestionKind> = new Set(['event_invite']);
+const SHOWN_FIELDS: ReadonlySet<string> = new Set(['person_id', 'related_person_id', 'person_ids', 'signals', 'evidence_ids', 'base_score']);
+
+/**
+ * Inserts or refreshes the live row for a candidate (signals, base, links, expiry, the emitting run; for
+ * KEEP_SHOWN_KINDS once shown, only links, expiry and the run). A snoozed row whose snooze has passed becomes a
+ * candidate again. Returns the row id.
  */
 export function upsertCandidate(db: DB, c: Candidate, runId: string, now: number): string {
   const key = suggestionDedupeKey(c);
@@ -138,7 +147,8 @@ export function upsertCandidate(db: DB, c: Candidate, runId: string, now: number
   };
   if (live) {
     const status = live.status === 'snoozed' && (live.snoozed_until ?? 0) <= now ? 'candidate' : live.status;
-    const cols = Object.keys(fields) as (keyof typeof fields)[];
+    const keep = KEEP_SHOWN_KINDS.has(c.kind) && status !== 'candidate';
+    const cols = (Object.keys(fields) as (keyof typeof fields)[]).filter((k) => !keep || !SHOWN_FIELDS.has(k));
     db.prepare(`UPDATE suggestions SET ${cols.map((k) => `${k} = ?`).join(', ')}, status = ?, updated_at = ? WHERE id = ?`).run(
       ...cols.map((k) => fields[k]),
       status,

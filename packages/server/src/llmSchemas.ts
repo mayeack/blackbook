@@ -6,6 +6,7 @@
  * empty request per entry to the real API. A new LLM call site adds its schema here.
  */
 import type { z } from 'zod';
+import { TicketEmail } from './adapters/gmail/prompt';
 import { ASK_TOOL_DEFS } from './ask/tools';
 import { DraftSchema } from './commands/draft';
 import { IntentSchema } from './commands/intent';
@@ -37,5 +38,6 @@ export const LLM_SCHEMAS: readonly LlmSchemaEntry[] = [
   { name: 'ComposerOutput', route: 'digest_compose', schema: ComposerOutput },
   { name: 'DraftOut', route: 'draft_openers', schema: DraftOut },
   { name: 'DraftSchema', route: 'draft_openers', schema: DraftSchema },
+  { name: 'TicketEmail', route: 'ticket_parse', schema: TicketEmail },
   { name: 'ASK_TOOL_DEFS', route: 'ask_web', tools: ASK_TOOL_DEFS },
 ];

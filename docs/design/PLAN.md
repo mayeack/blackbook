@@ -35,6 +35,8 @@ Michael wants an agentic rebuild that does the work for him:
 | Instagram | **Beeper Desktop** (on-device Instagram only, read-only) local API, plus a one-time **"Download your information" export** for history. |
 | Partiful | **Unofficial API**: daily, read-only, with a stored refresh token. Plus **Partiful texts parsed from chat.db**. |
 | Google Calendar | **Google Calendar API** (OAuth, read-only, incremental sync). Infers attendees and cross-references with messages. |
+| Gmail (added 2026-10-21) | **Gmail API, read-only** (`gmail.readonly`, its own consent and token): a ticket ledger of every concert and event he holds tickets to, which feeds occasions. Design: `docs/design/tickets-met-at.md`. |
+| Google Photos (added 2026-10-21) | **Google Photos Picker** (owner-initiated; Google offers no continuous library read since 2025-03-31). Screenshots of contact info are OCR'd on the Mac by the collector (Apple Vision) and never reach an LLM; those people rank first for shows like the one where he met them. |
 | Digest sender | **His own Apple ID → himself** (silent note-to-self thread, accepted), plus a **Web Push ping** from the installed PWA. |
 | LLM | **Claude Haiku 5.5** on every route (owner, 2026-10-16: cheapest model first, maximize caching). Effort `low`, nightly work in Message Batches (50% off), byte-stable prompts cached. A route moves to Sonnet 5.5 only if the eval says Haiku isn't good enough; Opus is not selectable. Identifiers are pseudonymized before anything leaves the Mac. |
 | UI | **Agent-first core**: Today, People/Person, Ask, Network, Circles/Tags/Locations, Events, Sources, Settings. |
@@ -51,10 +53,11 @@ Cloudflare Access (Google SSO) → cloudflared (LaunchAgent com.cloudflare.yeack
 └──┬─────────────────────────────┬───────────────────────┬──────────────────────────────────────────────────────────┘
    │ Bearer, 127.0.0.1:4321      │ Bearer, :23373 (GET)  │ HTTPS out: api.anthropic.com, api.partiful.com,
 ┌──▼─────────────────────────┐ ┌─▼──────────────────┐    securetoken.googleapis.com, www.googleapis.com (Calendar),
-│ Collector = BlackbookServer│ │ Beeper Desktop     │    web push services
-│ .app evolved in place      │ │ (Instagram only)   │
+│ Collector = BlackbookServer│ │ Beeper Desktop     │    gmail.googleapis.com (read-only), photospicker.googleapis.com +
+│ .app evolved in place      │ │ (Instagram only)   │    lh*.googleusercontent.com (Picker), web push services
 │ owns ALL TCC: FDA, Contacts│ └────────────────────┘
 │ Automation→Messages        │──▶ chat.db · WhatsApp group container · CNContactStore · Messages.app send
+│ + Vision OCR (on-device)   │    · AddressBook store (card creation dates, read-only)
 └────────────────────────────┘    Login Items (GUI session): collector, Messages, WhatsApp, Beeper
 ```
 
@@ -165,6 +168,23 @@ The design panel produced full specs. Copy them into `docs/design/` as the first
 - Contract alert when a call fails, or when chat.db texts mention an event id the API didn't return.
 - First guest-list pass over ~300 past events is trickled across several nights.
 
+### Gmail tickets and Google Photos screenshots (added 2026-10-21)
+Full design and review amendments: `docs/design/tickets-met-at.md`.
+- **Gmail** (job `gmail`, every 30 min; LLM job `ticket-parse`):
+  - a vendor allowlist plus deterministic triage, then a Haiku 5.5 batch over masked, pseudonymized excerpts;
+  - the `ticket_events` ledger keeps a quantity state machine (bought, received, sent, sold, refunded) and a
+    status;
+  - holding tickets become occasions (`occasion_sources.source = 'ticket'`).
+- **Met at** (job `met-at`, 06:40): a new Instagram follow or first DM, a new contact card, or a contact screenshot
+  close to an event he attended becomes a journaled `person_met_at` link.
+- **Contact screenshots** (job `gphotos`):
+  - the owner picks screenshots in the Google Photos Picker, and the collector OCRs them on-device
+    (`POST /v1/vision/ocr`);
+  - phones, emails and @handles are extracted locally and linked to people;
+  - nothing from a screenshot reaches an LLM.
+- **`event_invite`**: for a show he holds tickets to 1–21 days out, people he met at a similar event. Screenshot
+  people come first, and nobody already going is suggested.
+
 ### Google Calendar (new)
 **Access**
 - `googleapis` OAuth web client, scope `calendar.readonly`, offline access. The callback `/api/v1/google/callback` sits behind Access.
@@ -199,7 +219,9 @@ The design panel produced full specs. Copy them into `docs/design/` as the first
 | `imessage-tail` (ingest + command poll) | 10 s |
 | `commands` | After each tail with new self-thread rows |
 | `collector-health` | 60 s |
-| `beeper`, `whatsapp`, `gcal` | 30 min |
+| `beeper`, `whatsapp`, `gcal`, `gmail`, `ticket-parse` | 30 min |
+| `gphotos` (Picker sessions + OCR) | 60 s (no-op without an open session or pending file) |
+| `met-at` | 06:40 |
 | `addressbook` | 60 min |
 | `partiful` | 02:00 |
 | `backup` | 02:15 (`db.backup()`, paged; not `VACUUM INTO` on the writer) |
@@ -763,7 +785,7 @@ Run in this order and record the results in `docs/RUNBOOK.md`.
 
 ## Cut or deferred
 
-**Cut**: backups UI, subscriptions, biometrics, auth screens, the sync protocol and Bonjour, the manual Log Interaction form (replaced by `log:`), the Reminders screen (replaced by commitments), Smart Groups (replaced by filters), the met-via/introduced-to pickers (replaced by edges), scoring sliders, the AI Insights screen (replaced by Ask), LinkedIn enrichment, photo upload, life events and birthdays, sending drafts, instagrapi, Playwright, Splink, Presidio, a multi-model cascade, offline PWA data, attachments.
+**Cut**: backups UI, subscriptions, biometrics, auth screens, the sync protocol and Bonjour, the manual Log Interaction form (replaced by `log:`), the Reminders screen (replaced by commitments), Smart Groups (replaced by filters), the met-via/introduced-to pickers (replaced by edges), scoring sliders, the AI Insights screen (replaced by Ask), LinkedIn enrichment, photo upload (but see Google Photos contact screenshots, added 2026-10-21), life events and birthdays, sending drafts, instagrapi, Playwright, Splink, Presidio, a multi-model cascade, offline PWA data, attachments.
 
 **Deferred**: WhatsApp iPhone-backup backfill, the new-number supersede rule, embeddings (ollama/sqlite-vec), photo pHash, shadow tables (the eval gate is used instead), a weekly review digest (not requested), and any offsite encrypted backup beyond Time Machine.
 

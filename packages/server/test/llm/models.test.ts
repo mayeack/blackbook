@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { TICKET_SYSTEM, TicketEmail } from '../../src/adapters/gmail/prompt';
 import { ASK_SYSTEM_PROMPT } from '../../src/ask/prompt';
 import { ASK_TOOL_DEFS } from '../../src/ask/tools';
 import { INTENT_SYSTEM } from '../../src/commands/intent';
@@ -17,7 +18,7 @@ import { COMPOSER_SYSTEM } from '../../src/delivery/llmComposer';
 import { CONSOLIDATION_SYSTEM, KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM } from '../../src/extraction/prompt';
 import { TIEBREAK_SYSTEM } from '../../src/identity/tiebreak';
 import { ADJUDICATION_SYSTEM } from '../../src/intel/adjudicationPrompt';
-import { outputFormat, volatileMarkers } from '../../src/llm/caching';
+import { outputFormat, schemaJson, volatileMarkers } from '../../src/llm/caching';
 import { promptTokens, requestIssues, requestParams, routeOverrides, STRICT_MAX_OPTIONAL_PARAMS, STRICT_MAX_UNION_PARAMS, strictParamCounts, strictSchemaIssues } from '../../src/llm/client';
 import {
   BATCH_CACHE_MISS_SHARE,
@@ -68,6 +69,7 @@ describe('route table defaults', () => {
       'ask_web',
       'ask_imessage',
       'eval_shadow',
+      'ticket_parse',
     ]);
     for (const r of LLM_ROUTES) {
       const p = ROUTES[r];
@@ -82,7 +84,7 @@ describe('route table defaults', () => {
   it('cache TTL: 1 h on batch routes, 5 min on synchronous ones, no marker where the prefix is never re-read', () => {
     const unmarked = ['digest_compose', 'intent'];
     for (const r of LLM_ROUTES) expect(ROUTES[r].cacheTtl, r).toBe(ROUTES[r].mode === 'batch' ? '1h' : unmarked.includes(r) ? null : '5m');
-    expect(LLM_ROUTES.filter((r) => ROUTES[r].mode === 'batch').sort()).toEqual(['adjudicate', 'extract_consolidate', 'extract_historical', 'extract_steady']);
+    expect(LLM_ROUTES.filter((r) => ROUTES[r].mode === 'batch').sort()).toEqual(['adjudicate', 'extract_consolidate', 'extract_historical', 'extract_steady', 'ticket_parse']);
   });
 
   it('the web and iMessage Ask routes share model, effort and thinking (so they share one cached prefix)', () => {
@@ -181,7 +183,7 @@ describe('request shape per route', () => {
       expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     }
     expect(outputFormat(Out)).toBe(outputFormat(Out)); // memoized: one schema object per zod schema
-    const systems = { KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM, CONSOLIDATION_SYSTEM, TIEBREAK_SYSTEM, INTENT_SYSTEM, DRAFT_SYSTEM, COMPOSER_SYSTEM, ADJUDICATION_SYSTEM, ASK_SYSTEM_PROMPT, NAMING_SYSTEM };
+    const systems = { KNOWLEDGE_SYSTEM, OBLIGATIONS_SYSTEM, CONSOLIDATION_SYSTEM, TIEBREAK_SYSTEM, INTENT_SYSTEM, DRAFT_SYSTEM, COMPOSER_SYSTEM, ADJUDICATION_SYSTEM, ASK_SYSTEM_PROMPT, NAMING_SYSTEM, TICKET_SYSTEM };
     for (const [name, sys] of Object.entries(systems)) {
       // Fixed few-shot dates in the extraction examples are literals; nothing else may look volatile.
       const markers = volatileMarkers(sys).filter((m) => !((name === 'KNOWLEDGE_SYSTEM' || name === 'OBLIGATIONS_SYSTEM') && m === 'iso_timestamp'));
@@ -196,6 +198,8 @@ describe('request shape per route', () => {
     expect(estimatePromptTokens(OBLIGATIONS_SYSTEM)).toBeGreaterThan(512);
     expect(estimatePromptTokens(CONSOLIDATION_SYSTEM)).toBeGreaterThan(512);
     expect(estimatePromptTokens(ADJUDICATION_SYSTEM)).toBeGreaterThan(512);
+    expect(estimatePromptTokens(TICKET_SYSTEM)).toBeGreaterThan(512);
+    expect(estimatePromptTokens(TICKET_SYSTEM + schemaJson(TicketEmail))).toBeGreaterThan(512);
     expect(estimatePromptTokens(ASK_SYSTEM_PROMPT + JSON.stringify(ASK_TOOL_DEFS))).toBeGreaterThan(512);
   });
 

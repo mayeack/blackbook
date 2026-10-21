@@ -1063,7 +1063,7 @@ class CommandRun {
     // The next suggestion that can still be shown (an intro whose other person is hidden since is passed over).
     const next = Math.max(0, ...items.map((i) => i.ordinal)) + 1;
     const candidates = moreCandidates(this.db, digest.id, this.now, MORE_LOOKAHEAD, this.settings['learner.muted_kinds']);
-    const item = candidates.map((c) => selectedItemById(this.db, c.suggestionId, next)).find((i) => i !== null) ?? null;
+    const item = candidates.map((c) => selectedItemById(this.db, c.suggestionId, next, this.now)).find((i) => i !== null) ?? null;
     if (
       !item ||
       !this.db

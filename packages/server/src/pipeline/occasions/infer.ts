@@ -2,7 +2,10 @@
  * Attendee candidates for one social occasion (PLAN step 3) and their deterministic scores (step 4):
  *   explicit attendees (email → identity; a bare display name is resolved like a written name),
  *   names in the title/notes ("w/ X", "X & Y", "X has my ticket") and group nicknames (circle names, small
- *   group-chat titles), Partiful GOING/MAYBE guests and host, and the message cross-reference (messages.ts).
+ *   group-chat titles), Partiful GOING/MAYBE guests and host, the people the owner's ticket emails name as
+ *   transfer counterparties (ticket_parties resolved to a person: named ticket holders), and the message
+ *   cross-reference (messages.ts; a ticket-only occasion has no calendar notes, so its title, performers and venue
+ *   carry the scan).
  * Names resolve only against visible people: first name (+ nickname table), or first + last; an ambiguous first
  * name is settled by 1:1 recency around the occasion, message evidence for it, and co-membership with the other
  * people named, else it stays an unresolved name candidate for the LLM step. A ticket count caps how many
@@ -96,6 +99,7 @@ export function occasionWindow(d: OccasionDraft, days: ReadonlySet<string>): Occ
     d.venueText,
     d.eventTitle,
     ...d.events.filter((e) => e.reservation).map((e) => e.venue),
+    ...(d.ticket?.performers ?? []),
   ];
   const tokens = distinctiveTokens(texts, names, 10);
   // Alone, only the venue's own name or a title's single rare word makes a message about this occasion.
@@ -145,6 +149,23 @@ export function inferAttendees(ctx: InferContext, d: OccasionDraft): Inference {
       if (g.role === 'host' || g.role === 'co_host' || status === 'host') addSignal(byPerson, pid, { type: 'partiful_host', weight: WEIGHTS.partifulHost, ref });
       else if (GOING.has(status)) addSignal(byPerson, pid, { type: 'partiful_going', weight: WEIGHTS.partifulGoing, ref });
       else if (MAYBE.has(status)) addSignal(byPerson, pid, { type: 'partiful_maybe', weight: WEIGHTS.partifulMaybe, ref });
+    }
+  }
+
+  // people the ticket emails name: who he sent tickets to or got them from (resolved by the ledger)
+  if (d.ticket) {
+    const ids = [d.ticket.id, ...d.ticket.aliases];
+    const holders = db
+      .prepare(
+        `SELECT DISTINCT person_id FROM ticket_parties
+         WHERE ticket_event_id IN (SELECT value FROM json_each(?)) AND person_id IS NOT NULL ORDER BY person_id`,
+      )
+      .pluck()
+      .all(JSON.stringify(ids)) as string[];
+    for (const raw of holders) {
+      const pid = people.visibleCanonical(raw);
+      if (!pid || pid === people.me) continue;
+      addSignal(byPerson, pid, { type: 'ticket_holder', weight: WEIGHTS.ticketHolder, ref: `ticket:${d.ticket.id}` });
     }
   }
 

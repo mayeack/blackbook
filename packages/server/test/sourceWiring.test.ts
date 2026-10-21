@@ -47,6 +47,8 @@ describe('job registry', () => {
     expect(s.imessage && s.whatsapp && s.addressbook).toBeTruthy();
     expect(s.beeper).toBeNull(); // no token anywhere yet
     expect(s.calendar).toBeNull(); // no OAuth client
+    expect(s.gmail).toBeNull();
+    expect(s.gphotos).toBeNull();
     expect(s.instagramDyi?.importsDir).toBe(plain.importsDir);
     expect(s.partiful?.browserCdpUrl).toBe(DEFAULT_BROWSER_CDP_URL);
     expect(s.matcher).not.toBeNull();
@@ -57,10 +59,12 @@ describe('job registry', () => {
     const f = sourceJobDeps({ config: full });
     expect(f.beeper).toMatchObject({ url: DEFAULT_BEEPER_URL, token: null });
     expect(f.calendar?.google.clientId).toBe('cid');
+    expect(f.gmail?.google.clientId).toBe('cid');
+    expect(f.gphotos?.google.clientId).toBe('cid');
     expect(sourceJobDeps({ config: loadConfig({ ...base, BEEPER_TOKEN: 'synthetic' }) }).beeper?.token).toBe('synthetic');
     // Every source's jobs are registered through the real registry, in order, with their cadences. Agent-loop
     // jobs follow them (gated and checked in agentWiring.test.ts).
-    expect(buildJobs({ config: full }).slice(0, 14).map((j) => [j.name, j.schedule])).toEqual([
+    expect(buildJobs({ config: full }).slice(0, 16).map((j) => [j.name, j.schedule])).toEqual([
       ['backup', { kind: 'daily', at: '02:15' }],
       ['logs-prune', { kind: 'daily', at: '04:45' }],
       ['imessage-tail', { kind: 'interval', everyMs: 10_000 }],
@@ -75,6 +79,8 @@ describe('job registry', () => {
       ['gcal', expect.anything()],
       ['identity-match', expect.anything()],
       ['occasions', { kind: 'daily', at: '03:00' }],
+      ['gmail', { kind: 'interval', everyMs: 30 * 60_000 }],
+      ['gphotos', { kind: 'interval', everyMs: 60_000 }],
     ]);
   });
 });

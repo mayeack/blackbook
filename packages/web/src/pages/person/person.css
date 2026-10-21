@@ -556,3 +556,22 @@ a.pt-body:hover {
 .pair-undo {
   margin-top: 18px;
 }
+
+/* ---------------------------------------------------------------- Met at */
+.met-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.met-item > a {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.met-item > .btn {
+  flex: none;
+}
+.ph-met a {
+  color: inherit;
+  font-weight: 550;
+}
+

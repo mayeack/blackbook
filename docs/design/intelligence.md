@@ -464,6 +464,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 | `commitment_due` | 0.6 + 0.4·[owner ME] | 0.95 | 3 days |
 | `event_followup` | 0.7 | 0.85 | once per event |
 | `party_invite` | 0.8 if ≤5 days out, else 0.7 | 0.80 | once per hosted event |
+| `event_invite` | 0.75 with a screenshot person, else 0.6 | 0.75 | once per ticketed event (`tkt:<id>`) |
 | `fading` | sev | 0.80 | 14 days |
 | `travel_overlap` | 0.75 | 0.80 | once per trip |
 | `cooling` | 0.6·H/100 | 0.50 | 21 days |
@@ -536,6 +537,25 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
   3. the host, if it isn't me and T is in 20–70 → thank-you opener
 - **Pre-event brief:** the morning before, or a push 3h before for same-day events, for Partiful or calendar events with ≥2 known attendees. Contents: top 5 known attendees by T, each with last contact, open debts and commitments, and 1 recent fact; unknown guest names; mutual connectors. Full version lives at `/events/:id/brief`.
 - **Who to invite** (`party_invite`, intel/invites.ts): for a party or event I host 2–14 days out — a Partiful event where I'm host/co-host, or a social calendar occasion I organize (my own calendar copy, not "Sam's …"; the title says I'm hosting, or I sent calendar invites: ≥1 to a party-like title, ≥3 to anything social) — up to 5 people not yet on the guest list: Party invites circle members first (by T), then people with closeness ≥7 (priority people regardless) who came to ≥2 of my social happenings in the last year or to one I hosted, ranked `0.6·T/100 + 0.4·min(1, parties/4) + 0.1·came_to_mine`. Never a duplicate (owner: "always cross check … against currently invited people on partiful"): a Partiful list counts only when read in full within the last hour (job `partiful-hosted-guests` re-reads hosted lists in the next 15 days every 30 min; no hosted events → no calls), else no item; the brief and Today drop an item whose list went stale or that names someone invited since (`partyInviteStale` in delivery selection). Left out: anyone with a guest-list row in any status (incl. invited/declined), a calendar invite or an occasion-candidate match; anyone sharing an identity with a guest in another form (phone inside a WhatsApp id, Gmail dot/+tag variants, an @handle on a Beeper/Instagram record, the Partiful user) or with an open match candidate (pending / possible_duplicate / held); anyone whose first + last name matches a name on the list (same last name, first names in one nickname family or JW ≥ 0.92), including SMS invitees with no Partiful account (kept by name in `partiful_guest_names`, migration 024) and calendar invitee names; and people muted for the kind or resting after ignores (dropped from the list, not killing it). When in doubt, they stay out. Acted = an outbound message to one of them, or one of them joining the guest list, within 7 days.
+- **Met at** (`person_met_at`, intel/metAt, job `met-at` 06:40; design `docs/design/tickets-met-at.md`):
+  - Signals: a person the owner newly connected with close to an event he went to:
+    - an Instagram follow (direction `following`; earliest follow time);
+    - a first DM in a chat born while watched;
+    - a new contact card (AddressBook creation date; bulk imports and the first dump don't count);
+    - a contact screenshot.
+  - Window: [start − 2 h, end + 36 h].
+  - Skip anyone known before start − 12 h: an interaction, earlier counted attendance, a small group together, an
+    earlier card or follow, a ticket counterparty, or an open match candidate with history.
+  - Skip performers, venues and promoters.
+  - One active link per person; written at ≥ 0.5 confidence.
+  - Journaled: the agent withdraws its own links, and the owner's "Wrong" is sticky.
+- **Invite to a show** (`event_invite`, intel/eventInvites.ts):
+  - For: a show he holds tickets to (Gmail ledger, status holding), 1–21 days out, not one he hosts.
+  - Picks: up to 3 people he met at a *similar* event (shared performer = 1; else genres, category, venue, title
+    tokens).
+  - Order: people whose contact info he screenshotted come first (tier A, sim ≥ 0.35); then others at sim ≥ 0.5
+    and link confidence ≥ 0.7.
+  - Never anyone already going: guestCheck plus ticket transfer counterparties.
 
 ---
 

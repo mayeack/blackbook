@@ -1,5 +1,6 @@
 /**
- * Digest composition (07:30, and again at send time if the ranker's picks changed since): template copy for every
+ * Digest composition (07:30, and again at send time if the ranker's picks changed since, or an invite to a show
+ * lost someone who joined it): template copy for every
  * item, then the LLM composer over the eligible ones (grounded items replace their template copy), then the
  * iMessage text and the push body. The composer never ranks and never sends.
  *
@@ -95,7 +96,17 @@ export interface WebBody {
   texts?: string[];
   /** Per text: the item it carries (null for the health text). Sending freezes these once a text was attempted. */
   parts?: (TextPart | null)[];
-  items: { suggestionId: string; ordinal: number; copy: 'llm' | 'template'; headline: string; body: string | null; openers: string[]; line: string }[];
+  items: {
+    suggestionId: string;
+    ordinal: number;
+    copy: 'llm' | 'template';
+    headline: string;
+    body: string | null;
+    openers: string[];
+    line: string;
+    /** The people the copy names (absent in compositions written before it was recorded). */
+    personIds?: string[];
+  }[];
 }
 
 export interface ComposeOptions {
@@ -284,7 +295,16 @@ export function webBodyOf(c: ComposedDigest): WebBody {
     health: c.health,
     texts: c.texts,
     parts: c.parts,
-    items: c.items.map((i) => ({ suggestionId: i.suggestionId, ordinal: i.ordinal, copy: i.copy, headline: i.headline, body: i.body, openers: i.openers, line: i.line })),
+    items: c.items.map((i) => ({
+      suggestionId: i.suggestionId,
+      ordinal: i.ordinal,
+      copy: i.copy,
+      headline: i.headline,
+      body: i.body,
+      openers: i.openers,
+      line: i.line,
+      personIds: i.people.map((p) => p.id),
+    })),
   };
 }
 
@@ -298,14 +318,26 @@ export function parseWebBody(raw: string | null): WebBody | null {
   }
 }
 
-/** Whether the stored composition still matches the ranker's current picks. */
+/**
+ * An "Invite to a show" item whose stored copy names someone it no longer shows (they joined the show since it was
+ * composed): that copy would tell the owner to invite someone already going.
+ */
+function peopleChanged(i: SelectedItem, b: WebBody['items'][number] | undefined): boolean {
+  if (i.kind !== 'event_invite' || !b?.personIds) return false;
+  const shown = i.people.map((p) => p.id);
+  return b.personIds.length !== shown.length || b.personIds.some((id, k) => id !== shown[k]);
+}
+
+/** Whether the stored composition still matches the ranker's current picks (and the people each invite shows). */
 export function compositionCurrent(selection: DigestSelection): boolean {
   const d = selection.digest;
   if (!d.composed_at || !d.imessage_text) return false;
   const body = parseWebBody(d.web_body);
   if (!body?.texts?.length) return false;
   const now = selection.items.map((i) => i.suggestionId);
-  return body.suggestionIds.length === now.length && body.suggestionIds.every((id, k) => id === now[k]);
+  if (body.suggestionIds.length !== now.length || body.suggestionIds.some((id, k) => id !== now[k])) return false;
+  const byId = new Map(body.items.map((i) => [i.suggestionId, i]));
+  return !selection.items.some((i) => peopleChanged(i, byId.get(i.suggestionId)));
 }
 
 /**
@@ -349,7 +381,11 @@ export async function composeDigest(db: DB, services: Pick<AgentServices, 'llm' 
   return composed;
 }
 
-/** The stored composition of a digest (stored copy over the current selection), or a fresh template one. */
+/**
+ * The stored composition of a digest (stored copy over the current selection), or a fresh template one. An invite
+ * naming someone who has joined the show since gets template copy for the people it shows now (selection.ts
+ * currentCopy); the texts stay as stored (as they went out).
+ */
 export function storedComposition(selection: DigestSelection): ComposedDigest | null {
   const d = selection.digest;
   const body = parseWebBody(d.web_body);
@@ -357,7 +393,10 @@ export function storedComposition(selection: DigestSelection): ComposedDigest | 
   const byId = new Map(body.items.map((i) => [i.suggestionId, i]));
   const items: ComposedItem[] = selection.items.flatMap((i) => {
     const b = byId.get(i.suggestionId);
-    return b ? [{ ...i, copy: b.copy, headline: b.headline, body: b.body, openers: b.openers, line: b.line }] : [];
+    if (!b) return [];
+    const fresh = peopleChanged(i, b) ? i.currentCopy : undefined;
+    const c = fresh ? { ...fresh, copy: 'template' as const, line: mainLine(i.ordinal, fresh.headline, i.sensitive) } : b;
+    return [{ ...i, copy: c.copy, headline: c.headline, body: c.body, openers: c.openers, line: c.line }];
   });
   let llm: ComposedDigest['llm'] = null;
   try {

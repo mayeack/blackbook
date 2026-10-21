@@ -2,7 +2,8 @@
  * A Contacts card (collector ContactCard) → what yeackbot uses from it: display fields, a comparable name, and
  * its identity keys (E.164 phones, emails, Instagram usernames from social profiles by `service` — not by label,
  * the old ContactSyncService bug — and from instagram.com URLs). The content hash covers only those, so edits to
- * fields yeackbot ignores (postal addresses, notes) don't re-apply a card.
+ * fields yeackbot ignores (postal addresses, notes) don't re-apply a card. The card's creation date (collector
+ * `created_at`, read from the AddressBook store) rides along outside the hash: ingest fills it separately.
  */
 import crypto from 'node:crypto';
 import type { ContactCard } from '@yb/shared/collector/v1';
@@ -35,7 +36,20 @@ export interface ParsedCard {
   name: PersonName | null;
   keys: CardKey[];
   modifiedAt: number | null;
+  /** When the card was created in the AddressBook store (Unix ms), if the collector could read it; not hashed. */
+  createdAt: number | null;
   hash: string;
+}
+
+/** Core Data's epoch: no AddressBook store dates a card earlier. */
+const CREATED_MIN = Date.UTC(2001, 0, 1);
+const DAY_MS = 86_400_000;
+
+/** A plausible card creation time (Unix ms, whole), else null: never before 2001, never more than a day ahead. */
+export function cardCreatedAt(v: number | null | undefined, now: number): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  const ms = Math.round(v);
+  return ms > CREATED_MIN && ms <= now + DAY_MS ? ms : null;
 }
 
 const clean = (s: string | null | undefined): string | null => {
@@ -61,7 +75,7 @@ export function cardDisplayName(f: Pick<CardFields, 'given' | 'family' | 'nickna
 
 const INSTAGRAM_URL = /(^|\/\/|\.)instagram\.com\//i;
 
-export function parseCard(c: ContactCard): ParsedCard {
+export function parseCard(c: ContactCard, now: number = Date.now()): ParsedCard {
   const given = clean(c.given);
   const family = clean(c.family);
   const nickname = clean(c.nickname);
@@ -101,7 +115,7 @@ export function parseCard(c: ContactCard): ParsedCard {
     .createHash('sha256')
     .update(JSON.stringify({ fields, keys: keys.map((k) => `${k.norm.kind}:${k.norm.key}`).sort() }))
     .digest('hex');
-  return { id: c.id, fields, name, keys, modifiedAt: c.modified_at, hash };
+  return { id: c.id, fields, name, keys, modifiedAt: c.modified_at, createdAt: cardCreatedAt(c.created_at, now), hash };
 }
 
 export const keySig = (k: { kind: string; key: string }): string => `${k.kind}\u0000${k.key}`;

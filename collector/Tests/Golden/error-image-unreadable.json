@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "image_unreadable",
+    "message": "the image could not be decoded"
+  }
+}

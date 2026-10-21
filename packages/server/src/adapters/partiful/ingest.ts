@@ -6,8 +6,10 @@
  *                                    'event' interactions rebuilt; source_health (ok / stale = texts name events
  *                                    the API never returned / contract_broken / auth_required).
  *   syncPartifulContacts (weekly)    getContacts + getMutuals → identities + sharedEventCount (tie seeding).
- *   refreshHostedGuests (30 min)     getGuests for events I host in the next 15 days, so "Who to invite" is checked
- *                                    against who is invited right now (no hosted events → no calls).
+ *   refreshHostedGuests (30 min)     getGuests for events I host in the next 15 days, and for the Partiful events
+ *                                    behind a show I hold tickets to in the next 3 weeks, so "Who to invite" and
+ *                                    "Invite to a show" are checked against who is invited right now (no such
+ *                                    events → no calls).
  * Every journaled write (people, identities, merges, event_attendees) shares one run per pass (undo per run).
  * A spent budget, a 429 or a scheduler stop ends the pass early as 'partial': the next run continues where this
  * one stopped. Logs and stats carry counts only.
@@ -15,6 +17,7 @@
 import type { DB } from '../../db/connection';
 import { attachExternalIdentity } from '../../identity/external';
 import type { ResolveContext } from '../../identity/resolver';
+import { ticketPartifulEvents } from '../../intel/eventInvites';
 import type { Logger } from '../../ops/logger';
 import { sourceRun } from '../common/context';
 import { cursorMeta, readCursor, recordSourceHealth, writeCursor, type SourceHealthStatus } from '../common/cursors';
@@ -31,7 +34,7 @@ import {
   PartifulRateLimitedError,
   SIGN_IN_MESSAGE,
 } from './errors';
-import { isHost, mergeFound, storedEvents, upsertEvents, type EventOrigin, type FoundEvent } from './events';
+import { isHost, mergeFound, storedEvents, upsertEvents, type EventOrigin, type FoundEvent, type StoredEvent } from './events';
 import { rebuildPartifulInteractions } from './interactions';
 import { applyGuestList, DEFAULT_GUEST_LIMITS, isCanceled, markGuestState, planGuestFetches, type GuestLimits } from './guests';
 import { parseContacts, parseEventInfo, parseEventList, parseGuestPage, parseUsers, type ParsedGuest } from './schemas';
@@ -375,13 +378,17 @@ export const HOSTED_REFRESH_DAYS = 15;
 /**
  * Re-reads the guest lists of Partiful events I host that start in the next HOSTED_REFRESH_DAYS days (job
  * 'partiful-hosted-guests', every 30 min), so "Who to invite" never names someone already invited: the generator and
- * the brief only trust a list read 'ok' within the last hour (intel/invites.ts). Only complete lists are applied; one
- * that can't be read is marked 'error', which keeps its invite suggestion out. No hosted events → no calls at all.
+ * the brief only trust a list read 'ok' within the last hour (intel/invites.ts). The same goes for the Partiful
+ * events behind a show I hold tickets to in the next three weeks, which "Invite to a show" checks
+ * (intel/eventInvites.ts ticketPartifulEvents). Only complete lists are applied; one that can't be read is marked
+ * 'error', which keeps its invite suggestion out. No such events → no calls at all.
  */
 export async function refreshHostedGuests(db: DB, client: PartifulClient, o: SyncOptions = {}): Promise<SyncResult> {
   const now = o.now ?? Date.now();
   const limits: SyncLimits = { ...DEFAULT_LIMITS, ...o.limits };
-  const due = storedEvents(db).filter((e) => e.myRole === 'host' && e.startsAt !== null && e.startsAt >= now && e.startsAt < now + HOSTED_REFRESH_DAYS * DAY && !isCanceled(e));
+  const ticketed = new Set(ticketPartifulEvents(db, now));
+  const hosted = (e: StoredEvent) => e.myRole === 'host' && e.startsAt !== null && e.startsAt >= now && e.startsAt < now + HOSTED_REFRESH_DAYS * DAY && !isCanceled(e);
+  const due = storedEvents(db).filter((e) => hosted(e) || ticketed.has(e.rowId));
   if (!due.length) return { stats: {}, partial: false, health: 'ok' };
   const stats = emptyStats();
   let stop: StopReason | null = null;

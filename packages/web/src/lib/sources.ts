@@ -1,13 +1,17 @@
 /**
  * Sources-screen wording: the status pill, the count rows and the "how to fix" box for each fix kind the server
  * picks (routes/sources.ts). The Google Calendar card also folds in /google/status, which knows more than the
- * health row (connected or not, needs reconnecting).
+ * health row (connected or not, needs reconnecting); Settings → Email & photos does the same for Gmail and Google
+ * Photos with /gmail/status and /gphotos/status (googleProductFix).
  */
-import type { GoogleStatusView, SourceCounts, SourceFix, SourceView } from '../api/types';
+import type { GoogleStatusView, SourceCounts, SourceFix, SourceFixKind, SourceView } from '../api/types';
 import { plural } from './format';
 import { sourceStatus } from './labels';
 
 export const GOOGLE_CONNECT_URL = '/api/v1/google/connect';
+/** Each Google product is its own consent and token (routes/google.ts ?product=). */
+export const GMAIL_CONNECT_URL = `${GOOGLE_CONNECT_URL}?product=gmail`;
+export const GPHOTOS_CONNECT_URL = `${GOOGLE_CONNECT_URL}?product=photos`;
 
 /** The card has seen anything at all: a report, a cursor, messages or counted rows. */
 export function hasData(s: SourceView): boolean {
@@ -31,6 +35,11 @@ const COUNT_ROWS: { key: keyof SourceCounts; label: string }[] = [
   { key: 'calendars', label: 'Calendars' },
   { key: 'calendarEvents', label: 'Calendar events' },
   { key: 'occasions', label: 'Get-togethers' },
+  { key: 'emailsScanned', label: 'Emails checked' },
+  { key: 'ticketEmails', label: 'Ticket emails' },
+  { key: 'tickets', label: 'Ticketed events' },
+  { key: 'screenshots', label: 'Screenshots read' },
+  { key: 'screenshotsLinked', label: 'Linked to people' },
 ];
 
 /** The count rows to show, in a fixed order (zeroes and absent keys left out). */
@@ -107,7 +116,42 @@ export function fixCopy(fix: SourceFix): FixCopy {
         title: 'This source changed shape',
         body: 'yeackbot paused reading it rather than guess. Nothing was lost; it resumes once the adapter is updated.',
       };
+    case 'connect_gmail':
+      return {
+        title: 'Connect Gmail',
+        body: 'yeackbot reads ticket and registration emails (read-only: it never sends, deletes or labels mail) to keep a record of the shows and events you have tickets for. Google shows an “unverified app” screen once.',
+        action: { label: 'Connect Gmail', href: GMAIL_CONNECT_URL },
+      };
+    case 'connect_gphotos':
+      return {
+        title: 'Connect Google Photos',
+        body: 'You pick contact screenshots in Google Photos; they are read on this Mac (never sent to an AI) and each is linked to a person. yeackbot sees only the photos you pick.',
+        action: { label: 'Connect Google Photos', href: GPHOTOS_CONNECT_URL },
+      };
   }
+}
+
+/** The reconnect wording for a connect fix whose grant Google stopped accepting. */
+export function reconnectCopy(kind: SourceFixKind): { title: string; body: string } | null {
+  const what = kind === 'connect_google' ? 'Google Calendar' : kind === 'connect_gmail' ? 'Gmail' : kind === 'connect_gphotos' ? 'Google Photos' : null;
+  if (!what) return null;
+  return { title: `Reconnect ${what}`, body: `Google stopped accepting yeackbot’s access to ${what} (it was revoked, expired, or your password changed). Sign in again to resume.` };
+}
+
+/** What Settings knows about a Gmail / Google Photos connection (/gmail/status, /gphotos/status). */
+export interface GoogleProductState {
+  configured: boolean;
+  secretsAvailable: boolean;
+  connected: boolean;
+  needsReconnect: boolean;
+}
+
+/** The fix to show for Gmail or Google Photos in Settings, or null when connected and accepted. */
+export function googleProductFix(product: 'gmail' | 'gphotos', s: GoogleProductState | undefined): SourceFix | null {
+  if (!s) return null;
+  if (!s.configured) return { kind: 'google_not_configured' };
+  if (!s.connected || s.needsReconnect) return s.secretsAvailable ? { kind: product === 'gmail' ? 'connect_gmail' : 'connect_gphotos' } : { kind: 'google_secrets_missing' };
+  return null;
 }
 
 /** The Google card's fix once /google/status is known; the health row's fix otherwise. */

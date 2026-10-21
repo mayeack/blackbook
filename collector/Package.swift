@@ -24,7 +24,7 @@ let package = Package(
             exclude: ["Tests", "Tools", "Generated/SelfHandles.example.swift", "run-tests.sh"],
             // The fallback (empty) self-handle list; SelfHandles.generated.swift is app-only.
             sources: ["API", "App", "Contacts", "Core", "Generated/SelfHandlesFallback.swift", "Health", "HTTP",
-                      "IMessage", "Send", "WhatsApp"]
+                      "IMessage", "Send", "Vision", "WhatsApp"]
         ),
         .executableTarget(
             name: "CollectorVerify",

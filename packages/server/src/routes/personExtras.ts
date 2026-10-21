@@ -15,6 +15,8 @@
  *   POST   /people/:id/merges/:mergeId/split        {} → BatchRef     undo of the merge (writes do_not_merge)
  *   GET    /people/:id/collections · POST /people/:id/collections   circles / tags / places membership
  *   GET    /people/:a/with/:b                       → PairView        the pair page
+ *   GET    /people/:id/met                          → MetAtList       where the owner met them (intel/metAt links)
+ *   POST   /people/:id/met/:linkId/wrong            {} → BatchRef     rejects that link (sticky: never re-created)
  *   GET    /loops?cursor=&limit=                    → OpenLoopList    everyone's (Today's expanded strip)
  *   POST   /loops/:type/:id                         LoopAction → BatchRef
  *
@@ -45,6 +47,9 @@ import {
   type FactView,
   type MergeHistory,
   type MergeRecord,
+  MetAtSignal,
+  type MetAtLink,
+  type MetAtList,
   type Note,
   type NoteList,
   type NoteWriteResult,
@@ -60,6 +65,7 @@ import {
 } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { badRequest, HttpError, notFound } from '../http/errors';
+import { metAtLinksForPerson, targetKeys as metTargetKeys, rejectMetAtLinks } from '../intel/metAt/store';
 import { withBatch, type JournalTx } from '../journal/batch';
 import { withRun } from '../journal/runs';
 import { undoBatch } from '../journal/undo';
@@ -70,6 +76,7 @@ import { neighborEdges, pairEvidence, readEdge, rejectEdgeEvidence, type PairEvi
 import { EVIDENCE_BLOCK_PREFIX, labelFamily, tierOf } from '../pipeline/graph/weights';
 import { refreshEdgeStats } from '../pipeline/graph/run';
 import { applyLoopAction, openLoops, personOpenLoops } from '../pipeline/obligations';
+import { survivingOccasion } from '../pipeline/occasions/build';
 import { shortDate } from '../pipeline/obligations/dates';
 import { readTieStats } from '../pipeline/ties/view';
 import { settingTimeZone } from '../settings/registry';
@@ -85,6 +92,7 @@ const OtherParams = z.object({ id: Id, otherId: Id });
 const NoteParam = z.object({ noteId: Id });
 const MergeParams = z.object({ id: Id, mergeId: Id });
 const LoopParams = z.object({ type: OpenLoopType, id: Id });
+const MetParams = z.object({ id: Id, linkId: z.string().regex(/^[0-9A-Za-z_-]{1,64}$/) });
 const LoopsQuery = z.object({ cursor: z.string().regex(/^o\d{1,6}$/).optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -908,6 +916,94 @@ export function pairView(db: DB, aId: string, bId: string, now = Date.now()): Pa
   };
 }
 
+// ---------------------------------------------------------------------------------------------- met at
+
+type MetTarget = Pick<MetAtLink, 'target' | 'title' | 'startsAt' | 'venue' | 'href'>;
+
+/**
+ * The happening a met-at link points at, as the person page names it: an occasion resolves to its survivor (title
+ * through the hidden-name redactor); a Partiful event that a live occasion now covers is shown as that occasion.
+ * Sensitive, missing or undated targets are null (never shown).
+ */
+function metTarget(db: DB, target: { type: string; id: string }, redactTitle: (t: string | null) => string | null): MetTarget | null {
+  const occasion = (id: string): MetTarget | null => {
+    const o = db.prepare('SELECT id, title, starts_at, venue_text, sensitive FROM occasions WHERE id = ?').get(survivingOccasion(db, id)) as
+      | { id: string; title: string | null; starts_at: number; venue_text: string | null; sensitive: number }
+      | undefined;
+    if (!o || o.sensitive === 1) return null;
+    return { target: { type: 'occasion', id: o.id }, title: redactTitle(o.title), startsAt: o.starts_at, venue: o.venue_text && maskText(o.venue_text), href: `/e/${o.id}` };
+  };
+  if (target.type === 'occasion') return occasion(target.id);
+  if (target.type !== 'event') return null;
+  const covering = db
+    .prepare(`SELECT id FROM occasions WHERE event_id = ? AND merged_into_id IS NULL AND status IN ('active', 'candidate') ORDER BY starts_at, id LIMIT 1`)
+    .pluck()
+    .get(target.id) as string | undefined;
+  if (covering) return occasion(covering);
+  const e = db.prepare('SELECT id, title, starts_at, location_text FROM events WHERE id = ?').get(target.id) as
+    | { id: string; title: string | null; starts_at: number | null; location_text: string | null }
+    | undefined;
+  if (!e || e.starts_at == null) return null;
+  return { target: { type: 'event', id: e.id }, title: e.title && maskText(e.title), startsAt: e.starts_at, venue: e.location_text && maskText(e.location_text), href: `/e/${e.id}` };
+}
+
+/**
+ * Active met-at links of the person (intel/metAt reads every record merged into them), earliest event first: one per
+ * happening as the page names it (a Partiful event and the get-together that covers it are one), the surest kept.
+ */
+export function personMetAt(db: DB, id: string): MetAtList {
+  const p = visiblePerson(db, id);
+  const redactTitle = hiddenNameRedactor(db);
+  const best = new Map<string, MetAtLink>();
+  for (const l of metAtLinksForPerson(db, p.id)) {
+    const signal = MetAtSignal.safeParse(l.signal);
+    const t = signal.success ? metTarget(db, l.target, redactTitle) : null;
+    if (!t || !signal.success) continue;
+    const link: MetAtLink = { id: l.id, ...t, signal: signal.data, signalAt: l.signalAt, confidence: l.confidence, screenshot: l.screenshot };
+    const k = `${t.target.type}:${t.target.id}`;
+    const cur = best.get(k);
+    if (!cur || link.confidence > cur.confidence || (link.confidence === cur.confidence && link.id < cur.id)) best.set(k, link);
+  }
+  const links = [...best.values()].sort((a, b) => a.startsAt - b.startsAt || a.id.localeCompare(b.id));
+  return { personId: p.id, links };
+}
+
+/**
+ * "Wrong" on a met-at link: it (and any other active link of the person's records to the same happening) is rejected
+ * in one journaled batch, undoable from Today, and never re-created by intel/metAt.
+ */
+export function metAtWrong(db: DB, id: string, linkId: string, now = Date.now()): BatchRef {
+  const p = visiblePerson(db, id);
+  const members = cluster(db, p.id);
+  type Row = { id: string; person_id: string; status: string; occasion_id: string | null; event_id: string | null };
+  const row = db.prepare('SELECT id, person_id, status, occasion_id, event_id FROM person_met_at WHERE id = ?').get(linkId) as Row | undefined;
+  if (!row || !members.includes(row.person_id)) throw notFound('Met-at link');
+  if (row.status !== 'active') return { batchId: null };
+  // The page shows one link per happening; another record of this person (merged in later) may hold its own active
+  // link to the same one (its merge chain, or the Partiful event an occasion stands for). "Wrong" means all of them.
+  const keys = metTargetKeys(db, row);
+  const ids = [
+    linkId,
+    ...(
+      db
+        .prepare(`SELECT id, person_id, status, occasion_id, event_id FROM person_met_at WHERE status = 'active' AND id <> ? AND person_id IN (SELECT value FROM json_each(?))`)
+        .all(linkId, JSON.stringify(members)) as Row[]
+    )
+      .filter((r) => [...metTargetKeys(db, r)].some((k) => keys.has(k)))
+      .map((r) => r.id),
+  ];
+  return withRun(
+    db,
+    'user',
+    (runId) => {
+      if (!rejectMetAtLinks(db, ids, { runId, actor: 'user', now })) return { batchId: null };
+      const batchId = db.prepare('SELECT id FROM change_batches WHERE run_id = ? ORDER BY seq DESC LIMIT 1').pluck().get(runId) as string | undefined;
+      return { batchId: batchId ?? null };
+    },
+    { now },
+  );
+}
+
 // ---------------------------------------------------------------------------------------------- routes
 
 export function personExtrasRoutes({ db }: RouteDeps): Router {
@@ -993,6 +1089,16 @@ export function personExtrasRoutes({ db }: RouteDeps): Router {
   r.get('/people/:a/with/:b', (req, res) => {
     const { a, b } = PairParams.parse(req.params);
     res.json(pairView(db, a, b) satisfies PairView);
+  });
+
+  r.get('/people/:id/met', (req, res) => {
+    const { id } = IdParam.parse(req.params);
+    res.json(personMetAt(db, id) satisfies MetAtList);
+  });
+
+  r.post('/people/:id/met/:linkId/wrong', (req, res) => {
+    const { id, linkId } = MetParams.parse(req.params);
+    res.json(metAtWrong(db, id, linkId) satisfies BatchRef);
   });
 
   r.get('/loops', (req, res) => {

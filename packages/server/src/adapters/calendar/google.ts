@@ -1,8 +1,13 @@
 /**
  * Google OAuth + Calendar API v3 client, read-only (PLAN "Ingestion → Google Calendar").
- *   - Every request goes through guardedFetch: an allowlist of POST oauth2.googleapis.com/{token,revoke} and GET
- *     calendarList / events.list on www.googleapis.com. Anything else (an insert, another host) is refused before
- *     it leaves the Mac, so nothing can ever write to the calendar.
+ *   - Three products share the OAuth client, each with its own consent and refresh token (GOOGLE_PRODUCTS):
+ *     calendar (calendar.readonly), gmail (gmail.readonly, adapters/gmail) and photos (the Google Photos Picker,
+ *     adapters/gphotos). A Gmail-scoped token dies on a password change; kept apart, it can't take Calendar with it.
+ *   - Every request goes through guardedFetch: an allowlist of POST oauth2.googleapis.com/{token,revoke}, GET
+ *     calendarList / events.list on www.googleapis.com, GET Gmail profile / messages.list / messages.get, the Photos
+ *     Picker's session calls and GET on its lh*.googleusercontent.com media URLs. Anything else (an insert, a Gmail
+ *     modify or send, another host) is refused before it leaves the Mac, so nothing can ever write to the calendar
+ *     or the mailbox.
  *   - Only the calendar module of googleapis is loaded (the full package costs ~0.6 s at startup).
  *   - Google errors become GoogleAuthError / SyncTokenGoneError / GoogleApiError carrying a status and a short
  *     reason token. The underlying GaxiosError is dropped: its config holds the refresh token, the auth code and
@@ -16,6 +21,19 @@ import { getSecret, setSecret } from '../../security/secrets';
 
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 export const REFRESH_TOKEN_SECRET = 'google.refresh_token';
+export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+export const GMAIL_REFRESH_TOKEN_SECRET = 'gmail.refresh_token';
+export const PHOTOS_PICKER_SCOPE = 'https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
+export const GPHOTOS_REFRESH_TOKEN_SECRET = 'gphotos.refresh_token';
+
+/** What a consent is for. Each product is its own grant (include_granted_scopes: false) and refresh token. */
+export type GoogleProduct = 'calendar' | 'gmail' | 'photos';
+export const GOOGLE_PRODUCTS: Readonly<Record<GoogleProduct, { scope: string; secret: string; settingsParam: string }>> = {
+  calendar: { scope: CALENDAR_SCOPE, secret: REFRESH_TOKEN_SECRET, settingsParam: 'google' },
+  gmail: { scope: GMAIL_SCOPE, secret: GMAIL_REFRESH_TOKEN_SECRET, settingsParam: 'gmail' },
+  photos: { scope: PHOTOS_PICKER_SCOPE, secret: GPHOTOS_REFRESH_TOKEN_SECRET, settingsParam: 'gphotos' },
+};
+export const isGoogleProduct = (v: unknown): v is GoogleProduct => typeof v === 'string' && Object.hasOwn(GOOGLE_PRODUCTS, v);
 
 export interface GoogleOAuthConfig {
   clientId: string;
@@ -35,11 +53,23 @@ export class GoogleEgressRefusedError extends Error {
   }
 }
 
-const ALLOWED: readonly { method: string; origin: string; path: RegExp }[] = [
+const ALLOWED: readonly { method: string; origin: string | RegExp; path: RegExp }[] = [
   { method: 'POST', origin: 'https://oauth2.googleapis.com', path: /^\/(token|revoke)$/ },
   { method: 'GET', origin: 'https://www.googleapis.com', path: /^\/calendar\/v3\/users\/me\/calendarList$/ },
   { method: 'GET', origin: 'https://www.googleapis.com', path: /^\/calendar\/v3\/calendars\/[^/]+\/events$/ },
+  // Gmail (adapters/gmail): read-only — the profile, messages.list and messages.get. Never modify/send/trash/watch.
+  { method: 'GET', origin: 'https://gmail.googleapis.com', path: /^\/gmail\/v1\/users\/me\/(profile|messages)$/ },
+  { method: 'GET', origin: 'https://gmail.googleapis.com', path: /^\/gmail\/v1\/users\/me\/messages\/[A-Za-z0-9_-]{1,64}$/ },
+  // Google Photos Picker (adapters/gphotos): sessions the owner picks into, the picked items, and their media bytes.
+  // Creating / deleting a session touches no photo; the library itself is never written.
+  { method: 'POST', origin: 'https://photospicker.googleapis.com', path: /^\/v1\/sessions$/ },
+  { method: 'GET', origin: 'https://photospicker.googleapis.com', path: /^\/v1\/sessions\/[A-Za-z0-9_-]{1,128}$/ },
+  { method: 'DELETE', origin: 'https://photospicker.googleapis.com', path: /^\/v1\/sessions\/[A-Za-z0-9_-]{1,128}$/ },
+  { method: 'GET', origin: 'https://photospicker.googleapis.com', path: /^\/v1\/mediaItems$/ },
+  { method: 'GET', origin: /^https:\/\/lh[0-9]\.googleusercontent\.com$/, path: /^\/.+$/ },
 ];
+
+const originMatches = (allowed: string | RegExp, origin: string) => (typeof allowed === 'string' ? allowed === origin : allowed.test(origin));
 
 const requestUrl = (input: unknown): URL =>
   new URL(input instanceof URL ? input.href : typeof input === 'string' ? input : (input as { url: string }).url);
@@ -49,10 +79,11 @@ export function guardedFetch(inner: FetchLike): FetchLike {
   return (input, init) => {
     const url = requestUrl(input);
     const method = (init?.method ?? (input as { method?: string }).method ?? 'GET').toUpperCase();
-    if (!ALLOWED.some((a) => a.method === method && a.origin === url.origin && a.path.test(url.pathname))) {
+    if (!ALLOWED.some((a) => a.method === method && originMatches(a.origin, url.origin) && a.path.test(url.pathname))) {
       return Promise.reject(new GoogleEgressRefusedError(method, url.origin));
     }
-    return inner(url, init);
+    // A redirect would reach a host the allowlist never saw: refuse it rather than follow it.
+    return inner(url, { ...init, redirect: 'error' });
   };
 }
 
@@ -267,26 +298,33 @@ export function calendarApi(client: OAuth2Client): CalendarApi {
 
 // ---------------------------------------------------------------------------------------------- connection
 
-export function isConnected(db: DB): boolean {
-  return db.prepare('SELECT 1 FROM secrets WHERE name = ?').get(REFRESH_TOKEN_SECRET) !== undefined;
+export function isConnected(db: DB, product: GoogleProduct = 'calendar'): boolean {
+  return db.prepare('SELECT 1 FROM secrets WHERE name = ?').get(GOOGLE_PRODUCTS[product].secret) !== undefined;
 }
 
-/** When the refresh token was stored (the connect time), or null. */
-export function connectedAt(db: DB): number | null {
-  return (db.prepare('SELECT updated_at FROM secrets WHERE name = ?').pluck().get(REFRESH_TOKEN_SECRET) as number | undefined) ?? null;
+/** When the product's refresh token was stored (the connect time), or null. */
+export function connectedAt(db: DB, product: GoogleProduct = 'calendar'): number | null {
+  return (db.prepare('SELECT updated_at FROM secrets WHERE name = ?').pluck().get(GOOGLE_PRODUCTS[product].secret) as number | undefined) ?? null;
 }
 
 /**
- * An OAuth client holding the stored refresh token, or null when Google isn't connected. A refresh token that
- * Google rotates is stored again (encrypted).
+ * An OAuth client holding the product's stored refresh token, or null when that product isn't connected. A refresh
+ * token that Google rotates is stored again (encrypted).
  */
-export function connectedClient(db: DB, secretsKey: Buffer, cfg: GoogleOAuthConfig, fetchImpl?: FetchLike): OAuth2Client | null {
-  const refreshToken = getSecret(db, secretsKey, REFRESH_TOKEN_SECRET);
+export function connectedClient(
+  db: DB,
+  secretsKey: Buffer,
+  cfg: GoogleOAuthConfig,
+  fetchImpl?: FetchLike,
+  product: GoogleProduct = 'calendar',
+): OAuth2Client | null {
+  const secret = GOOGLE_PRODUCTS[product].secret;
+  const refreshToken = getSecret(db, secretsKey, secret);
   if (!refreshToken) return null;
   const client = oauthClient(cfg, fetchImpl);
   client.setCredentials({ refresh_token: refreshToken });
   client.on('tokens', (t) => {
-    if (t.refresh_token && t.refresh_token !== refreshToken) setSecret(db, secretsKey, REFRESH_TOKEN_SECRET, t.refresh_token);
+    if (t.refresh_token && t.refresh_token !== refreshToken) setSecret(db, secretsKey, secret, t.refresh_token);
   });
   return client;
 }
