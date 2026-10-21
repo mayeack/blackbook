@@ -35,6 +35,16 @@ beforeEach(() => {
   app = createApp({ db: w.db, auth: { mode: 'dev-bypass', email: 'owner@example.com' } });
 });
 
+/** Ann, Ben and Cy were at a second gathering together: repeated co-attendance makes them an auto circle. */
+function againTogether() {
+  for (const [a, b, at] of [
+    [ann, ben, NOW - 10 * DAY],
+    [ann, cy, NOW - 400 * DAY],
+    [ben, cy, NOW - 5 * DAY],
+  ] as const)
+    link(a, b, 'co_attend', 2, at, 'event:again');
+}
+
 const send = (method: 'post' | 'patch' | 'delete', url: string, body: object = {}) =>
   request(app)[method](url).set('X-YB', '1').set('Content-Type', 'application/json').send(body);
 
@@ -83,6 +93,7 @@ describe('GET /network', () => {
   });
 
   it('circle filter and node colors', async () => {
+    againTogether();
     await runCircles(w.db, { now: NOW });
     const list = CollectionList.parse((await request(app).get('/api/v1/circles?kind=auto')).body);
     expect(list.items).toHaveLength(1);
@@ -133,6 +144,7 @@ describe('circles / tags / locations', () => {
   });
 
   it('auto circles: owner removals are sticky across weekly runs; deleting archives', async () => {
+    againTogether();
     await runCircles(w.db, { now: NOW });
     const auto = CollectionList.parse((await request(app).get('/api/v1/circles?kind=auto')).body).items[0]!;
     await send('post', `/api/v1/circles/${auto.id}/members`, { remove: [cy] });
