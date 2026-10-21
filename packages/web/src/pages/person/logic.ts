@@ -137,7 +137,8 @@ export function loopSubtitle(l: Pick<OpenLoop, 'type' | 'since' | 'due' | 'owner
 
 // ---------------------------------------------------------------------------------------------- facts
 
-export type FactGroup = 'Interests' | 'Work & school' | 'Places' | 'Life' | 'Other';
+/** Places holds place names only ("Los Angeles, CA"); a trip is a plan in its own words, so it has its own group. */
+export type FactGroup = 'Interests' | 'Work & school' | 'Places' | 'Trips' | 'Life' | 'Other';
 
 const FACT_GROUPS: Record<FactType, FactGroup> = {
   interest: 'Interests',
@@ -153,7 +154,7 @@ const FACT_GROUPS: Record<FactType, FactGroup> = {
   location_current: 'Places',
   location_next: 'Places',
   hometown: 'Places',
-  travel_plan: 'Places',
+  travel_plan: 'Trips',
   address: 'Places',
   relationship_status: 'Life',
   family: 'Life',
@@ -161,7 +162,7 @@ const FACT_GROUPS: Record<FactType, FactGroup> = {
   other: 'Other',
 };
 
-const GROUP_ORDER: FactGroup[] = ['Interests', 'Work & school', 'Places', 'Life', 'Other'];
+const GROUP_ORDER: FactGroup[] = ['Interests', 'Work & school', 'Places', 'Trips', 'Life', 'Other'];
 
 const FACT_TYPE_LABELS: Partial<Record<FactType, string>> = {
   activity_pref: 'Likes to',

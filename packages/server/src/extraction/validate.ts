@@ -12,6 +12,8 @@
  *               >2 days apart with an explicit date in the quote → chrono wins; a due date before the message
  *               date −1 → vague.
  *   exclusions  life events are never facts; identifiers never stored; health/sex/money/breakup → sensitive.
+ *   places      location_current / location_next / hometown values become place names ("LA" → "Los Angeles, CA");
+ *               an ADD or UPDATE that names no single city is dropped (fact_not_a_place).
  *   mentions    facts about non-participants apply only through a unique resolution at conf ≥0.8, otherwise
  *               they are held (pending_mention_facts, 30 days).
  *   historical  ADD-only; commitments and needs_reply dropped for messages older than 30 days before as_of.
@@ -19,6 +21,7 @@
  * The confidence gates that pick candidate / tentative / confirmed run at apply time (they need support counts).
  */
 import * as chrono from 'chrono-node';
+import { isPlaceFactType, placeName } from '../intel/placeNames';
 import { DAY_MS, localDateEndMs, localDateToMs, localStamp, tzOffsetMinutes } from './env';
 import type { Packet, PacketLine } from './packet';
 import { SUMMARY_MAX_CHARS } from './prompt';
@@ -297,21 +300,29 @@ export function validateExtraction(x: ParsedExtraction, packet: Packet, _o: { no
       drop('fact_bad_conf');
       continue;
     }
-    const value = lineText(f.value, 400).trim();
-    if (!value || value.length > MAX_VALUE_CHARS || looksLikeIdentifier(value)) {
+    const said = lineText(f.value, 400).trim();
+    if (!said || said.length > MAX_VALUE_CHARS || looksLikeIdentifier(said)) {
       drop('fact_bad_value');
       continue;
     }
-    if (isLifeEventText(value)) {
+    if (isLifeEventText(said)) {
       drop('fact_excluded');
       continue;
     }
+    // A place fact is a place name ("City, ST" / "City, Country"; intel/placeNames.ts). INVALIDATE and NOOP only
+    // point at an existing fact, so their value can stay as the model repeated it.
+    const place = isPlaceFactType(f.cat) ? placeName(said) : null;
+    if (isPlaceFactType(f.cat) && !place && (f.op === 'ADD' || f.op === 'UPDATE')) {
+      drop('fact_not_a_place');
+      continue;
+    }
+    const value = place?.name ?? said;
     const ev = evidence(f.ev);
     if (!hasNew(ev)) {
       drop('fact_no_new_evidence');
       continue;
     }
-    const sensitive = f.sensitive || isSensitiveText(value) || ev.some((e) => isSensitiveText(e.quote));
+    const sensitive = f.sensitive || isSensitiveText(said) || ev.some((e) => isSensitiveText(e.quote));
     const core: VFactCore = {
       cat: f.cat,
       value,

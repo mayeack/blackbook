@@ -6,6 +6,7 @@
  */
 import { uuidv7 } from '@yb/shared';
 import type { DB } from '../db/connection';
+import { isPlaceFactType, placeName } from '../intel/placeNames';
 import { withBatch } from '../journal/batch';
 import { normText } from '../migration/convert';
 import type { LogFactCat, LogKind } from './intent';
@@ -107,7 +108,9 @@ export function applyLog(
       }
       for (const f of plan.facts) {
         if (!people.includes(f.personId)) continue;
-        const value = f.value.trim().slice(0, 120);
+        // A place the owner names reads as a place name ("LA" → "Los Angeles, CA"); anything else stays as typed.
+        const typed = f.value.trim().slice(0, 120);
+        const value = (isPlaceFactType(f.cat) && placeName(typed)?.name) || typed;
         const valueNorm = normText(value);
         if (!valueNorm || factBlocked.get(f.personId, f.cat, valueNorm) || factLive.get(f.personId, f.cat, valueNorm)) continue;
         const id = uuidv7(o.now);

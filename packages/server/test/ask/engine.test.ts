@@ -55,7 +55,7 @@ describe('askNetwork (web)', () => {
     expect(out.error).toBeNull();
     expect(out.answer).toBe(`Sam Rivera lives in Austin [${fAustin}] and so does Jess Kim [${fJess}]. Sam Rivera said hi. Climbing buddies [${t.sam}].`);
     expect(out.citations.map((c) => c.ref)).toEqual([fAustin, fJess, t.sam]);
-    expect(out.citations[0]).toMatchObject({ kind: 'fact', label: expect.stringMatching(/^Sam — lives in Austin \(since /), href: `/p/${t.w.sam}` });
+    expect(out.citations[0]).toMatchObject({ kind: 'fact', label: expect.stringMatching(/^Sam — lives in Austin, TX \(since /), href: `/p/${t.w.sam}` });
     expect(out.citations[2]).toMatchObject({ kind: 'person', label: 'Sam Rivera', href: `/p/${t.w.sam}` });
     expect(out.people.map((p) => p.id)).toEqual([t.w.sam, t.w.jess]);
     expect(out.list).toBeNull(); // prose, not one line per person
@@ -138,7 +138,7 @@ describe('askNetwork (web)', () => {
     expect(out.degradedReason).toBe('no_key');
     expect(out.answer.startsWith(NEEDS_KEY_MESSAGE)).toBe(true);
     expect(out.answer).toContain('Sam Rivera — Austin');
-    expect(out.answer).toContain('Jess Kim — East Austin');
+    expect(out.answer).toContain('Jess Kim — Austin, TX'); // "East Austin" is a part of Austin
     expect(out.answer).not.toContain('Halvard');
     expect(out.citations.length).toBeGreaterThan(0);
     expect(out.citations.every((c) => ['fact', 'message', 'event'].includes(c.kind))).toBe(true);
@@ -157,21 +157,21 @@ describe('askNetwork (web)', () => {
     expect(who).toMatchObject({ degraded: true, degradedReason: 'api_error' });
     expect(who.answer).toContain('Here’s who a plain search found:');
     expect(who.answer).toContain('Sam Rivera — Austin');
-    expect(who.answer).toContain('Jess Kim — East Austin');
+    expect(who.answer).toContain('Jess Kim — Austin, TX');
     expect(who.answer).not.toContain('Friendsgiving'); // an event at a venue in Austin
     expect(who.answer).not.toContain('ropes'); // a message mentioning Austin
     expect(who.citations.every((c) => c.kind === 'fact')).toBe(true);
     // The same one-line-per-person shape as a model answer, with rows for the web's table.
-    expect(who.answer).toMatch(new RegExp(`^- Sam Rivera — Austin · bouldering \\[F\\w+\\] · Climbing crew circle · ${LAST_SAM}$`, 'm'));
+    expect(who.answer).toMatch(new RegExp(`^- Sam Rivera — Austin, TX · bouldering \\[F\\w+\\] · Climbing crew circle · ${LAST_SAM}$`, 'm'));
     expect(who.list?.intro).toBe('Claude isn’t reachable right now. Here’s who a plain search found:');
     expect(who.list?.rows.find((r) => r.person.id === who.people[0]?.id)).toBeTruthy();
     const samRow = who.list!.rows.find((r) => r.person.displayName === 'Sam Rivera')!;
-    expect(samRow).toMatchObject({ city: 'Austin', circles: ['Climbing crew'], lastContactAt: T0 });
-    expect(samRow.detail).toMatch(/^Austin · bouldering \[F\w+\]$/);
+    expect(samRow).toMatchObject({ city: 'Austin, TX', circles: ['Climbing crew'], lastContactAt: T0 });
+    expect(samRow.detail).toMatch(/^Austin, TX · bouldering \[F\w+\]$/);
     // Over iMessage a fact that only repeats the city isn't cited ("Austin · Austin¹").
     const text = await ask('who do I know in Austin', 'imessage');
-    expect(text.answer).toMatch(new RegExp(`^- Sam R\\. — Austin · bouldering \\[F\\w+\\] · Climbing crew circle · ${LAST_SAM}$`, 'm'));
-    expect(text.answer).not.toMatch(/Austin · Austin/);
+    expect(text.answer).toMatch(new RegExp(`^- Sam R\\. — Austin, TX · bouldering \\[F\\w+\\] · Climbing crew circle · ${LAST_SAM}$`, 'm'));
+    expect(text.answer).not.toMatch(/Austin, TX · Austin/);
     expect(text.list?.rows.length).toBeGreaterThan(1);
     // Other questions still get events and messages.
     const what = await ask('Austin potluck', 'web');
@@ -206,11 +206,11 @@ describe('askNetwork (web)', () => {
     expect(out.list).toEqual({
       intro: '2 people in Austin:',
       rows: [
-        { person: expect.objectContaining({ id: t.w.sam, displayName: 'Sam Rivera' }), detail: `lives in Austin [${fAustin}]`, city: 'Austin', circles: ['Climbing crew'], lastContactAt: T0 },
+        { person: expect.objectContaining({ id: t.w.sam, displayName: 'Sam Rivera' }), detail: `lives in Austin [${fAustin}]`, city: 'Austin, TX', circles: ['Climbing crew'], lastContactAt: T0 },
         {
           person: expect.objectContaining({ id: t.w.jess, displayName: 'Jess Kim' }),
           detail: `East Austin [${fJess}]; works at Acme Robotics [${fAcme}]`,
-          city: 'East Austin',
+          city: 'Austin, TX',
           circles: ['Climbing crew'],
           lastContactAt: T0 + DAY,
         },

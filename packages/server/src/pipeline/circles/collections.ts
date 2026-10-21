@@ -10,6 +10,7 @@
  */
 import { normalizeNamePart, uuidv7, type CollectionCreate, type CollectionDetail, type CollectionMember, type CollectionSummary, type CollectionUpdate, type PersonChip } from '@yb/shared';
 import type { DB } from '../../db/connection';
+import { placeName } from '../../intel/placeNames';
 import { badRequest, HttpError, notFound } from '../../http/errors';
 import { withBatch, type JournalTx } from '../../journal/batch';
 import { withRun } from '../../journal/runs';
@@ -248,16 +249,23 @@ export function collectionDetail(db: DB, type: CollectionKind, id: string, now =
   let fromFacts: PersonChip[] = [];
   if (type === 'location') {
     const norm = normalizeNamePart(row.name);
+    // Place facts are place names: a collection called "LA" also finds "Los Angeles, CA".
+    const place = placeName(row.name);
     if (norm) {
-      const ids = db
+      const rows = db
         .prepare(
-          `SELECT DISTINCT pc.canonical_id FROM facts f JOIN person_canon pc ON pc.person_id = f.person_id
+          `SELECT DISTINCT pc.canonical_id, f.value FROM facts f JOIN person_canon pc ON pc.person_id = f.person_id
            WHERE f.type IN ('location_current','home_location') AND f.status IN ('tentative','confirmed') AND f.sensitive = 0
-             AND f.retracted_at IS NULL AND (f.valid_to IS NULL OR f.valid_to > ?)
-             AND (lower(f.value_norm) = ? OR lower(f.value_norm) LIKE ? ESCAPE '\\')`,
+             AND f.retracted_at IS NULL AND (f.valid_to IS NULL OR f.valid_to > ?)`,
         )
-        .pluck()
-        .all(now, norm, `${norm.replace(/[\\%_]/g, (c) => `\\${c}`)},%`) as string[];
+        .all(now)
+        .filter((r) => {
+          const { value } = r as { value: string };
+          const v = normalizeNamePart(value);
+          return v === norm || v.startsWith(`${norm},`) || (!!place && placeName(value)?.name === place.name);
+        })
+        .map((r) => (r as { canonical_id: string }).canonical_id);
+      const ids = [...new Set(rows)];
       const memberSet = new Set(memberIds);
       const fInfo = people(db, ids.filter((x) => !memberSet.has(x)));
       fromFacts = [...fInfo.values()].sort(byName).slice(0, 50).map(chipOf);
