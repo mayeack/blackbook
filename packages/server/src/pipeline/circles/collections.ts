@@ -15,6 +15,7 @@ import { badRequest, HttpError, notFound } from '../../http/errors';
 import { withBatch, type JournalTx } from '../../journal/batch';
 import { withRun } from '../../journal/runs';
 import { maskText } from '../../routes/people';
+import { titleKey } from './naming';
 import { circleColor } from './run';
 
 export type CollectionKind = 'circle' | 'tag' | 'location';
@@ -176,6 +177,21 @@ const SUGGESTION_REASON: Record<string, string> = {
   community: 'Often together with this circle',
   near_member: 'Close to several members',
 };
+const SHARES_INTEREST = 'Shares this interest';
+
+/** Of `ids`, the people holding an interest (tentative / confirmed, not sensitive) spelled like the circle's name. */
+function holdsNamedInterest(db: DB, circleName: string, ids: readonly string[]): Set<string> {
+  const key = titleKey(circleName);
+  if (!key || !ids.length) return new Set();
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT pc.canonical_id AS person_id, f.value_norm AS norm FROM facts f JOIN person_canon pc ON pc.person_id = f.person_id
+       WHERE f.type IN ('interest','activity_pref') AND f.status IN ('tentative','confirmed') AND f.sensitive = 0
+         AND f.retracted_at IS NULL AND pc.canonical_id IN (SELECT value FROM json_each(?))`,
+    )
+    .all(JSON.stringify(ids)) as { person_id: string; norm: string | null }[];
+  return new Set(rows.filter((r) => r.norm && titleKey(r.norm) === key).map((r) => r.person_id));
+}
 
 export function collectionDetail(db: DB, type: CollectionKind, id: string, now = Date.now()): CollectionDetail {
   const row = getActive(db, type, id);
@@ -217,11 +233,17 @@ export function collectionDetail(db: DB, type: CollectionKind, id: string, now =
     );
     const candidates = sugg.filter((s) => !anyRow.has(s.person_id));
     const sInfo = people(db, candidates.map((s) => s.person_id));
+    // the weekly pass suggests people for a circle named after an interest they share ("Running") as 'community'
+    const into = holdsNamedInterest(db, row.name, candidates.filter((s) => s.reason === 'community').map((s) => s.person_id));
     suggestedAdditions = candidates
       .filter((s) => sInfo.has(s.person_id))
       .sort((a, b) => b.score - a.score || (a.person_id < b.person_id ? -1 : 1))
       .slice(0, 30)
-      .map((s) => ({ person: chipOf(sInfo.get(s.person_id)!), score: Math.round(s.score * 1000) / 1000, reason: SUGGESTION_REASON[s.reason] ?? 'Suggested' }));
+      .map((s) => ({
+        person: chipOf(sInfo.get(s.person_id)!),
+        score: Math.round(s.score * 1000) / 1000,
+        reason: into.has(s.person_id) ? SHARES_INTEREST : (SUGGESTION_REASON[s.reason] ?? 'Suggested'),
+      }));
   }
 
   let fromFacts: PersonChip[] = [];

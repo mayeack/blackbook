@@ -506,10 +506,13 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 - Openers are drafts only. No send path exists for them.
 
 ### Circles (weekly)
-- **Graph:** persons with strength ≥0.2 edges, built from `co_group` + `co_attend` + family/partner/roommate labels only (no mention-only edges).
+Circles are deduced friend groups and shared interests (owner, 2026-10-21: "Circles should not be based on Partiful event names, but deduced social groups / interests"). One party's guest list is never a circle, and no circle is named after an event.
+- **Graph:** persons with strength ≥0.2 edges, built from `co_group` + `co_attend` + family/partner/roommate labels only (no mention-only edges). `co_attend` counts only for a pair who shared ≥2 events / get-togethers. Partiful organizer accounts (known only through Partiful, hosted ≥2 events, never a guest: venues, promoters, party series) are never members.
 - **Detection:** `louvain` (graphology) with resolution 1.0. Run 10 seeds (rng seeded) and keep the best modularity. Communities over 60 are re-run on the subgraph at γ=1.5. Keep sizes 3–60.
+- **Interests:** one auto circle per interest (facts `interest` / `activity_pref`, tentative or confirmed, not sensitive) held by 3–60 people, named after it ("Skiing"), found again by its signature `interest:<value_norm>`, never renamed. Skipped when a friend group this run is mostly the same people; when the owner has a circle with that name (or Jaccard ≥0.6), its people become that circle's suggested additions ("Shares this interest").
 - **Stability:** match new communities to existing circles by Jaccard ≥0.5 (Hungarian assignment) so ids and names persist. Soft membership is added when ≥40% of a person's edge weight goes into the circle.
-- **Naming:** a batch request per new or changed circle (rename only if Jaccard <0.7 and the user hasn't edited the name). Input: top group-chat titles by shared membership, Partiful event titles, interests held by ≥30% of members, and the top 10 members' first names. Output `{name ≤3 words, emoji, description ≤15 words, conf}`.
+- **Naming:** a sync request per new or changed circle (rename only if Jaccard <0.7 and the user hasn't edited the name). Input: top group-chat titles by shared membership (not a chat titled like a Partiful event), interests held by ≥30% of members, how many events / get-togethers they shared (a count, never titles), and the top 10 members' first names. Output `{name ≤3 words, emoji, description ≤15 words, conf}`; a name another active circle has falls back. Deterministic fallback: group-chat title → "<Interest> crew" (≥50% hold it) → "Sam, Jess & Priya +4".
+- **Event-named circles from before:** an auto circle the agent named after an event is renamed when still detected, else retired (`retracted`, an undoable agent batch) unless the owner ever touched it. An agent-retired circle doesn't block a later community.
 - A legacy manual group with Jaccard ≥0.6 lends its name.
 
 ### Intro suggestions (never auto-sent)

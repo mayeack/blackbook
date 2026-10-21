@@ -1296,6 +1296,41 @@ the background at once (journaled; `undo` reverts it).
 cursor from before the deploy still pages (closeness optional in the cursor).
 **Platforms**: server + web. Not visually checked in a browser; not deployed.
 
+## 2026-10-21 — Circles are friend groups and shared interests, not Partiful events
+
+Auto circles used to come from Partiful guest lists and take an event's title (the party's name, or "<party> crew").
+Now: co-attendance counts only between people who shared ≥ 2 events / get-togethers; Partiful organizer accounts
+(venues, promoters: known only through Partiful, host-only) are never members; names come from group chats, shared
+interests ("Rock climbing crew") or first names, never event titles (the LLM gets only a count of shared gatherings).
+Each interest held by 3+ people (tentative/confirmed facts) becomes an auto circle ("Skiing"), or suggested additions
+for the owner's own circle of that name. On the first weekly run, auto circles named after an event are renamed if
+still detected, otherwise retired (undoable from Activity), unless the owner ever edited them.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/pipeline/circles/socialGroups.test.ts`: one party → no circle, two → a circle named without the title; LLM
+   packet has no event titles; a chat titled like the party lends no name; "Rock climbing crew"; organizer excluded;
+   interest circle kept by signature (join / retract / owner removal / owner delete); "Running" user circle gets
+   "Shares this interest" suggestions; legacy event circles renamed / retired / undo respected / owner-touched kept /
+   retired circle doesn't block. `test/pipeline/circles/circles.test.ts`: LLM name already taken → deterministic name.
+3. Dry run on a copy of a live snapshot (no LLM): 2 event-named circles retired, 1 renamed, no event-titled names, 2
+   interest circles created, owner's Skiing / Running circles get suggestions.
+
+### Scenario B — Web (owner, after deploy and the Sunday circles run, or `yb` run of job `circles`)
+1. yeackbot.com → More → Circles. **Expected**: no auto circle named after a party; auto circles show group-chat names,
+   "<Interest> crew", interest names like "Skiing", or LLM names such as a friend-group description.
+2. Today / Activity feed. **Expected**: "Renamed an auto circle that was named after an event" and "Retired an auto
+   circle that was named after an event" entries, each with Undo.
+3. Undo a retirement. **Expected**: the circle comes back with its members and stays on later weekly runs.
+4. Open your Skiing (or Running) circle. **Expected**: Suggested additions marked "Shares this interest".
+5. Open a person who used to be in a party-named circle. **Expected**: that chip is gone; their friend-group circles
+   (group chats) remain.
+
+**Edge cases**: a recurring party series still forms a circle (repeated co-attendance) but is named by interests or
+first names; an event-named circle you renamed, locked or edited is never touched; deleting an interest circle keeps it
+gone; candidate or sensitive interests never make a circle.
+**Platforms**: server + web copy. Web not visually checked; not deployed.
+
 ## 2026-10-21 — Places are place names ("Los Angeles, CA", "Berlin, Germany")
 
 A person's Places (Overview → Facts & interests) show only real cities and towns in one form: "City, ST" in the US,
