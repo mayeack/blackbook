@@ -9,6 +9,8 @@ import fs from 'node:fs/promises';
 import {
   AttachmentImageResponse,
   AttachmentQuery,
+  CallsQuery,
+  CallsResponse,
   ChatsQuery,
   ChatsResponse,
   COLLECTOR_ROUTES,
@@ -183,6 +185,12 @@ export class CollectorClient {
   attachmentImage(q: AttachmentQuery) {
     const p = AttachmentQuery.parse(q);
     return this.get('attachment', `${COLLECTOR_ROUTES.imessageAttachment}${query(p)}`, AttachmentImageResponse);
+  }
+
+  /** The Mac's call log, oldest first by CallHistory rowid. */
+  calls(q: CallsQuery = {}) {
+    const p = CallsQuery.parse(q);
+    return this.get('calls', `${COLLECTOR_ROUTES.calls}${query(p)}`, CallsResponse);
   }
 
   async close(): Promise<void> {

@@ -19,8 +19,10 @@
   align-items: center;
   justify-content: center;
 }
+/* A circle inside the circular ring: the usual rounded-square tile's corners would crowd the arc. */
 .person-header .tie-ring .avatar {
   --size: 64px;
+  border-radius: 50%;
 }
 .ph-cadence {
   display: flex;

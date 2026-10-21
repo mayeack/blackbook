@@ -3,14 +3,14 @@ import { useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { keys, useSessionMessages, useTimeline } from '../../api/hooks';
-import type { InteractionItem, PersonDetail, SessionItem, SessionMessage, SessionMessages } from '../../api/types';
+import type { CallItem, InteractionItem, PersonDetail, SessionItem, SessionMessage, SessionMessages } from '../../api/types';
 import { EntityRow, IconTile } from '../../components/EntityRow';
 import { Icons } from '../../components/icons';
 import { Empty, PageState } from '../../components/PageState';
 import { PersonLink } from '../../components/PersonLink';
 import { SourceTile } from '../../components/SourceBadge';
 import { eventPath } from '../../lib/events';
-import { plural, span, time } from '../../lib/format';
+import { dateTime, plural, span, time } from '../../lib/format';
 import { channelOf, interactionLabel, sourceLabel } from '../../lib/labels';
 import { messageDomId, nextStep, parseLocateTarget, type LocateTarget } from './locate';
 
@@ -195,7 +195,39 @@ function InteractionCard({ it }: { it: InteractionItem }) {
   );
 }
 
-/** All / iMessage / WhatsApp / Instagram, when the person is on more than one. */
+const CALL_KINDS: Record<CallItem['service'], string> = {
+  phone: 'Phone',
+  facetime_audio: 'FaceTime audio',
+  facetime_video: 'FaceTime video',
+  other: 'Call',
+};
+
+function callLength(c: CallItem): string | null {
+  if (c.endedAt == null) return null;
+  const s = Math.round((c.endedAt - c.startedAt) / 1000);
+  return s < 60 ? `${s} sec` : `${Math.round(s / 60)} min`;
+}
+
+function CallCard({ c, p }: { c: CallItem; p: PersonDetail }) {
+  const name = firstName(p);
+  const title = c.outgoing
+    ? `You called ${name}${c.answered ? '' : ' · no answer'}`
+    : c.answered
+      ? `Call from ${name}`
+      : `Missed call from ${name}`;
+  const length = callLength(c);
+  return (
+    <div className="tl-card">
+      <EntityRow
+        icon={<IconTile accent={c.answered}>{Icons.call}</IconTile>}
+        title={title}
+        subtitle={[CALL_KINDS[c.service], dateTime(c.startedAt), length].filter(Boolean).join(' · ')}
+      />
+    </div>
+  );
+}
+
+/** All / iMessage / WhatsApp / Instagram / Phone / FaceTime, when the person is on more than one. */
 function ChannelFilter({ channels, value, onChange }: { channels: string[]; value: string | null; onChange: (c: string | null) => void }) {
   const options: (string | null)[] = [null, ...channels];
   return (
@@ -293,6 +325,8 @@ export function PersonTimeline({ p }: { p: PersonDetail }) {
         {items.map((it) =>
           it.type === 'session' ? (
             <SessionCard key={it.id} s={it} p={p} focus={focusSession === it.id ? target!.messageId : null} />
+          ) : it.type === 'call' ? (
+            <CallCard key={it.id} c={it} p={p} />
           ) : (
             <InteractionCard key={it.id} it={it} />
           ),
