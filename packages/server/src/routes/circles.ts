@@ -9,7 +9,8 @@
  *   DELETE /{circles|tags|locations}/:id                             → BatchRef   (tombstone; an auto circle is archived)
  *
  * Every write is the owner's (actor 'user'), journaled and undoable from Today. The agent maintains auto circles
- * (weekly) but never deletes a collection or touches the owner's own ones.
+ * (weekly) and never touches the owner's own collections; the only collections it ever retires are auto circles of
+ * its own that were named after an event and that the owner never touched (undoable, pipeline/circles/run.ts).
  */
 import { Router } from 'express';
 import { z } from 'zod';

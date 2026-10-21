@@ -117,7 +117,7 @@ function CollectionList({ type, filter }: { type: CollectionType; filter: string
         {filter ? (
           <Empty title={`No ${noun.one}s match “${filter}”.`} />
         ) : type === 'circle' ? (
-          <Empty title="No circles yet.">The weekly run finds circles from shared group chats and events. You can also make your own.</Empty>
+          <Empty title="No circles yet.">The weekly run finds friend groups and shared interests from your group chats, the people who keep turning up together, and what you know about them. You can also make your own.</Empty>
         ) : (
           <Empty title={`No ${noun.one}s yet.`}>Add one here or from anyone’s page.</Empty>
         )}
@@ -138,7 +138,7 @@ function CollectionList({ type, filter }: { type: CollectionType; filter: string
       {auto.length > 0 && (
         <>
           <h2 className="section-title">Auto circles · {auto.length}</h2>
-          <p className="caption section-note">Found from group chats and events. The agent keeps membership current but never deletes one.</p>
+          <p className="caption section-note">Friend groups and shared interests, found from group chats, people who keep turning up together, and their interests. The agent keeps membership current.</p>
           <div className="card-list">
             {auto.map((c) => (
               <CollectionRow key={c.id} c={c} />

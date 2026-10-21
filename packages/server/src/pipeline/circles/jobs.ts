@@ -1,8 +1,9 @@
 /**
- * Job 'circles' (weekly AGENT_TIMES.circles): seeded Louvain over the co_group / co_attend / close-label graph,
- * Jaccard-stable circle ids, soft membership, naming (LLM through the egress choke point when a key and budget
- * exist, else group-chat / event titles). Journaled through run.ts; the graph aggregation yields the event loop
- * between steps and the pass stops early on ctx.signal.
+ * Job 'circles' (weekly AGENT_TIMES.circles): seeded Louvain over the co_group / repeated co_attend / close-label
+ * graph plus shared-interest groups, Jaccard- (or signature-) stable circle ids, soft membership, naming (LLM through
+ * the egress choke point when a key and budget exist, else group-chat titles, shared interests or first names; never
+ * event titles). Journaled through run.ts; the graph aggregation yields the event loop between steps and the pass
+ * stops early on ctx.signal.
  */
 import { weekly, type JobDef } from '../../scheduler/scheduler';
 import { AGENT_TIMES, jobServices, type AgentJobDeps } from '../../scheduler/timetable';
