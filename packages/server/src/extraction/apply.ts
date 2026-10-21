@@ -10,8 +10,9 @@
  *                    people who are only mentioned: at least 0.80;
  *                    0.5 ≤ conf < gate → candidate; a second independent sighting (another day) promotes it.
  *                  ADD dedups on (person, cat, value_norm) or Jaro–Winkler ≥0.92 → evidence + support instead of a
- *                  new row; fact_blocks and rejected rows are never re-added. UPDATE closes the old fact
- *                  (valid_to, superseded_by); INVALIDATE closes it; NOOP adds support. Single-valued categories
+ *                  new row; fact_blocks and rejected rows are never re-added. Places compare as place names only
+ *                  ("Portland, OR" is not "Portland, ME"; a block on "LA" also blocks "Los Angeles, CA"). UPDATE
+ *                  closes the old fact (valid_to, superseded_by); INVALIDATE closes it; NOOP adds support. Single-valued categories
  *                  (location_current, employer): a later fact closes the earlier one (chronologically, so
  *                  out-of-order historical windows reconcile).
  *   relations      edge_labels (sticky 'rejected' respected); 'ex' always sensitive.
@@ -32,6 +33,7 @@ import { tx } from '../db/tx';
 import { withBatch, type JournalTx, type Row } from '../journal/batch';
 import type { Egress, TokenMap } from '../llm/types';
 import { recordNeedsReplyFromExtraction, upsertCommitmentFromExtraction } from '../pipeline/obligations';
+import { isPlaceFactType, placeName, placeNameOfNorm } from '../intel/placeNames';
 import { localStamp, type Env } from './env';
 import type { Packet } from './packet';
 import type { FactCat } from './schema';
@@ -139,6 +141,18 @@ function factsOf(db: DB, personId: string, cat: string): FactRow[] {
 
 const isLive = (f: FactRow) => (LIVE as readonly string[]).includes(f.status) && f.superseded_at === null && f.retracted_at === null;
 const similarValue = (a: string, b: string) => a === b || jaroWinkler(a, b) >= DEDUP_JW;
+/** The same fact value: places by place name (rows written before names were normalized too), the rest by norm. */
+const sameValue = (cat: string, f: Pick<FactRow, 'value' | 'value_norm'>, core: Pick<VFactCore, 'value' | 'valueNorm'>) =>
+  isPlaceFactType(cat) ? f.value_norm === core.valueNorm || placeName(f.value)?.name === core.value : similarValue(f.value_norm, core.valueNorm);
+
+/** A place block written as "la" or "los angeles ca" blocks the place name "Los Angeles, CA". */
+function placeBlocked(db: DB, personId: string, cat: string, name: string): boolean {
+  const norms = db
+    .prepare(`SELECT b.value_norm FROM fact_blocks b JOIN person_canon pc ON pc.person_id = b.person_id WHERE pc.canonical_id = ? AND b.type = ?`)
+    .pluck()
+    .all(personId, cat) as string[];
+  return norms.some((n) => placeNameOfNorm(n)?.name === name);
+}
 
 function blocked(db: DB, personId: string, cat: string, valueNorm: string): boolean {
   return (
@@ -191,18 +205,19 @@ class FactWriter {
 
   /** ADD (also the new half of UPDATE): dedup into a live fact or insert. */
   add(w: FactWrite): FactOutcome {
-    const { core } = w;
+    const core = placeCore(w.core);
+    if (!core) return { kind: 'skipped', factId: null };
     const personId = this.ctx.env.canonical(w.personId);
-    if (blocked(this.db, personId, core.cat, core.valueNorm)) {
+    if (blocked(this.db, personId, core.cat, core.valueNorm) || (isPlaceFactType(core.cat) && placeBlocked(this.db, personId, core.cat, core.value))) {
       this.stats.factsBlocked++;
       return { kind: 'blocked', factId: null };
     }
     const all = factsOf(this.db, personId, core.cat);
-    if (all.some((f) => f.status === 'rejected' && similarValue(f.value_norm, core.valueNorm))) {
+    if (all.some((f) => f.status === 'rejected' && sameValue(core.cat, f, core))) {
       this.stats.factsBlocked++;
       return { kind: 'blocked', factId: null };
     }
-    const match = all.find((f) => isLive(f) && similarValue(f.value_norm, core.valueNorm));
+    const match = all.find((f) => isLive(f) && sameValue(core.cat, f, core));
     if (match) return this.merge(match, core, w.viaMention);
 
     const id = uuidv7(this.ctx.now);
@@ -216,7 +231,8 @@ class FactWriter {
       id,
       person_id: personId,
       type: core.cat,
-      value: this.display(core.value),
+      // A place name is built locally and holds no tokens; "Portland, ME" is Maine, not the owner's ref.
+      value: isPlaceFactType(core.cat) ? core.value : this.display(core.value),
       value_norm: core.valueNorm,
       sensitive: sens ? 1 : 0,
       confidence: round(core.conf),
@@ -265,7 +281,7 @@ class FactWriter {
   /** UPDATE: a new value replaces the target (closed once the new value is at least tentative). */
   update(w: FactWrite, targetId: string): FactOutcome {
     const target = this.db.prepare('SELECT * FROM facts WHERE id = ?').get(targetId) as FactRow | undefined;
-    if (target && isLive(target) && similarValue(target.value_norm, w.core.valueNorm)) return this.merge(target, w.core, w.viaMention);
+    if (target && isLive(target) && sameValue(w.core.cat, target, w.core)) return this.merge(target, w.core, w.viaMention);
     const out = this.add(w);
     // Re-read: adding a single-valued fact may already have closed the target.
     const fresh = target ? (this.db.prepare('SELECT * FROM facts WHERE id = ?').get(target.id) as FactRow | undefined) : undefined;
@@ -327,6 +343,17 @@ class FactWriter {
 }
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * A place fact's core with its place name as the value (validate.ts already does this for new windows; facts held
+ * for an unresolved mention before then still arrive as written), or null when it names no place.
+ */
+function placeCore(core: VFactCore): VFactCore | null {
+  if (!isPlaceFactType(core.cat)) return core;
+  const place = placeName(core.value);
+  if (!place) return null;
+  return place.name === core.value ? core : { ...core, value: place.name, valueNorm: normValue(place.name, core.cat) };
+}
 
 export function tokenMapOf(env: Env, packet: Packet | null): TokenMap {
   const map: TokenMap = {};

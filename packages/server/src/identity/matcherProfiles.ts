@@ -5,6 +5,7 @@
  */
 import { computeCanon } from '../db/canon';
 import type { DB } from '../db/connection';
+import { placeName } from '../intel/placeNames';
 import { firstCanon, isDerivedName, parseName, personName, type PersonName } from './matcherNames';
 import { NAME_PRECEDENCE } from './resolver';
 
@@ -244,9 +245,10 @@ export function loadBook(db: DB): Book {
   }
 
   const cities = db
-    .prepare(`SELECT person_id, value_norm FROM facts WHERE type = 'location_current' AND status IN ('tentative','confirmed')`)
-    .all() as { person_id: string; value_norm: string }[];
-  for (const c of cities) ownerOf(c.person_id)?.cities.add(c.value_norm);
+    .prepare(`SELECT person_id, value, value_norm FROM facts WHERE type = 'location_current' AND status IN ('tentative','confirmed')`)
+    .all() as { person_id: string; value: string; value_norm: string }[];
+  // By place name, so "LA" and "Los Angeles, CA" are one city.
+  for (const c of cities) ownerOf(c.person_id)?.cities.add(placeName(c.value)?.name.toLowerCase() ?? c.value_norm);
 
   return { profiles, firstCount, lastCount, named, phoneDays, convSize, eventSize };
 }
