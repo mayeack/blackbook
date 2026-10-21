@@ -1,7 +1,9 @@
 /**
  * Community detection for auto circles (intelligence §5 "Circles", PLAN "Circles and intros"):
  *   graph       visible people; an edge where co_group + co_attend + family/partner/roommate labels give
- *               strength_c = 1 − e^(−W_c/2) ≥ 0.2 (no mention-only or coworker edges)
+ *               strength_c = 1 − e^(−W_c/2) ≥ 0.2 (no mention-only or coworker edges). Co-attendance counts only for
+ *               a pair that shared at least MIN_SHARED_GATHERINGS events / get-togethers: one party's guest list is
+ *               not a social group, people who keep turning up together are.
  *   detection   one seeded Louvain run (graphology-communities-louvain, resolution 1.0); communities over 60 are
  *               re-run on their subgraph at γ = 1.5; sizes 3–60 are kept
  *   membership  core = the community; soft = anyone else with ≥ 40% of their circle-graph weight inside it. A
@@ -34,9 +36,13 @@ export function seededRng(seed: number): () => number {
   };
 }
 
+/** Distinct events / get-togethers (co_attend evidence rows, one per ref) a pair must share before co-attendance counts. */
+export const MIN_SHARED_GATHERINGS = 2;
+
 /** Circle-graph weight of an aggregated pair. */
 export function circleWeight(p: PairAgg): number {
-  return (p.byType.co_group?.w ?? 0) + (p.byType.co_attend?.w ?? 0) + Math.min(5, p.closeLabelW);
+  const attend = p.byType.co_attend;
+  return (p.byType.co_group?.w ?? 0) + (attend && attend.n >= MIN_SHARED_GATHERINGS ? attend.w : 0) + Math.min(5, p.closeLabelW);
 }
 
 export interface CircleGraph {

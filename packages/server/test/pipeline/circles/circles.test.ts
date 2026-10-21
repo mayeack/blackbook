@@ -4,10 +4,10 @@ import { uuidv7 } from '@yb/shared';
 import { undoBatch } from '../../../src/journal/undo';
 import { nullLogger } from '../../../src/ops/logger';
 import { editMembers, updateCollection } from '../../../src/pipeline/circles/collections';
-import { buildCircleGraph, detectCommunities, greedyMatch, jaccard, seededRng } from '../../../src/pipeline/circles/detect';
+import { buildCircleGraph, circleWeight, detectCommunities, greedyMatch, jaccard, seededRng } from '../../../src/pipeline/circles/detect';
 import { circleCheckinWildcard, circleNeglectGenerator } from '../../../src/pipeline/circles/generators';
 import { circlesJobs } from '../../../src/pipeline/circles/jobs';
-import { cleanTitle, validateName } from '../../../src/pipeline/circles/naming';
+import { cleanTitle, interestName, sharedInterests, titleKey, validateName } from '../../../src/pipeline/circles/naming';
 import { runCircles } from '../../../src/pipeline/circles/run';
 import type { PairAgg } from '../../../src/pipeline/graph/aggregate';
 import type { Candidate, GeneratorContext } from '../../../src/pipeline/suggestions/types';
@@ -16,11 +16,13 @@ import { settingsSnapshot } from '../../../src/settings/registry';
 import { FakeEgress, FakeLlmClient } from '../../fakes/llm';
 import { DAY, NOW, socialWorld, type SocialWorld } from '../socialWorld';
 
-function link(w: SocialWorld, a: string, b: string, wRaw = 1, ref = 'event:e1') {
+/** Co-attendance of a and b at `refs` (two gatherings by default: one alone doesn't make a circle edge), wRaw in all. */
+function link(w: SocialWorld, a: string, b: string, wRaw = 1, refs: string[] = ['event:e1', 'event:e2']) {
   const [x, y] = a < b ? [a, b] : [b, a];
-  w.db
-    .prepare(`INSERT INTO edge_evidence (a_id, b_id, type, directed, ref, at, w_raw, created_at) VALUES (?, ?, 'co_attend', 0, ?, ?, ?, ?)`)
-    .run(x, y, ref, NOW - DAY, wRaw, NOW);
+  for (const ref of refs)
+    w.db
+      .prepare(`INSERT INTO edge_evidence (a_id, b_id, type, directed, ref, at, w_raw, created_at) VALUES (?, ?, 'co_attend', 0, ?, ?, ?, ?)`)
+      .run(x, y, ref, NOW - DAY, wRaw / refs.length, NOW);
 }
 
 function clique(w: SocialWorld, ids: string[], wRaw = 1) {
@@ -67,7 +69,7 @@ describe('community detection', () => {
     const p = (a: string, b: string, w: number): PairAgg => ({
       a: a < b ? a : b,
       b: a < b ? b : a,
-      byType: { co_attend: { w, n: 1, last: null } },
+      byType: { co_attend: { w, n: 2, last: null } },
       closeLabelW: 0,
       weight: w,
       strength: 0,
@@ -98,6 +100,26 @@ describe('community detection', () => {
     const r1 = seededRng(1);
     const r2 = seededRng(1);
     expect([r1(), r1()]).toEqual([r2(), r2()]);
+  });
+
+  it('counts co-attendance only for pairs who shared at least two gatherings', () => {
+    const pair = (n: number, extra: Partial<PairAgg> = {}): PairAgg => ({
+      a: 'a',
+      b: 'b',
+      byType: { co_attend: { w: 3, n, last: null } },
+      closeLabelW: 0,
+      weight: 3,
+      strength: 0,
+      tier: 'faint',
+      dominant: null,
+      last: null,
+      evidenceCount: n,
+      ...extra,
+    });
+    expect(circleWeight(pair(1))).toBe(0);
+    expect(circleWeight(pair(2))).toBe(3);
+    expect(circleWeight(pair(1, { byType: { co_attend: { w: 3, n: 1, last: null }, co_group: { w: 0.5, n: 1, last: null } } }))).toBe(0.5);
+    expect(buildCircleGraph([pair(1)], new Set(['a', 'b'])).adj.size).toBe(0);
   });
 });
 
@@ -156,7 +178,7 @@ describe('weekly circles pass', () => {
     updateCollection(w.db, 'circle', crew.id, { name: 'Rock gym' }, NOW);
     // a new climber shows up; Dina drifts away entirely
     const kai = w.person('Kai', 'Climb');
-    for (const c of climbers.slice(0, 3)) link(w, kai, c, 1, 'event:e9');
+    for (const c of climbers.slice(0, 3)) link(w, kai, c, 1, ['event:e9', 'event:e10']);
     w.db.prepare(`DELETE FROM edge_evidence WHERE a_id = ? OR b_id = ?`).run(climbers[3]!, climbers[3]!);
     const r = await runCircles(w.db, { now: NOW + 7 * DAY });
     expect(r.stats.membersAdded).toBe(1);
@@ -198,15 +220,16 @@ describe('weekly circles pass', () => {
     const { w } = fixture();
     const llm = new FakeLlmClient().on('circle_name', { json: { name: 'Weekend climbers', emoji: '🧗', description: 'Friends who climb on weekends', conf: 0.9 } });
     const r = await runCircles(w.db, { now: NOW, llm, egress: new FakeEgress() });
-    expect(r.stats.llmNamed).toBe(2);
+    // the second circle's LLM name is taken by the first: it falls back to the deterministic name
+    expect(r.stats.llmNamed).toBe(1);
     expect(circles(w).map((c) => [c.name, c.icon])).toEqual([
-      ['Weekend climbers', '🧗'],
+      ['Gus, Hana & Ivo +1', null],
       ['Weekend climbers', '🧗'],
     ]);
     expect(llm.calls.every((c) => c.kind === 'circle_name' && c.route === 'circle_name' && c.effort === 'low' && !c.fallbacks)).toBe(true);
     expect(llm.calls[0]!.userText).toContain('Climbing crew');
     expect(llm.calls[0]!.userText).not.toMatch(/\+1\d{10}|@example\.com/);
-    expect(w.db.prepare(`SELECT count(*) FROM circle_auto_meta WHERE named_by = 'llm'`).pluck().get()).toBe(2);
+    expect(w.db.prepare(`SELECT count(*) FROM circle_auto_meta WHERE named_by = 'llm'`).pluck().get()).toBe(1);
 
     const { w: w2 } = fixture();
     const bad = new FakeLlmClient().on('circle_name', { json: { name: 'A very long circle name', emoji: null, description: 'x', conf: 0.9 } });
@@ -239,7 +262,7 @@ describe('weekly circles pass', () => {
   it('hidden people never join a circle', async () => {
     const { w, climbers } = fixture();
     const hid = w.person('Hal', 'Hidden', { is_hidden: 1 });
-    for (const c of climbers) link(w, hid, c, 2, 'event:e7');
+    for (const c of climbers) link(w, hid, c, 2, ['event:e7', 'event:e8']);
     await runCircles(w.db, { now: NOW });
     expect(w.db.prepare('SELECT count(*) FROM circle_members WHERE person_id = ?').pluck().get(hid)).toBe(0);
   });
@@ -263,6 +286,18 @@ describe('naming helpers', () => {
     expect(cleanTitle(ctx, '  Ski   trip  ')).toBe('Ski trip');
     expect(cleanTitle(ctx, 'call +12025550123')).not.toContain('5550123');
     expect(cleanTitle({ redact: () => '…' }, 'Hal & me')).toBeNull();
+    expect(interestName(ctx, 'rock climbing', 'crew')).toBe('Rock climbing crew');
+    expect(interestName(ctx, 'electronic music festivals', 'crew')).toBeNull();
+    expect(titleKey('Summer Bash 🔥!!')).toBe(titleKey('summer   bash'));
+    const interests = new Map([
+      ['a', new Map([['skiing', 'skiing'], ['chess', 'chess']])],
+      ['b', new Map([['skiing', 'Skiing']])],
+      ['c', new Map([['chess', 'chess']])],
+    ]);
+    expect(sharedInterests({ interests }, ['a', 'b', 'c'], 0.5)).toEqual([
+      { norm: 'chess', value: 'chess', count: 2 },
+      { norm: 'skiing', value: 'Skiing', count: 2 },
+    ]);
   });
 });
 

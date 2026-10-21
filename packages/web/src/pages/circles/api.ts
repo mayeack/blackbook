@@ -1,6 +1,6 @@
 /**
  * Circles / Tags / Locations (routes/circles.ts). Writes are the owner's, journaled and undoable from Today; the
- * agent maintains auto circles but never deletes one or touches the owner's own collections.
+ * agent maintains auto circles (friend groups and shared interests) and never touches the owner's own collections.
  * Keys start with ['collections'] so any membership change refreshes lists and details together.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
