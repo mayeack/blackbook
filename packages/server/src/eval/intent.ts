@@ -134,7 +134,9 @@ export function gradeIntent(c: IntentEvalCase, r: IntentResult | null): string[]
       if (!e.reminder.kinds.includes(r.reminder.kind)) out.push(`reminder kind ${r.reminder.kind} ∉ ${e.reminder.kinds.join('/')}`);
       if (!r.reminder.what.toLowerCase().includes(e.reminder.contains.toLowerCase())) out.push(`reminder "${r.reminder.what}" lacks "${e.reminder.contains}"`);
     }
-    for (const p of e.reminder.who) if (!(r.log?.people ?? []).some((x) => whoOf(x) === p)) out.push(`${p} not named for the reminder`);
+    // Named in log.people, or (when the model names nobody) by name in the note: the executor matches those locally.
+    const byName = !(r.log?.people.length) ? c.people.filter((p) => new RegExp(`\\b${p.first}\\b`, 'i').test(c.text)).map((p) => p.id) : [];
+    for (const p of e.reminder.who) if (!(r.log?.people ?? []).some((x) => whoOf(x) === p) && !byName.includes(p)) out.push(`${p} not named for the reminder`);
   }
   return out;
 }

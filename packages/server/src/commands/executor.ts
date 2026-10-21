@@ -38,7 +38,7 @@ import { finishRun, startRun } from '../journal/runs';
 import type { LlmImage } from '../llm/types';
 import { nullLogger, type Logger } from '../ops/logger';
 import { ACTION_EFFECTS, applyPreference, legacyAction, PREFERENCES, preferenceTitle, type PreferenceAction } from '../pipeline/circles/preferences';
-import { resolveDue } from '../pipeline/obligations/dates';
+import { chronoDay, resolveDue } from '../pipeline/obligations/dates';
 import { whatNorm } from '../pipeline/obligations/text';
 import type { FeedbackContext } from '../pipeline/suggestions/feedback';
 import { resolveServices, type AgentServices, type ServicesConfig, type ServicesProvider } from '../services';
@@ -952,7 +952,7 @@ class CommandRun {
     const applied = applyLog(this.db, plan, { runId: this.ensureRun(), now: this.now, messageId: msg.id, title });
     if (applied.batchId) ex.batchIds.push(applied.batchId);
     const prefAcks = this.applyPrefs(payload, ex, labelFor);
-    const reminderAck = payload.reminder ? this.applyReminder(payload.reminder, payload.resolved, msg, ex, labelFor) : null;
+    const reminderAck = payload.reminder ? this.applyReminder(payload.reminder, payload.text, payload.resolved, msg, ex, labelFor) : null;
     ex.effect = ex.effect === 'none' || ex.effect === 'log' ? 'log' : 'mixed';
     const day = relativeDay(payload.date, localParts(this.now, this.tz).date, payload.at, this.tz);
     const what = kind === 'other' ? 'note' : logKindTitle(kind).toLowerCase();
@@ -1014,13 +1014,23 @@ class CommandRun {
 
   /**
    * "Remind me to call Sam Friday": a commitment of his (origin 'command', journaled) about the first person named,
-   * due at the end of that day (tomorrow when he gave no day); the brief brings it up when it is due. Returns the ack.
+   * due at the end of that day; the brief brings it up when it is due. The day is read off his own words first
+   * ("Friday", "the 24th": small local models get weekday arithmetic wrong), then the model's date, else tomorrow.
+   * Returns the ack.
    */
-  private applyReminder(r: IntentReminder, personIds: readonly string[], msg: MessageInfo, ex: Exec, labelFor: (personId: string) => string | null): string | null {
+  private applyReminder(
+    r: IntentReminder,
+    text: string,
+    personIds: readonly string[],
+    msg: MessageInfo,
+    ex: Exec,
+    labelFor: (personId: string) => string | null,
+  ): string | null {
     const [personId, ...others] = personIds;
     if (!personId) return null;
     const today = localParts(msg.sentAt, this.tz).date;
-    const date = r.date && r.date >= today ? r.date : addDays(today, 1);
+    const said = chronoDay(text, msg.sentAt, this.tz);
+    const date = [said, r.date].find((d): d is string => !!d && d >= today) ?? addDays(today, 1);
     const due = resolveDue({ precision: 'date', start: date, end: date }, this.tz);
     const what = truncate(scrub(r.what), 120);
     if (!what) return null;

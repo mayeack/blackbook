@@ -82,7 +82,7 @@ gist: write it first: what he wants, in at most 15 words ("lower Jake's priority
 
 Intents:
 - log_interaction: he is recording time spent with people or a call ("coffee with Sam", "called Priya yesterday").
-- add_fact: he is recording a fact about someone without an interaction ("Sam moved to Denver").
+- add_fact: he is recording a fact about someone without an interaction ("Sam moved to Denver"): the person in log.people, the fact in log.facts.
 - set_preference: he is telling the assistant how to treat someone from now on. Add one entry per person and action to preferences as {surface, ref, action}:
   invite_first: invite them to parties and events first ("always invite Jess", "prioritize inviting Sam to parties").
   stop_inviting: stop suggesting them as party invites ("don't invite Sam to parties anymore").
@@ -108,7 +108,7 @@ log.kind: coffee, meal (breakfast, lunch, dinner, brunch), drinks, call (phone o
 log.date: the day it happened, YYYY-MM-DD, resolved against MESSAGE DATE (that day unless the note says otherwise).
 log.facts: durable facts he stated about a person whose ref you returned (a token or IMG); cat is one of the allowed categories (skills and talents like "great DJ" are interest or activity_pref); value is a short phrase in his words (at most 80 characters). Never birthdays, life events, health, money or anything intimate.
 log.note: one short line on what happened, or null.
-Fill only the fields for the chosen intent: log for log_interaction, add_fact, set_preference and reminder (kind other when nothing happened), preferences for set_preference ([] otherwise), reminder for reminder, question, command; set the others to null. image depends only on the images.`;
+Fill only the fields for the chosen intent: log for log_interaction, add_fact, set_preference and reminder (kind other when nothing happened), preferences for set_preference ([] otherwise), reminder for reminder, question, command; set the others to null. For those four intents log is never null: log.people lists every person the note names. image depends only on the images.`;
 
 const SCHEMA_JSON = JSON.stringify(z.toJSONSchema(IntentSchema));
 export const INTENT_PROMPT_VERSION = routePromptVersion('intent', INTENT_SYSTEM, SCHEMA_JSON);
@@ -187,10 +187,8 @@ export function validateIntent(v: IntentOutput, tokens: ReadonlySet<string>, has
   if (v.gist.length > 200) issues.push('gist too long');
   if ((v.intent === 'log_interaction' || v.intent === 'add_fact') && !v.log) issues.push('log missing');
   if (v.intent === 'set_preference' && !v.preferences.length) issues.push('preferences missing');
-  if (v.intent === 'reminder') {
-    if (!v.reminder) issues.push('reminder missing');
-    if (!v.log?.people.length) issues.push('reminder without a person');
-  }
+  // A reminder that names nobody in log.people is fine: the executor matches names in the note locally (as for `log:`).
+  if (v.intent === 'reminder' && !v.reminder) issues.push('reminder missing');
   if (v.reminder) {
     if (!v.reminder.what.trim() || v.reminder.what.length > 120) issues.push('bad reminder');
     if (v.reminder.date !== null && !DATE_RE.test(v.reminder.date)) issues.push('bad reminder date');

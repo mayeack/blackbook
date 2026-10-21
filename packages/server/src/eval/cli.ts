@@ -24,7 +24,7 @@ import { formatUsd as fmtUsd } from '../llm/models';
 import type { LocalLlm } from '../llm/local';
 import type { LlmClient, LlmEffort } from '../llm/types';
 import { servicesFor } from '../services';
-import { runIntentEval } from './intent';
+import { INTENT_EVAL_CASES, runIntentEval, type IntentEvalCase } from './intent';
 import { buildReport, shadowSummary, type ShadowSummary } from './metrics';
 import { sampleSet } from './sample';
 import { planShadow, runShadow, type ShadowPlan } from './shadow';
@@ -174,20 +174,28 @@ async function intentEval(
       io.err('no ANTHROPIC_API_KEY (or the AI is off): nothing was sent.');
       return 1;
     }
+    let cases: readonly IntentEvalCase[] = INTENT_EVAL_CASES;
+    const skipped: string[] = [];
     if (o.engine !== 'claude') {
       const info = await o.local.info(o.model);
       if (!info?.available) {
         io.err(info ? `the Ollama model ${o.model} isn't pulled (ollama pull ${o.model}).` : `Ollama isn't reachable at ${o.local.url}.`);
         return 1;
       }
+      // A model that can't read images never gets a screenshot command (Claude reads those): not its miss.
+      if (o.engine === 'local' && !info.vision) {
+        skipped.push(...cases.filter((c) => c.image).map((c) => c.id));
+        cases = cases.filter((c) => !c.image);
+      }
     }
     const local = o.engine === 'claude' ? null : { client: o.local, model: o.model };
-    const results = await runIntentEval({ llm, egress: servicesFor(db).egress, timeZone: 'UTC', local }, { now: o.now, requireSure: o.engine === 'local' });
+    const results = await runIntentEval({ llm, egress: servicesFor(db).egress, timeZone: 'UTC', local }, { now: o.now, cases, requireSure: o.engine === 'local' });
     const cost = llm.spend().todayUsd;
     const passed = results.filter((r) => r.pass).length;
-    if (o.json) io.out(JSON.stringify({ results, passed, total: results.length, costUsd: cost, engine: o.engine, ...(local ? { model: o.model } : {}) }));
+    if (o.json) io.out(JSON.stringify({ results, passed, total: results.length, skipped, costUsd: cost, engine: o.engine, ...(local ? { model: o.model } : {}) }));
     else {
       for (const r of results) io.out(`${r.pass ? '✓' : '✗'} ${r.id}${r.engine ? ` [${r.engine}]` : ''}${r.failures.length ? `: ${r.failures.join('; ')}` : ''}`);
+      for (const id of skipped) io.out(`– ${id}: skipped (${o.model} doesn't read images; Claude reads screenshots)`);
       io.out(`${passed}/${results.length} passed · ${fmtUsd(cost)}${local ? ` · local ${o.model}` : ''}`);
     }
     return passed === results.length ? 0 : 1;

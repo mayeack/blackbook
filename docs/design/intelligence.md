@@ -580,7 +580,7 @@ pause  := pause dur? | resume | status | help | more
 **Intent parser** for `log:` and unparsed text, **local first** (2026-10-21, after "deprioritize Jake M" came back "Prioritized for party invites": the schema had no way to say deprioritize, so the model forced the only preference there was).
 1. A local model reads it first: Ollama on loopback (`OLLAMA_URL`, settings `llm.local_enabled` default on, `llm.local_model` default `llama3.1:8b`, Meta's Llama: the owner avoids models from Chinese labs; llm/local.ts). Nothing leaves the Mac and nothing is billed, so it sees candidates' full names and the note verbatim. The schema goes to Ollama as `format` (a grammar), temperature 0, `think: false` on thinking models, keep_alive 30 min.
 2. Claude (route `intent`: Haiku 5.5, effort low, thinking off, pseudonymized through egress) reads it only when the local model can't: Ollama down, model not pulled, timeout, a bound broken, `sure: false`, or `unknown`. Without Claude (no key, budget) an unsure local answer still stands. A screenshot goes to Claude unless the local model reads images.
-3. Same instructions, same schema, same code-side bounds for both; `inbound_commands.parsed` records `engine` (local/claude) and `model`. `yb eval intent --engine local|auto|claude` grades either.
+3. Same instructions, same schema, same code-side bounds for both; `inbound_commands.parsed` records `engine` (local/claude) and `model`. `yb eval intent --engine local|auto|claude` grades either (local skips screenshot cases for a text-only model). Measured 2026-10-21: llama3.1:8b 11/11 text cases (≈4 s each, warm); auto 13/13 (11 local, 2 screenshots on Claude, $0.0012 vs $0.0061 Claude-only).
 
 Candidate people come from local fuzzy search (top 8 by name × recency, passed as tokens). Output (`gist` first, so the model states the meaning before it classifies; the prompt says to read for meaning: fragments, caps, corrections like "No - DEPRIORITIZE Jake M", and words that flip it):
 ```ts
@@ -605,7 +605,7 @@ Candidate people come from local fuzzy search (top 8 by name × recency, passed 
 | unmute | − Don't suggest | | suggested again |
 | hide | | hidden | gone everywhere but Settings → Hidden contacts (the journal title never names them) |
 
-A **reminder** ("remind me to call Sam Friday") is a commitment of mine (`origin 'command'`, confidence 1) about the first person named, due at the end of that day (tomorrow when no day is given); the brief words it "Reminder for Sam R.: call", never as a promise.
+A **reminder** ("remind me to call Sam Friday") is a commitment of mine (`origin 'command'`, confidence 1) about the first person named (when the model names nobody, names in the note are matched locally, as for `log:`), due at the end of that day: the day is read off his own words first ("Friday", "the 24th"; small local models get weekday arithmetic wrong), then the model's date, else tomorrow; the brief words it "Reminder for Sam R.: call", never as a promise.
 - Ambiguous people → the bot replies "Sam R. or Sam K.? reply 1/2". The clarification state lasts 1h.
 - `log:` writes an interaction (U=1.5) and facts with conf 0.95 and source `user_log`.
 - Every effect gets one confirmation reply: `[yb] ✓ done: Reply to Sam · undo`.

@@ -1313,12 +1313,13 @@ prioritize, deprioritize, stop suggesting, suggest again, hide, and reminders. E
    reminder → commitment + undo, every action's circles/flags), `test/llm/local.test.ts` (Ollama requests and every
    failure as an outcome), `test/intel/invites.test.ts` + `test/pipeline/suggestions/stage.test.ts` (who is left out
    or lowered).
-3. Live, synthetic notes only: `npx tsx packages/server/src/cli.ts eval intent` → 13/13 on Haiku 5.5 ($0.006);
-   `llm-smoke --live --only IntentSchema` → 42 nodes, accepted.
+3. Live, synthetic notes only: `eval intent` → 13/13 on Haiku 5.5 ($0.006); `eval intent --engine local` → 11/11 on
+   llama3.1:8b (2 screenshot cases skipped: it doesn't read images), twice; `--engine auto` → 13/13 (11 local, 2 on
+   Claude, $0.0012); `llm-smoke --live --only IntentSchema` → 42 nodes, accepted.
 
 ### Scenario B — Local model (owner, after deploy)
-1. `ollama pull llama3.1:8b` once (≈4.9 GB), then `npm run yb -- eval intent --engine local`. **Expected**: the cases
-   print `[local]`; any it misses or is unsure of are listed.
+1. `ollama list` shows `llama3.1:8b` (pulled 2026-10-21). `npm run yb -- eval intent --engine local`. **Expected**:
+   11/11 `[local]`, the 2 screenshot cases skipped.
 2. Settings → Privacy → **On this Mac**: "Read commands on this Mac first" is on, model `llama3.1:8b`.
 
 ### Scenario C — iPhone (owner)
@@ -1335,4 +1336,4 @@ prioritize, deprioritize, stop suggesting, suggest again, hide, and reminders. E
 **Edge cases**: a screenshot command goes to Claude (the default model doesn't read images); people excluded from the
 AI are never sent to either model; an open "Which Sam?" clarification from before the deploy still applies its party
 invite.
-**Platforms**: server + web (Settings). Not deployed; the local model not yet pulled, so not run against a real one.
+**Platforms**: server + web (Settings). Not deployed; evals ran against the real llama3.1:8b, not the iPhone flow.

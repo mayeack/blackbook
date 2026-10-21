@@ -160,7 +160,8 @@ describe('social intents, local model first', () => {
         command: null,
         log: { people: [{ surface: 'Priya', ref }], kind: 'other', date: null, facts: [], note: null },
         preferences: [],
-        reminder: { what: 'call', kind: 'call', date: '2026-10-16' },
+        // A small model's weekday arithmetic is off (Friday after Wednesday the 14th is the 16th): his words win.
+        reminder: { what: 'call', kind: 'call', date: '2026-10-21' },
         question: null,
       };
     });
@@ -177,6 +178,28 @@ describe('social intents, local model first', () => {
     w.say('undo', at(2));
     await w.run({ now: at(3) });
     expect(w.db.prepare('SELECT status FROM commitments').pluck().get()).toBe('retracted');
+  });
+
+  it('a reminder the model names nobody for is matched by name locally; with no day at all it is due tomorrow', async () => {
+    const local = fakeLocal(() => ({
+      gist: 'remind to text Priya',
+      intent: 'reminder',
+      sure: true,
+      image: null,
+      command: null,
+      log: null,
+      preferences: [],
+      reminder: { what: 'text Priya', kind: 'other', date: null },
+      question: null,
+    }));
+    const w = commandsWorld({ llm: new FakeLlmClient(), local });
+    const priya = w.person('Priya', 'Nair');
+    w.say('yb remind me to text Priya', at(0));
+    await w.run({ now: at(1) });
+    const k = w.db.prepare('SELECT person_id, kind, due_end FROM commitments').get() as Record<string, unknown>;
+    expect(k).toMatchObject({ person_id: priya, kind: 'other' });
+    expect(new Date(k.due_end as number).toISOString()).toBe('2026-10-16T04:59:59.999Z'); // end of Oct 15 (tomorrow) in Chicago
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ I'll remind you about Priya N. on Thu Oct 15: text Priya.\n\n(Text "undo" to take that back.)`);
   });
 });
 
