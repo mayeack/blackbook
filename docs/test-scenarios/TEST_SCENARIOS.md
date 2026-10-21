@@ -1302,7 +1302,7 @@ cursor from before the deploy still pages (closeness optional in the cursor).
 
 **Why:** "Yb I don't know who Jake M is, deprioritize him" and then "No - DEPRIORITIZE Jake M" both came back
 "✓ Noted for Jake M. Prioritized for party invites." The intent schema had one preference (party invites), so the
-model forced "deprioritize" into it. Now a local model (Ollama, `qwen3:4b` by default) reads free-text commands first,
+model forced "deprioritize" into it. Now a local model (Ollama, Meta's `llama3.1:8b` by default) reads free-text commands first,
 Claude only when it is unsure or unavailable, and the schema has social intents: invite first, stop inviting,
 prioritize, deprioritize, stop suggesting, suggest again, hide, and reminders. Each is journaled; `undo` reverts it.
 
@@ -1317,9 +1317,9 @@ prioritize, deprioritize, stop suggesting, suggest again, hide, and reminders. E
    `llm-smoke --live --only IntentSchema` → 42 nodes, accepted.
 
 ### Scenario B — Local model (owner, after deploy)
-1. `ollama pull qwen3:4b` once (≈2.5 GB), then `npm run yb -- eval intent --engine local`. **Expected**: the cases
+1. `ollama pull llama3.1:8b` once (≈4.9 GB), then `npm run yb -- eval intent --engine local`. **Expected**: the cases
    print `[local]`; any it misses or is unsure of are listed.
-2. Settings → Privacy → **On this Mac**: "Read commands on this Mac first" is on, model `qwen3:4b`.
+2. Settings → Privacy → **On this Mac**: "Read commands on this Mac first" is on, model `llama3.1:8b`.
 
 ### Scenario C — iPhone (owner)
 1. Text `yb I don't know who Jake M is, deprioritize him` (use a real low-priority contact). **Expected**:

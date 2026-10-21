@@ -24,7 +24,7 @@ function ollama(o: { capabilities?: string[] | null; reply?: unknown; chatStatus
     if (o.down) throw new TypeError('fetch failed');
     if (path === '/api/show') {
       return o.capabilities === null
-        ? new Response(JSON.stringify({ error: "model 'qwen3:4b' not found" }), { status: 404 })
+        ? new Response(JSON.stringify({ error: "model 'llama3.1:8b' not found" }), { status: 404 })
         : Response.json({ capabilities: o.capabilities ?? ['completion'] });
     }
     if (o.hang) {
@@ -36,15 +36,15 @@ function ollama(o: { capabilities?: string[] | null; reply?: unknown; chatStatus
   return { sent, client: createOllamaClient({ url: OLLAMA, fetch }) };
 }
 
-const req = { model: 'qwen3:4b', system: 'S', user: 'U', schema: Out };
+const req = { model: 'llama3.1:8b', system: 'S', user: 'U', schema: Out };
 
 describe('local model (Ollama)', () => {
   it('sends the schema as a grammar format (no $schema, no ±2^53 int bounds), temperature 0, no streaming', async () => {
     const { client, sent } = ollama({ capabilities: ['completion', 'thinking'] });
     const r = await client.parse(req);
-    expect(r).toMatchObject({ status: 'ok', value: { answer: 'yes', n: 2, note: null }, model: 'qwen3:4b' });
+    expect(r).toMatchObject({ status: 'ok', value: { answer: 'yes', n: 2, note: null }, model: 'llama3.1:8b' });
     const chat = sent.find((s) => s.path === '/api/chat')!.body;
-    expect(chat).toMatchObject({ model: 'qwen3:4b', stream: false, think: false, keep_alive: '30m', options: { temperature: 0 } });
+    expect(chat).toMatchObject({ model: 'llama3.1:8b', stream: false, think: false, keep_alive: '30m', options: { temperature: 0 } });
     expect(chat.messages).toEqual([
       { role: 'system', content: 'S' },
       { role: 'user', content: 'U' },
@@ -67,7 +67,7 @@ describe('local model (Ollama)', () => {
   it('images go only to a vision model; any other answers no_vision (Claude reads the screenshot)', async () => {
     const img = { mediaType: 'image/png' as const, data: 'aGVsbG8=' };
     const text = ollama({ capabilities: ['completion'] });
-    expect(await text.client.parse({ ...req, images: [img] })).toEqual({ status: 'unavailable', reason: 'no_vision', detail: 'qwen3:4b' });
+    expect(await text.client.parse({ ...req, images: [img] })).toEqual({ status: 'unavailable', reason: 'no_vision', detail: 'llama3.1:8b' });
     expect(text.sent.some((s) => s.path === '/api/chat')).toBe(false);
     const vision = ollama({ capabilities: ['completion', 'vision'] });
     expect(await vision.client.parse({ ...req, images: [img] })).toMatchObject({ status: 'ok' });
@@ -77,13 +77,13 @@ describe('local model (Ollama)', () => {
 
   it('every failure is an outcome: not running, not pulled, an HTTP error, a timeout', async () => {
     expect(await ollama({ down: true }).client.parse(req)).toEqual({ status: 'unavailable', reason: 'unreachable' });
-    expect(await ollama({ capabilities: null }).client.parse(req)).toEqual({ status: 'unavailable', reason: 'model_missing', detail: 'qwen3:4b' });
+    expect(await ollama({ capabilities: null }).client.parse(req)).toEqual({ status: 'unavailable', reason: 'model_missing', detail: 'llama3.1:8b' });
     expect(await ollama({ chatStatus: 500 }).client.parse(req)).toEqual({ status: 'unavailable', reason: 'error', detail: 'boom' });
     expect(await ollama({ hang: true }).client.parse({ ...req, timeoutMs: 20 })).toEqual({ status: 'unavailable', reason: 'timeout' });
     const ac = new AbortController();
     ac.abort();
     expect(await ollama().client.parse({ ...req, signal: ac.signal })).toEqual({ status: 'unavailable', reason: 'aborted' });
-    expect(await ollama({ down: true }).client.info('qwen3:4b')).toBeNull();
+    expect(await ollama({ down: true }).client.info('llama3.1:8b')).toBeNull();
   });
 
   it('output that is not JSON, breaks the schema or fails validate is invalid', async () => {

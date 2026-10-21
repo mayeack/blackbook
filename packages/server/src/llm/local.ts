@@ -15,11 +15,16 @@
 import { z } from 'zod';
 import type { LlmImage } from './types';
 
-/** Small enough for a 16 GB Mac mini next to everything else (≈2.5 GB on disk, text only). */
-export const DEFAULT_LOCAL_MODEL = 'qwen3:4b';
+/**
+ * Meta's Llama 3.1 8B (the owner prefers models not made by Chinese labs): ≈4.9 GB on disk, ≈5.5 GB loaded with this
+ * context, unloaded after KEEP_ALIVE, so it fits a 16 GB Mac mini next to everything else. Text only: screenshots go
+ * to Claude. Lighter Meta option: llama3.2:3b (≈2 GB).
+ */
+export const DEFAULT_LOCAL_MODEL = 'llama3.1:8b';
 export const LOCAL_TIMEOUT_MS = 45_000;
 const KEEP_ALIVE = '30m';
-const NUM_CTX = 8192;
+/** The intent prompt is ≈2K tokens with the note; 4K leaves room for the answer and keeps the KV cache small. */
+const NUM_CTX = 4096;
 const NUM_PREDICT = 1024;
 /** How long /api/show answers are reused: a pulled model stays pulled; a missing one is re-checked sooner. */
 const INFO_TTL_MS = 5 * 60_000;

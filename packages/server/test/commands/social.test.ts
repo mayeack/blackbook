@@ -76,7 +76,7 @@ describe('social intents, local model first', () => {
     expect(priority(w.db, jake)).toBe(0);
     expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Deprioritized Jake M. and took them off Party invites.\n\n(Text "undo" to take that back.)`);
     expect(w.command(commandId)).toMatchObject({ status: 'handled', intent: 'set_preference' });
-    expect(w.command(commandId).parsed).toMatchObject({ llm: true, engine: 'local', model: 'qwen3:4b' });
+    expect(w.command(commandId).parsed).toMatchObject({ llm: true, engine: 'local', model: 'llama3.1:8b' });
 
     w.say('undo', at(2));
     await w.run({ now: at(3) });

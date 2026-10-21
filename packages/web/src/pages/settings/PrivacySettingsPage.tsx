@@ -92,7 +92,7 @@ function LocalModelSection({ form }: { form: SettingsForm }) {
           className="input input-sm st-text-input"
           value={text}
           maxLength={100}
-          placeholder="qwen3:4b"
+          placeholder="llama3.1:8b"
           disabled={!v['llm.local_enabled']}
           onChange={(e) => {
             setText(e.target.value);

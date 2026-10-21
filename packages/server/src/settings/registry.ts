@@ -187,7 +187,7 @@ const DEFS: { [K in AnySettingKey]: Def<K> } = {
   'llm.local_model': {
     group: 'llm',
     label: 'Local model',
-    description: 'The Ollama model that reads your texts. Pull it first: ollama pull qwen3:4b.',
+    description: 'The Ollama model that reads your texts. Pull it first: ollama pull llama3.1:8b.',
     default: v(DEFAULT_LOCAL_MODEL),
   },
   'llm.route_overrides': {
