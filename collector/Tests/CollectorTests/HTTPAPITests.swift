@@ -377,6 +377,8 @@ struct LoopbackServerTests {
     }
 
     @Test func authenticatedRequestOverTCP() throws {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         let port = Self.freePort()
         let h = try APIHarness(port: port)
         let server = try startServer(api: h.api, port: port)
@@ -410,6 +412,8 @@ struct LoopbackServerTests {
 
     /// Over a real socket: ~6 MiB reaches the OCR route's handler; any other POST still gets 413 above 1 MiB.
     @Test func ocrRouteTakesSixMiBOthersStopAtOne() throws {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         let port = Self.freePort()
         let server = try startServer(port: port, handler: { r in
             .json(200, .object([("path", .string(r.path)), ("bytes", .num(r.body.count))]))
@@ -429,6 +433,8 @@ struct LoopbackServerTests {
     }
 
     @Test func idleConnectionsTimeOut() throws {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         let port = Self.freePort()
         var limits = HTTPLimits()
         limits.idleTimeout = 0.5

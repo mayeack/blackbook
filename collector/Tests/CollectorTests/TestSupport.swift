@@ -7,6 +7,16 @@ import Testing
 
 // All fixtures are synthetic: 555-01xx numbers, example.com addresses, invented names.
 
+/// Tests that run real Vision recognition (a cold model load is ~30 s of CPU on a GPU-less CI VM) and tests that talk
+/// to a real loopback socket with 5–10 s waits never overlap: under that load the socket tests time out. Swift Testing
+/// runs suites in parallel, and `.serialized` only orders tests inside one suite, so they share this lock instead.
+enum CPUHeavyTests {
+    private static let lock = NSLock()
+    /// Holds the lock until the returned token is released (`defer { token.release() }`).
+    static func acquire() -> Token { lock.lock(); return Token() }
+    struct Token { func release() { CPUHeavyTests.lock.unlock() } }
+}
+
 enum TestPaths {
     /// collector/Tests, resolved from this source file so it works under SwiftPM and Xcode.
     static let testsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

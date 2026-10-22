@@ -70,6 +70,8 @@ private func number(_ line: [String: Any], _ key: String) -> Double {
 @Suite("vision OCR route", .serialized)
 struct VisionOCRRouteTests {
     @Test func readsASyntheticScreenshotTopToBottomWithTopLeftCoordinates() throws {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         let h = try APIHarness()
         let r = h.request("POST", "/v1/vision/ocr", body: ocrBody(try SyntheticImages.contactScreenshot()))
         #expect(r.status == 200)
@@ -103,6 +105,8 @@ struct VisionOCRRouteTests {
     }
 
     @Test func maxLinesKeepsTheTopLines() throws {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         let h = try APIHarness()
         let r = h.request("POST", "/v1/vision/ocr", body: ocrBody(try SyntheticImages.contactScreenshot(), maxLines: 1))
         #expect(r.status == 200)
@@ -110,6 +114,8 @@ struct VisionOCRRouteTests {
     }
 
     @Test func blankImageHasNoLines() throws {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         let h = try APIHarness()
         let blank = try SyntheticImages.png(try #require(TextImageRenderer.image(width: 300, height: 200, lines: [])))
         let r = h.request("POST", "/v1/vision/ocr", body: ocrBody(blank))
@@ -120,6 +126,8 @@ struct VisionOCRRouteTests {
     }
 
     @Test func undecodableBytesAre422ImageUnreadable() throws {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         let h = try APIHarness()
         for bytes in [Data("not an image at all".utf8), Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00])] {
             let r = h.request("POST", "/v1/vision/ocr", body: ocrBody(bytes))
@@ -221,6 +229,8 @@ struct VisionOCRUnitTests {
     }
 
     @Test func warmUpRecognizesWithoutThrowing() {
+        let heavy = CPUHeavyTests.acquire()
+        defer { heavy.release() }
         sharedOCR.warmUp()
     }
 }
