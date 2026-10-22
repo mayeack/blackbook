@@ -634,8 +634,8 @@ describe('commands: log', () => {
     expect(llm.calls[0]!.userText).not.toContain('@example.com');
     expect(INTENT_SYSTEM).not.toMatch(/\d{4}-\d{2}-\d{2}/); // byte-stable prefix: no dates
     const fact = w.db.prepare('SELECT type, value, confidence, source, status FROM facts WHERE person_id = ?').get(sam);
-    expect(fact).toEqual({ type: 'location_next', value: 'moving to Denver', confidence: 0.95, source: 'user_log', status: 'confirmed' });
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged a meal with Sam R. today.\nNoted: “moving to Denver”\n\n(Text "undo" to take that back.)`);
+    expect(fact).toEqual({ type: 'location_next', value: 'Denver, CO', confidence: 0.95, source: 'user_log', status: 'confirmed' });
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Logged a meal with Sam R. today.\nNoted: “Denver, CO”\n\n(Text "undo" to take that back.)`);
   });
 
   it('with the AI key, free text in the window is classified: notes stay silent, questions go to Ask', async () => {

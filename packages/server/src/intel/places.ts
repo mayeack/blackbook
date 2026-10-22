@@ -133,7 +133,7 @@ const MAX_ALIAS_WORDS = Math.max(...[...BY_ALIAS.keys()].map((a) => a.split(' ')
 /** Aliases this short (or these ambiguous words) only match a whole segment, never inside a longer phrase. */
 const WHOLE_ONLY = new Set(['la', 'l a', 'ny', 'sf', 'dc', 'd c', 'atl', 'atx', 'slc', 'rio', 'mesa', 'venice', 'chelsea', 'soho', 'marin', 'newton', 'aurora', 'georgetown', 'cambridge', 'portland', 'reno', 'irving', 'decatur', 'alexandria', 'arlington']);
 
-const US_STATES: Record<string, string> = {
+export const US_STATES: Record<string, string> = {
   al: 'alabama', ak: 'alaska', az: 'arizona', ar: 'arkansas', ca: 'california', co: 'colorado', ct: 'connecticut', de: 'delaware',
   fl: 'florida', ga: 'georgia', hi: 'hawaii', id: 'idaho', il: 'illinois', in: 'indiana', ia: 'iowa', ks: 'kansas', ky: 'kentucky',
   la: 'louisiana', me: 'maine', md: 'maryland', ma: 'massachusetts', mi: 'michigan', mn: 'minnesota', ms: 'mississippi',

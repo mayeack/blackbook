@@ -104,7 +104,7 @@ describe('retrieval', () => {
     expect(boulder.map((p) => p.id)).toEqual([w.sam]);
     expect(boulder[0]!.facts.map((f) => f.value)).toContain('bouldering');
     expect(boulder[0]!.facts.map((f) => f.value)).not.toContain('starting therapy');
-    expect(boulder[0]).toMatchObject({ city: 'Austin', strength: 72, circles: ['Climbing crew'] });
+    expect(boulder[0]).toMatchObject({ city: 'Austin, TX', strength: 72, circles: ['Climbing crew'] });
     expect(searchPeople(s, people({ employer: 'acme' })).map((p) => p.id)).toEqual([w.jess]);
     expect(searchPeople(s, people({ circle: 'climbing' })).map((p) => p.id)).toEqual([w.sam, w.jess]);
     expect(searchPeople(s, people({ minStrength: 60 })).map((p) => p.id)).toEqual([w.sam]);

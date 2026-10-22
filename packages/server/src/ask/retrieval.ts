@@ -17,6 +17,7 @@ import { DAY_MS } from '@yb/shared';
 import { dateToUtc } from '../adapters/calendar/time';
 import type { DB } from '../db/connection';
 import { collisionAware, ownerNames } from '../identity/ownerNames';
+import { placeFactValue, placeName } from '../intel/placeNames';
 import { occasionChain } from '../pipeline/occasions/build';
 import { COUNTED, POSSIBLE } from '../pipeline/occasions/signals';
 import { hiddenNameRedactor } from '../routes/people';
@@ -222,17 +223,21 @@ interface RawFact {
   rank?: number;
 }
 
-const toFact = (scope: AskScope, r: RawFact): FactRow => ({
-  seq: r.seq,
-  id: r.id,
-  personId: canonical(scope, r.person_id),
-  type: r.type,
-  value: r.value.length > 200 ? `${r.value.slice(0, 199)}…` : r.value,
-  validFrom: r.valid_from,
-  validTo: r.valid_to,
-  confidence: r.confidence,
-  recordedAt: r.recorded_at,
-});
+const toFact = (scope: AskScope, r: RawFact): FactRow => {
+  // Places read as place names ("LA" → "Los Angeles, CA"; intel/placeNames.ts).
+  const value = placeFactValue(r.type, r.value);
+  return {
+    seq: r.seq,
+    id: r.id,
+    personId: canonical(scope, r.person_id),
+    type: r.type,
+    value: value.length > 200 ? `${value.slice(0, 199)}…` : value,
+    validFrom: r.valid_from,
+    validTo: r.valid_to,
+    confidence: r.confidence,
+    recordedAt: r.recorded_at,
+  };
+};
 
 /** One fact by its seq (active, non-sensitive, visible person), or null. */
 export function factBySeq(scope: AskScope, seq: number): FactRow | null {
@@ -334,13 +339,19 @@ const METROS: Metro[] = [
 const fold = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().trim();
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Place names a city query matches: the city, its metro synonyms, and (with a radius) nearby places. */
+/**
+ * Place names a city query matches: the city, the city its name stands for (place facts are stored as place names:
+ * "Brooklyn" and "LA" also match "New York, NY" / "Los Angeles, CA"), its metro synonyms, and (with a radius)
+ * nearby places.
+ */
 export function placeNames(city: string, nearKm: number | null): string[] {
   const c = fold(city).replace(/\s+/g, ' ');
   if (!c) return [];
-  const metro = METROS.find((m) => m.names.includes(c) || (nearKm && m.nearby.includes(c)));
-  if (!metro) return [c];
-  return [...new Set([c, ...metro.names, ...(nearKm && nearKm > 0 ? metro.nearby : [])])];
+  const own = placeName(city);
+  const base = own ? [c, fold(own.city)] : [c];
+  const metro = METROS.find((m) => base.some((b) => m.names.includes(b) || (nearKm && m.nearby.includes(b))));
+  if (!metro) return [...new Set(base)];
+  return [...new Set([...base, ...metro.names, ...(nearKm && nearKm > 0 ? metro.nearby : [])])];
 }
 
 export function placeMatcher(names: string[]): (text: string | null | undefined) => boolean {

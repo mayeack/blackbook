@@ -121,6 +121,32 @@ describe('validateExtraction', () => {
     expect(v2.facts.map((f) => [f.personId, f.viaMention])).toEqual([['ana1', true]]);
   });
 
+  it('place facts become place names; an ADD or UPDATE that names no single city is dropped', () => {
+    const ev = [{ msg: 'm:3', quote: 'Ana just moved to Lisbon' }];
+    const v = run(
+      extraction({
+        facts: [
+          fact('P3', 'location_current', 'Lisbon', ev),
+          fact('P3', 'hometown', 'LA', ev),
+          fact('P3', 'location_next', 'lives with her sister', ev),
+          fact('P3', 'location_current', 'Portugal', ev),
+          fact('P3', 'location_current', 'Lisbon or Porto', ev),
+          // INVALIDATE only points at the card's fact: its repeated value can stay as written
+          fact('P1', 'location_current', 'Bay Area', [{ msg: 'm:2', quote: 'dinner thursday?' }], 0.9, { op: 'INVALIDATE', target: 'F2' }),
+          fact('P3', 'travel_plan', 'Lisbon trip', ev),
+        ],
+      }),
+      packet({ facts: { F2: { factId: 'fact-2', personId: 'sam', cat: 'location_current', valueNorm: 'bay area' } } }),
+    );
+    expect(v.facts.map((f) => [f.cat, f.value, f.valueNorm])).toEqual([
+      ['location_current', 'Lisbon, Portugal', 'lisbon portugal'],
+      ['hometown', 'Los Angeles, CA', 'los angeles ca'],
+      ['location_current', 'Bay Area', 'bay area'],
+      ['travel_plan', 'Lisbon trip', 'lisbon trip'],
+    ]);
+    expect(v.dropped.fact_not_a_place).toBe(3);
+  });
+
   it('commitment dates: chrono on the quote wins when the model is >2 days off; closes needs a K of the counterpart', () => {
     const c = (over: Record<string, unknown>) => ({
       owner: 'BOTH',
