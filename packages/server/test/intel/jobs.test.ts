@@ -16,9 +16,11 @@ const ctxFor = (db: JobContext['db'], now = NOW): JobContext => ({ db, jobRunId:
 const byName = (jobs: JobDef[], name: string) => jobs.find((j) => j.name === name)!;
 
 describe('intel jobs', () => {
-  it('registers intel (07:05), intel-adjudicate (03:20), intel-effects (5 min) and pre-event-push (15 min)', () => {
+  it('registers intel (07:05), intel-adjudicate (03:20), intel-effects (5 min), pre-event-push (15 min) and the place tidies', () => {
     const jobs = intelJobs({});
-    expect(jobs.map((j) => j.name)).toEqual(['intel', 'intel-adjudicate', 'intel-effects', 'pre-event-push']);
+    expect(jobs.map((j) => j.name)).toEqual(['intel', 'intel-adjudicate', 'intel-effects', 'pre-event-push', 'places-tidy', 'places-tidy-owner']);
+    expect(byName(jobs, 'places-tidy').schedule).toEqual({ kind: 'daily', at: '03:05' });
+    expect(INTEL_TIMES.placesTidy < AGENT_TIMES.extractSubmit).toBe(true); // tonight's packets already show place names
     expect(byName(jobs, 'intel').schedule).toEqual({ kind: 'daily', at: AGENT_TIMES.intel });
     expect(byName(jobs, 'intel-adjudicate').schedule).toEqual({ kind: 'daily', at: '03:20' });
     expect(INTEL_TIMES.adjudicate > '03:10').toBe(true); // after the occasions pass and the extraction submit

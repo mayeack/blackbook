@@ -190,7 +190,7 @@ describe('steady extraction: collect → validate → apply', () => {
     expect(facts.map((x) => [x.type, x.value, x.status])).toEqual([
       ['employer', 'Lumen Labs', 'confirmed'],
       ['interest', 'climbing', 'candidate'],
-      ['location_next', 'Denver', 'confirmed'],
+      ['location_next', 'Denver, CO', 'confirmed'],
     ]);
     expect(facts.every((x) => /^[0-9a-f]{8}$/.test(x.prompt_version))).toBe(true);
     expect(facts.find((x) => x.type === 'location_next')!.valid_from).toBe(Date.UTC(2026, 10, 1, 5));
@@ -262,9 +262,39 @@ describe('steady extraction: collect → validate → apply', () => {
     await collect(deps(w, g, NOW + DAY + 10 * MIN));
     const rows = w.db.prepare(`SELECT value, status, valid_to IS NOT NULL AS closed, superseded_by IS NOT NULL AS sup FROM facts ORDER BY created_at`).all();
     expect(rows).toEqual([
-      { value: 'Austin', status: 'invalidated', closed: 1, sup: 1 },
-      { value: 'Denver', status: 'confirmed', closed: 0, sup: 0 },
+      { value: 'Austin, TX', status: 'invalidated', closed: 1, sup: 1 },
+      { value: 'Denver, CO', status: 'confirmed', closed: 0, sup: 0 },
     ]);
+  });
+
+  it('places compare by place name: an old "la" block still blocks, "NYC" takes "New York", a namesake stays apart', async () => {
+    const { w, f, win, P, L, m1, m3 } = await submitted();
+    w.db.prepare(`INSERT INTO fact_blocks (person_id, type, value_norm, created_at) VALUES (?, 'hometown', 'la', 0)`).run(w.sam);
+    w.db
+      .prepare(
+        `INSERT INTO facts (id, person_id, type, value, value_norm, confidence, support, status, recorded_at, source, created_at, updated_at)
+         VALUES ('old-nyc', ?, 'location_current', 'NYC', 'nyc', 0.9, 1, 'tentative', 0, 'llm', 0, 0)`,
+      )
+      .run(w.sam);
+    f.llm.on(`extract:${win}`, {
+      json: extraction({
+        facts: [
+          fact(P, 'hometown', 'Los Angeles', [{ msg: L(m1), quote: 'big news' }], 0.95),
+          fact(P, 'location_current', 'New York', [{ msg: L(m3), quote: 'dinner thursday' }], 0.95),
+          fact(P, 'location_next', 'Portland, OR', [{ msg: L(m1), quote: 'I am moving to Denver' }], 0.95),
+          fact(P, 'location_next', 'Portland, ME', [{ msg: L(m1), quote: 'I am moving to Denver' }], 0.95),
+        ],
+      }),
+    });
+    const rep = await collect(deps(w, f, NOW + 10 * MIN));
+    expect(rep.counts.factsBlocked).toBe(1);
+    // "New York" folded into the stored "NYC" (its evidence moved there); "ME" here is Maine, never the owner's ref
+    expect(w.db.prepare(`SELECT id, type, value FROM facts ORDER BY type, value`).all()).toEqual([
+      { id: 'old-nyc', type: 'location_current', value: 'NYC' },
+      { id: expect.any(String), type: 'location_next', value: 'Portland, ME' },
+      { id: expect.any(String), type: 'location_next', value: 'Portland, OR' },
+    ]);
+    expect(count(w.db, `SELECT count(*) FROM evidence WHERE subject_type = 'fact' AND subject_id = 'old-nyc'`)).toBe(1);
   });
 
   it('fact_blocks and rejected facts are never re-added', async () => {
@@ -407,7 +437,7 @@ describe('group windows: mentions, relations, self-identification, waves', () =>
     });
     const rep = await collect(deps(w, f, NOW + 10 * MIN));
     expect(rep.counts).toMatchObject({ factsAdded: 1, pendingHeld: 1, relations: 1, selfIds: 1 });
-    expect(w.db.prepare(`SELECT value, status FROM facts WHERE person_id = ?`).get(w.dana)).toEqual({ value: 'Brooklyn', status: 'tentative' });
+    expect(w.db.prepare(`SELECT value, status FROM facts WHERE person_id = ?`).get(w.dana)).toEqual({ value: 'New York, NY', status: 'tentative' });
     expect(w.db.prepare(`SELECT surface, status FROM pending_mention_facts`).get()).toEqual({ surface: 'my cousin', status: 'pending' });
     const [a, b] = [w.priya, w.dana].sort();
     expect(w.db.prepare(`SELECT a_id, b_id, label, origin, status FROM edge_labels`).get()).toEqual({ a_id: a, b_id: b, label: 'roommate', origin: 'llm', status: 'active' });
