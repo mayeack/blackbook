@@ -16,6 +16,7 @@ final class CollectorAPI {
         var reader: MessageReader
         var contacts: ContactsSource
         var whatsapp: WhatsAppSnapshotter
+        var calls: CallHistoryReader
         var send: SendService
         var attachments: AttachmentService
         var health: HealthReporter
@@ -64,6 +65,8 @@ final class CollectorAPI {
             return Self.reply(error)
         } catch let error as ChatDBError {
             return Self.reply(.from(error))
+        } catch let error as CallHistoryError {
+            return Self.reply(.from(callHistory: error))
         } catch {
             log.error("route failed: \(String(describing: type(of: error)), privacy: .public)")
             return Self.reply(.internalError("internal error"))
@@ -112,6 +115,9 @@ final class CollectorAPI {
         case "/v1/whatsapp/snapshot":
             try expect("POST")
             return try whatsappSnapshot(r)
+        case "/v1/calls":
+            try expect("GET")
+            return try calls(r)
         default:
             throw APIError.notFound
         }
@@ -182,6 +188,14 @@ final class CollectorAPI {
         let index = try Params.int(r, "index", default: 0, min: 0, max: 9)!
         let maxEdge = try Params.int(r, "max_edge", default: ImageTranscoder.defaultMaxEdge, min: 256, max: 2576)!
         return envelope(try deps.attachments.image(messageGUID: guid, index: index, maxEdge: maxEdge).fields)
+    }
+
+    // MARK: Calls
+
+    private func calls(_ r: LoopbackRequest) throws -> JSON {
+        let after = try Params.int(r, "after_rowid", default: 0, min: 0)!
+        let limit = try Params.int(r, "limit", default: 500, min: 1, max: CallHistoryReader.maxPageSize)!
+        return pageEnvelope(try deps.calls.calls(afterRowID: Int64(after), limit: limit), \.json)
     }
 
     // MARK: Contacts and WhatsApp

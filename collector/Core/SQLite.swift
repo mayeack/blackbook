@@ -141,6 +141,8 @@ struct SQLiteRow {
 
     func bool(_ i: Int32) -> Bool { sqlite3_column_int64(stmt, i) != 0 }
 
+    func doubleOrNil(_ i: Int32) -> Double? { isNull(i) ? nil : sqlite3_column_double(stmt, i) }
+
     func text(_ i: Int32) -> String? {
         guard !isNull(i), let c = sqlite3_column_text(stmt, i) else { return nil }
         let n = Int(sqlite3_column_bytes(stmt, i))

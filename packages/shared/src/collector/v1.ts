@@ -7,6 +7,7 @@
  *  - timestamps may be Unix ms (preferred), Unix seconds, or ISO-8601; they always parse to Unix ms.
  * Phone/email normalization is NOT the collector's job: handles arrive raw and are normalized in Node.
  * There is no calendar route (Google Calendar is read through its own API).
+ * GET /v1/calls serves the Mac's call log (CallHistory.storedata): only calls that rang or were placed on this Mac.
  */
 import { z } from 'zod';
 
@@ -24,6 +25,7 @@ export const COLLECTOR_ROUTES = {
   imessageAttachment: '/v1/imessage/attachment',
   whatsappSnapshot: '/v1/whatsapp/snapshot',
   contacts: '/v1/contacts',
+  calls: '/v1/calls',
 } as const;
 
 // ---------- primitives ----------
@@ -57,6 +59,7 @@ export const CollectorErrorCode = z.enum([
   'attachment_not_found',
   'attachment_not_allowed',
   'attachment_unreadable',
+  'callhistory_unavailable',
 ]);
 export type CollectorErrorCode = z.infer<typeof CollectorErrorCode>;
 
@@ -335,3 +338,31 @@ export const ContactsResponse = z.object({
   items: z.array(ContactCard),
 });
 export type ContactsResponse = z.output<typeof ContactsResponse>;
+
+// ---------- GET /v1/calls ----------
+
+export const CallsQuery = z.object({
+  after_rowid: z.coerce.number().int().nonnegative().default(0),
+  limit: limit(1000, 500),
+});
+export type CallsQuery = z.input<typeof CallsQuery>;
+
+/** One CallHistory ZCALLRECORD row, raw: Node maps call_type/provider and normalizes the handles. */
+export const CallRecord = z.object({
+  rowid: RowId,
+  unique_id: z.string().min(1),
+  date: Timestamp,
+  duration_s: z.number().nonnegative(),
+  /** ZCALLTYPE: 1 phone, 8 FaceTime video, 16 FaceTime audio. */
+  call_type: opt(z.number().int()),
+  /** ZSERVICE_PROVIDER, e.g. com.apple.Telephony / com.apple.FaceTime. */
+  provider: opt(z.string()),
+  originated: Flag,
+  answered: Flag,
+  /** The remote party first, then any other participants of a group call (raw phone numbers / emails). */
+  handles: z.array(z.string()),
+});
+export type CallRecord = z.output<typeof CallRecord>;
+
+export const CallsResponse = envelope(CallRecord);
+export type CallsResponse = z.output<typeof CallsResponse>;

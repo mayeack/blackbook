@@ -23,6 +23,9 @@ struct APIError: Error, Equatable {
     static let attachmentNotFound = APIError(status: 404, code: "attachment_not_found", message: "no such attachment")
     static func attachmentNotAllowed(_ detail: String) -> APIError { APIError(status: 403, code: "attachment_not_allowed", message: detail) }
     static let attachmentUnreadable = APIError(status: 422, code: "attachment_unreadable", message: "the attachment is not a decodable image")
+    static func callHistoryUnavailable(status: Int, _ detail: String) -> APIError {
+        APIError(status: status, code: "callhistory_unavailable", message: detail)
+    }
     static func internalError(_ detail: String) -> APIError { APIError(status: 500, code: "internal", message: detail) }
 
     var response: LoopbackResponse {
@@ -34,6 +37,14 @@ struct APIError: Error, Equatable {
         case .accessDenied: return .fdaMissing
         case .notFound: return .chatdbUnavailable("chat.db not found")
         case let .unavailable(detail): return .chatdbUnavailable(detail)
+        }
+    }
+
+    static func from(callHistory error: CallHistoryError) -> APIError {
+        switch error {
+        case .accessDenied: return .fdaMissing
+        case .notFound: return .callHistoryUnavailable(status: 404, "call history not found")
+        case let .unavailable(detail): return .callHistoryUnavailable(status: 503, detail)
         }
     }
 }

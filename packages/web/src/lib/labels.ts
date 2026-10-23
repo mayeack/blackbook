@@ -20,6 +20,8 @@ const SOURCES: Record<string, string> = {
   collector: 'Mac helper',
   user: 'You',
   phone: 'Phone',
+  facetime: 'FaceTime',
+  calls: 'Calls',
   email: 'Email',
   x: 'X',
   linkedin: 'LinkedIn',
@@ -43,6 +45,8 @@ const SOURCE_SHORT: Record<string, string> = {
   legacy: 'Bb',
   collector: 'Mc',
   phone: 'Ph',
+  facetime: 'FT',
+  calls: 'Ph',
   email: '@',
   x: 'X',
   linkedin: 'in',
@@ -77,6 +81,7 @@ const CARD_LABELS: Record<string, string> = {
   instagram_dyi: 'Instagram export',
   gcal: 'Google Calendar',
   addressbook: 'Contacts',
+  calls: 'Phone & FaceTime calls',
 };
 export const sourceCardLabel = (s: string) => CARD_LABELS[s] ?? sourceLabel(s);
 

@@ -6,9 +6,9 @@
  *                                                      status=new: provisional people only ("New people")
  *   GET /people/:id                                    header, stats, linked accounts (masked)
  *   GET /people/:id/identities/:identityId/reveal      one full phone/email value (the owner asked)
- *   GET /people/:id/timeline?cursor=&limit=&source=    sessions + non-session interactions, newest first;
- *                                                      source = a raw source or a channel ('instagram' = Beeper
- *                                                      + the Instagram export)
+ *   GET /people/:id/timeline?cursor=&limit=&source=    sessions, calls + other non-session interactions, newest
+ *                                                      first; source = a raw source or a channel ('instagram' =
+ *                                                      Beeper + the Instagram export; 'phone' / 'facetime' = calls)
  *   GET /people/:id/sessions/:sessionId/messages       one session's messages (timeline expand)
  *
  * List views never carry raw phone numbers or emails: names, titles and labels that look like one are masked.
@@ -141,12 +141,24 @@ export type TimelineItem =
       /** The get-together this came from (Events screen /e/:id); null for a sensitive one, which isn't served. */
       occasionId: string | null;
       eventId: string | null;
+    }
+  | {
+      /** A call from the Mac's call log (answered or missed) with one of the person's numbers or emails. */
+      type: 'call';
+      id: string;
+      channel: 'phone' | 'facetime';
+      service: 'phone' | 'facetime_audio' | 'facetime_video' | 'other';
+      startedAt: number;
+      /** null when the call log has no length (calls answered on the iPhone). */
+      endedAt: number | null;
+      outgoing: boolean;
+      answered: boolean;
     };
 
 export interface TimelinePage {
   items: TimelineItem[];
   nextCursor: string | null;
-  /** Every channel the person has conversations on (for the source filter), in a fixed order. */
+  /** Every channel the person has conversations or calls on (for the source filter), in a fixed order. */
   channels: string[];
 }
 
@@ -649,7 +661,7 @@ export function revealIdentity(db: DB, personId: string, identityId: string): Re
 const CHANNEL_SOURCES: Record<string, readonly string[]> = {
   instagram: ['instagram', 'beeper', 'instagram_dyi', 'ig_dyi'],
 };
-const CHANNEL_ORDER = ['imessage', 'whatsapp', 'instagram'];
+const CHANNEL_ORDER = ['imessage', 'whatsapp', 'instagram', 'phone', 'facetime'];
 
 export function channelOf(source: string): string {
   for (const [channel, sources] of Object.entries(CHANNEL_SOURCES)) if (sources.includes(source)) return channel;
@@ -689,7 +701,7 @@ const inWindow = (w: ConvWindow, startedAt: number, endedAt: number) =>
   (w[1] == null || endedAt >= w[1]) && (w[2] == null || startedAt <= w[2]);
 
 interface TimelineRow {
-  type: 'session' | 'interaction';
+  type: 'session' | 'interaction' | 'call';
   id: string;
   started_at: number;
   ended_at: number | null;
@@ -703,6 +715,8 @@ interface TimelineRow {
   ikind: string | null;
   occasion_id: string | null;
   event_id: string | null;
+  /** Calls: 1 when answered. */
+  answered: number | null;
 }
 
 const TimelineCursor = z.string().regex(/^\d{1,15}:[\w.:-]{1,128}$/);
@@ -731,18 +745,27 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
        items AS (
          SELECT 'session' AS type, s.id, s.started_at, s.ended_at, s.msg_count, s.initiated_by_me,
                 c.id AS conversation_id, c.source, c.kind AS conv_kind, c.title, c.member_count, NULL AS ikind,
-                NULL AS occasion_id, NULL AS event_id
+                NULL AS occasion_id, NULL AS event_id, NULL AS answered
          FROM conv JOIN sessions s ON s.conversation_id = conv.cid JOIN conversations c ON c.id = s.conversation_id
          WHERE (conv.j IS NULL OR s.ended_at >= conv.j) AND (conv.l IS NULL OR s.started_at <= conv.l)
          UNION ALL
          SELECT 'interaction', i.id, i.started_at, i.ended_at, NULL, i.initiated_by_me,
                 i.conversation_id, i.channel, NULL,
                 CASE WHEN o.sensitive = 1 THEN NULL ELSE coalesce(e.title, o.title, i.summary) END, NULL, i.kind,
-                CASE WHEN o.sensitive = 1 THEN NULL ELSE i.occasion_id END, i.event_id
+                CASE WHEN o.sensitive = 1 THEN NULL ELSE i.occasion_id END, i.event_id, NULL
          FROM interactions i
          LEFT JOIN events e ON e.id = i.event_id
          LEFT JOIN occasions o ON o.id = i.occasion_id
          WHERE i.person_id IN (SELECT value FROM json_each(@cluster)) AND i.session_id IS NULL AND i.retracted_at IS NULL
+           AND i.call_id IS NULL
+         UNION ALL
+         -- Calls come from the call log itself, so missed ones show too (derived call interactions are answered only).
+         SELECT 'call', c.id, c.started_at, CASE WHEN c.duration_ms > 0 THEN c.started_at + c.duration_ms END, NULL, c.outgoing,
+                NULL, CASE WHEN c.service LIKE 'facetime%' THEN 'facetime' ELSE 'phone' END, NULL, NULL, NULL, c.service,
+                NULL, NULL, c.answered
+         FROM calls c
+         WHERE c.id IN (SELECT h.call_id FROM call_handles h JOIN identities i ON i.kind = h.kind AND i.key = h.key
+                        WHERE i.id IN (SELECT value FROM json_each(@identityIds)))
        )
        SELECT * FROM items
        WHERE (@cursorAt IS NULL OR started_at < @cursorAt OR (started_at = @cursorAt AND id < @cursorId))
@@ -753,6 +776,7 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
     .all({
       convs: JSON.stringify(convs),
       cluster: JSON.stringify(cluster),
+      identityIds: JSON.stringify(identityIds),
       cursorAt,
       cursorId,
       sources: o.source ? JSON.stringify(sourcesFor(o.source)) : null,
@@ -789,6 +813,18 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
         initiatedByMe: r.initiated_by_me === 1,
       };
     }
+    if (r.type === 'call') {
+      return {
+        type: 'call',
+        id: r.id,
+        channel: r.source === 'facetime' ? 'facetime' : 'phone',
+        service: r.ikind as 'phone' | 'facetime_audio' | 'facetime_video' | 'other',
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        outgoing: r.initiated_by_me === 1,
+        answered: r.answered === 1,
+      };
+    }
     return {
       type: 'interaction',
       id: r.id,
@@ -806,7 +842,17 @@ export function personTimeline(db: DB, id: string, o: { cursor?: string; limit: 
     .prepare('SELECT DISTINCT source FROM conversations WHERE id IN (SELECT value FROM json_each(?))')
     .pluck()
     .all(JSON.stringify(convs.map((c) => c[0]))) as string[];
-  const channels = [...new Set(convSources.map(channelOf))].sort((a, b) => channelRank(a) - channelRank(b) || a.localeCompare(b));
+  const callChannels = db
+    .prepare(
+      `SELECT DISTINCT CASE WHEN c.service LIKE 'facetime%' THEN 'facetime' ELSE 'phone' END
+       FROM call_handles h JOIN identities i ON i.kind = h.kind AND i.key = h.key JOIN calls c ON c.id = h.call_id
+       WHERE i.id IN (SELECT value FROM json_each(?))`,
+    )
+    .pluck()
+    .all(idsJson) as string[];
+  const channels = [...new Set([...convSources.map(channelOf), ...callChannels])].sort(
+    (a, b) => channelRank(a) - channelRank(b) || a.localeCompare(b),
+  );
   return { items, nextCursor: rows.length > o.limit && last ? `${last.started_at}:${last.id}` : null, channels };
 }
 
