@@ -99,6 +99,9 @@ final class VisionOCRService: TextRecognizer {
 
     private let lock = NSLock()
 
+    /// Call from a GCD queue (the HTTP work queue, the warm-up's global queue), never from a Swift Concurrency task that
+    /// waits on it: Vision runs part of this synchronous call on the cooperative thread pool, so a saturated pool
+    /// deadlocks it (measured on macOS 27 with the pool full of blocked tasks).
     func recognize(imageData: Data, maxLines: Int) throws -> OCRResult {
         try autoreleasepool {
             guard let image = ImageTranscoder.uprightImage(data: imageData, maxEdge: Self.maxEdge, maxPixels: Self.maxPixels,
