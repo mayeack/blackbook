@@ -81,9 +81,12 @@ describe('commands × egress (real pseudonymizer)', () => {
         const token = /^(P[0-9a-z]+) = Sam R\.$/m.exec(call.userText)?.[1] ?? 'none';
         return {
           json: {
+            gist: 'g',
+            sure: true,
             intent: 'log_interaction',
             image: null,
             command: null,
+            reminder: null,
             question: null,
             log: { people: [{ surface: 'Sam', ref: token }], kind: 'drinks', date: null, facts: [{ ref: token, cat: 'interest', value: 'bouldering' }], note: null },
             preferences: [],

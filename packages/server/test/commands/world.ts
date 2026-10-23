@@ -9,6 +9,7 @@ import { outboundTextHash } from '../../src/adapters/imessage/mapping';
 import { processCommands } from '../../src/commands/executor';
 import type { DB } from '../../src/db/connection';
 import { createEgress } from '../../src/llm/egress';
+import type { LocalLlm } from '../../src/llm/local';
 import type { Egress } from '../../src/llm/types';
 import type { AttachmentSource } from '../../src/adapters/imessage/attachments';
 import type { AgentServices } from '../../src/services';
@@ -49,7 +50,9 @@ export function setSetting(db: DB, key: string, value: unknown, now = BRIEF_AT):
   ).run(key, JSON.stringify(value), now, now);
 }
 
-export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboundConfigured?: boolean; realEgress?: boolean; attachments?: AttachmentSource } = {}) {
+export function commandsWorld(
+  o: { llm?: FakeLlmOptions | FakeLlmClient; outboundConfigured?: boolean; realEgress?: boolean; attachments?: AttachmentSource; local?: LocalLlm } = {},
+) {
   const db = memDb();
   setSetting(db, 'tz', TZ);
   let now = BRIEF_AT;
@@ -57,7 +60,14 @@ export function commandsWorld(o: { llm?: FakeLlmOptions | FakeLlmClient; outboun
   const outbound = new FakeOutboundSender({ db, now: clock, configured: o.outboundConfigured ?? true });
   const llm = o.llm instanceof FakeLlmClient ? o.llm : new FakeLlmClient({ configured: false, ...(o.llm ?? {}) });
   const egress: Egress = o.realEgress ? createEgress(db) : new FakeEgress();
-  const services: AgentServices = { llm, egress, outbound, push: new FakePushSender(), ...(o.attachments ? { attachments: o.attachments } : {}) };
+  const services: AgentServices = {
+    llm,
+    egress,
+    outbound,
+    push: new FakePushSender(),
+    ...(o.attachments ? { attachments: o.attachments } : {}),
+    ...(o.local ? { local: o.local } : {}),
+  };
   const provider = () => services;
 
   const selfConv = uuidv7(now);

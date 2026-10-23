@@ -5,7 +5,8 @@
 import { uuidv7 } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { MAX_COMMANDS_PER_HOUR, MAX_OUTBOUND_PER_HOUR } from '../delivery/types';
-import type { PreferenceKind } from '../pipeline/circles/preferences';
+import type { PreferenceAction } from '../pipeline/circles/preferences';
+import type { IntentReminder } from './intent';
 
 const HOUR = 3_600_000;
 export const CLARIFY_TTL_MS = HOUR;
@@ -34,6 +35,9 @@ export interface CommandParsed {
   replyStatus?: string | null;
   /** The intent parser answered (vs the deterministic path). */
   llm?: boolean;
+  /** Which model read it: the local one (Ollama) or Claude, and the model id. */
+  engine?: 'local' | 'claude';
+  model?: string;
   /** Screenshots that went to the intent parser with it. */
   images?: number;
   clarificationId?: string;
@@ -156,8 +160,13 @@ export interface ClarifyPayload {
   facts: { personId: string; cat: string; value: string }[];
   unresolved: string[];
   llm: boolean;
-  /** Standing preferences (set_preference); personId null = the ambiguous `surface`, settled by the clarification. */
-  prefs?: { personId: string | null; surface: string; kind: PreferenceKind }[];
+  /**
+   * Standing preferences (set_preference); personId null = the ambiguous `surface`, settled by the clarification.
+   * Payloads stored before actions existed carry `kind: 'party_invites'` instead (preferences.ts legacyAction).
+   */
+  prefs?: { personId: string | null; surface: string; action?: PreferenceAction; kind?: string }[];
+  /** A reminder (intent reminder) for the people resolved: a commitment of his, due on its date. */
+  reminder?: IntentReminder;
   /** People this command added (from a screenshot), for the reply. */
   created?: string[];
 }
