@@ -2,7 +2,8 @@
  * `yb eval …` / `npm run eval -- …` (scripts/eval.mjs): the eval harness from the terminal. Prints counts,
  * rates and ids only — never names, values or message text (the golden items themselves are labeled on
  * /settings/eval). Database access:
- *   report, status, shadow --plan, shadow-report   read-only (safe while the server runs; WAL readers never block)
+ *   report, status, shadow --plan, shadow-report,  read-only (safe while the server runs; WAL readers never block)
+ *   attendance
  *   sample, shadow, reset                           write eval tables (and, for shadow, the LLM ledger). With no
  *                                                   server running they take the data-dir lock first; while the
  *                                                   server runs they write alongside it (WAL + busy timeout:
@@ -24,6 +25,7 @@ import { formatUsd as fmtUsd } from '../llm/models';
 import type { LocalLlm } from '../llm/local';
 import type { LlmClient, LlmEffort } from '../llm/types';
 import { servicesFor } from '../services';
+import { formatAttendanceReport, runAttendanceEval } from './attendance';
 import { INTENT_EVAL_CASES, runIntentEval, type IntentEvalCase } from './intent';
 import { buildReport, shadowSummary, type ShadowSummary } from './metrics';
 import { sampleSet } from './sample';
@@ -49,6 +51,9 @@ export const EVAL_USAGE = `usage: yb eval <command> [options]        (also: npm 
                                          screenshot) on a scratch database. claude (default): Claude only (~$0.002;
                                          needs the key). local: the Ollama model only (free; OLLAMA_URL, default
                                          loopback; a case it is unsure of fails). auto: as the server does it
+  attendance [--json] [--without-plans]  who-was-there clues graded against Partiful guest lists of past events you
+                                         went to, each re-run with its list held out (read-only, no LLM).
+                                         --without-plans: the clues not weighed against your other plans
 sets: extraction, identity, reply_debt, ask ("golden" = all)`;
 
 export interface CliIO {
@@ -64,7 +69,7 @@ export interface EvalCliDeps {
   now?: () => number;
 }
 
-const COMMANDS = ['report', 'status', 'sample', 'shadow', 'shadow-report', 'reset', 'intent'] as const;
+const COMMANDS = ['report', 'status', 'sample', 'shadow', 'shadow-report', 'reset', 'intent', 'attendance'] as const;
 type Command = (typeof COMMANDS)[number];
 
 function parseSet(v: string | undefined): SetName[] | 'bad' {
@@ -235,6 +240,7 @@ export async function evalCommand(argv: string[], paths: DataPaths, io: CliIO, d
         'spot-check': { type: 'string' },
         'no-golden': { type: 'boolean', default: false },
         plan: { type: 'boolean', default: false },
+        'without-plans': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
         engine: { type: 'string' },
@@ -286,6 +292,13 @@ export async function evalCommand(argv: string[], paths: DataPaths, io: CliIO, d
         const r = buildReport(db, { now: now(), sets });
         if (json) io.out(JSON.stringify(r));
         else printReport(io, r, setCounts(db));
+        return 0;
+      });
+    case 'attendance':
+      return withReadDb(paths, (db) => {
+        const r = runAttendanceEval(db, { now: now(), withoutPlans: values['without-plans'] === true });
+        if (json) io.out(JSON.stringify(r));
+        else for (const line of formatAttendanceReport(r, now())) io.out(line);
         return 0;
       });
     case 'status':

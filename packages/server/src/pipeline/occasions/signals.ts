@@ -97,7 +97,12 @@ export function mergeSignals(signals: readonly Signal[]): Signal[] {
   for (const s of signals) {
     const cur = by.get(s.type);
     if (!cur) {
-      by.set(s.type, { ...s, weight: r3(s.weight), ...(s.m ? { m: [...new Set(s.m)].sort((a, b) => a - b).slice(0, MAX_IDS) } : {}) });
+      by.set(s.type, {
+        type: s.type,
+        weight: r3(s.weight),
+        ...(s.m ? { m: [...new Set(s.m)].sort((a, b) => a - b).slice(0, MAX_IDS) } : {}),
+        ...(s.ref ? { ref: s.ref } : {}),
+      });
       continue;
     }
     const ids = [...new Set([...(cur.m ?? []), ...(s.m ?? [])])].sort((a, b) => a - b).slice(0, MAX_IDS);

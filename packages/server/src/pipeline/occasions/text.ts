@@ -109,6 +109,22 @@ export const VENUE_WORDS = new Set(
   ballroom auditorium amphitheater bowl pavilion warehouse station pier beach court courts`.split(/\s+/),
 );
 
+/**
+ * Words that appear in titles and venues but say nothing about which event a message means: days and months ("Taco
+ * Tuesday" vs. "free tuesday?"), chat words ("Sounds at the Orchard" vs. "sounds good"), and address parts (a message
+ * with "Los Angeles" in it is not about a party on a street there). Measured by `yb eval attendance`: these made
+ * almost every "mention" clue.
+ */
+const GENERIC_TOKENS = new Set(
+  `monday tuesday wednesday thursday friday saturday sunday mon tue tues wed thu thur thurs fri sat sun mondays
+  tuesdays wednesdays thursdays fridays saturdays sundays january february march april june july august september
+  october november december jan feb mar apr jun jul aug sep sept oct nov dec weekly monthly annual
+  sounds sound good great fun best big little after down back out off live love free open special first last next
+  late early friends presents present feat featuring vol part official edition series session sessions
+  los angeles hollywood santa monica san francisco york brooklyn manhattan city county downtown midtown uptown
+  north south east west street ave avenue blvd boulevard road drive lane way place court suite unit floor`.split(/\s+/),
+);
+
 /** Lowercased word tokens (letters/digits), diacritics folded. */
 export function words(text: string): string[] {
   return normalizeNamePart(withoutUrls(text))
@@ -127,11 +143,49 @@ export function distinctiveTokens(texts: (string | null | undefined)[], exclude:
   for (const t of texts) {
     if (!t) continue;
     for (const w of words(t)) {
-      if (w.length < 3 || /^\d+$/.test(w) || STOPWORDS.has(w) || EVENT_WORDS.has(w) || skip.has(w)) continue;
+      if (w.length < 3 || /^\d+$/.test(w) || STOPWORDS.has(w) || EVENT_WORDS.has(w) || GENERIC_TOKENS.has(w) || skip.has(w)) continue;
       out.add(w);
     }
   }
   return [...out].sort((a, b) => b.length - a.length || (a < b ? -1 : 1)).slice(0, max);
+}
+
+/** Words that say what kind of get-together something is ("dinner tmrw?", "thanks for having us for brunch"). */
+const KIND_WORDS = new Set(
+  'dinner lunch brunch breakfast drinks drink coffee cocktails party bday birthday concert show gig tickets tix game match movie festival date'.split(' '),
+);
+
+/** The kind words in these texts. */
+export function kindWordsOf(...texts: (string | null | undefined)[]): Set<string> {
+  return new Set(words(texts.filter(Boolean).join(' ')).filter((w) => KIND_WORDS.has(w)));
+}
+
+/**
+ * Capitalized words of a title that could be someone's name ("Spotlight for Nico", "Ari's Lakeside
+ * Birthday"), normalized. Kind-of-event, venue, day and filler words are never names here.
+ */
+export function titleNameWords(title: string | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const raw of withoutUrls(title ?? '').split(/[^\p{L}'’-]+/u)) {
+    const w = raw.replace(/['’]s$/u, '').replace(/^['’-]+|['’-]+$/gu, '');
+    if (w.length < 3 || !/^\p{Lu}/u.test(w)) continue;
+    const norm = normalizeNamePart(w);
+    if (!norm || STOPWORDS.has(norm) || EVENT_WORDS.has(norm) || GENERIC_TOKENS.has(norm) || VENUE_WORDS.has(norm) || GENERIC_MENTIONS.has(norm)) continue;
+    out.add(norm);
+  }
+  return [...out];
+}
+
+/**
+ * The venue's own name for token matching: the first segment of a location, unless that segment is a street address
+ * ("100 Example St, Springfield" has no name, and its street and city words are not about any one event).
+ */
+export function venueName(raw: string | null | undefined): string {
+  const first =
+    withoutUrls(raw ?? '')
+      .split(/[\n,;|]/)[0]
+      ?.trim() ?? '';
+  return /^\d/.test(first) ? '' : first;
 }
 
 // ------------------------------------------------------------------------------------------------ tickets

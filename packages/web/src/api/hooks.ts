@@ -3,6 +3,7 @@ import { normalizeEventsPage, normalizeGoogleStatus, normalizeOccasionDetail } f
 import { api, ApiError, isApiError, qs } from './client';
 import type {
   ActivityPage,
+  AttendeeClues,
   EventsWhen,
   HiddenPage,
   Me,
@@ -27,6 +28,7 @@ export const keys = {
   hidden: ['settings', 'hidden'] as const,
   events: (when: EventsWhen) => ['events', when] as const,
   event: (id: string) => ['event', id] as const,
+  clues: (eventId: string, personId: string) => ['event', eventId, 'clues', personId] as const,
   google: ['google', 'status'] as const,
 };
 
@@ -145,6 +147,16 @@ export const useEvent = (id: string) =>
       if (!ev) throw new ApiError(502, 'BAD_RESPONSE', 'The server sent an unexpected response.');
       return ev;
     },
+    retry: retryOnce,
+  });
+
+/** One attendee's clues with their messages; fetched only once the card is opened (`enabled`). */
+export const useAttendeeClues = (eventId: string, personId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: keys.clues(eventId, personId),
+    queryFn: () => api.get<AttendeeClues>(`/events/${encodeURIComponent(eventId)}/clues/${encodeURIComponent(personId)}`),
+    enabled,
+    staleTime: 5 * 60_000,
     retry: retryOnce,
   });
 

@@ -89,7 +89,9 @@ export function normalizeAttendee(raw: unknown): AttendeeView | null {
     role: str(raw.role),
     source: str(raw.source) ?? 'unknown',
     confidence,
-    evidenceCount: num(pick(raw, 'evidenceCount', 'evidence_count')) ?? (Array.isArray(evidence) ? evidence.length : 0),
+    // the adjudicator's verdict is a reading of the clues, not one of them
+    evidenceCount:
+      num(pick(raw, 'evidenceCount', 'evidence_count')) ?? (Array.isArray(evidence) ? evidence.filter((e) => !isObj(e) || e.type !== 'llm').length : 0),
     tier,
   };
 }
@@ -101,6 +103,16 @@ export function attendeeLine(a: AttendeeView, o: { withSource?: boolean } = {}):
   if (a.confidence < 1) parts.push(percent(a.confidence));
   if (a.evidenceCount > 0) parts.push(plural(a.evidenceCount, 'clue'));
   return parts.join(' · ');
+}
+
+/** When a clue's message was sent, against the event: "28 h after it ended", "2 days before it", "during it". */
+export function relativeToEvent(at: number, start: number, end: number | null): string {
+  const HOUR = 3_600_000;
+  const stop = end ?? start;
+  const fmt = (ms: number) => (ms < 36 * HOUR ? `${Math.max(1, Math.round(ms / HOUR))} h` : `${Math.round(ms / (24 * HOUR))} days`);
+  if (at < start) return `${fmt(start - at)} before it`;
+  if (at <= stop) return 'during it';
+  return `${fmt(at - stop)} after it ended`;
 }
 
 const TIER_ORDER: Record<AttendeeTier, number> = { confirmed: 0, maybe: 1, possible: 2, declined: 3 };
