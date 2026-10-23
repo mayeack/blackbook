@@ -139,9 +139,10 @@ struct SQLiteRow {
 
     func intOrNil(_ i: Int32) -> Int64? { isNull(i) ? nil : sqlite3_column_int64(stmt, i) }
 
-    func bool(_ i: Int32) -> Bool { sqlite3_column_int64(stmt, i) != 0 }
-
+    /// REAL (or INTEGER, converted) column; nil for NULL. Core Data stores timestamps as REAL seconds since 2001.
     func doubleOrNil(_ i: Int32) -> Double? { isNull(i) ? nil : sqlite3_column_double(stmt, i) }
+
+    func bool(_ i: Int32) -> Bool { sqlite3_column_int64(stmt, i) != 0 }
 
     func text(_ i: Int32) -> String? {
         guard !isNull(i), let c = sqlite3_column_text(stmt, i) else { return nil }

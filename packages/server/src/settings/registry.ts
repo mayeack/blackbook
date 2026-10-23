@@ -216,6 +216,19 @@ const DEFS: { [K in AnySettingKey]: Def<K> } = {
     description: 'Used to spot trips; falls back to your own location fact.',
     default: v(null),
   },
+  // ---- gmail (adapters/gmail)
+  'gmail.backfill_days': {
+    group: 'features',
+    label: 'Ticket mail look-back (days)',
+    description: 'How far back Gmail is read for ticket emails once connected (30–3650).',
+    default: v(1095),
+  },
+  'gmail.extra_senders': {
+    group: 'features',
+    label: 'Extra ticket senders',
+    description: 'Sender domains to treat as ticket vendors besides the built-in list.',
+    default: () => [],
+  },
   // ---- locale
   tz: { group: 'locale', label: 'Time zone', description: 'Digest times, day boundaries and dates in briefs.', default: systemTimeZone },
   // ---- internal

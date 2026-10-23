@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { Link } from 'react-router';
 import { useGoogleStatus, useSources } from '../api/hooks';
 import type { GoogleStatusView, SourceView } from '../api/types';
 import { CalendarSection, FixBox } from '../components/GoogleCalendar';
@@ -17,7 +18,10 @@ const when = (ms: number | null) => (ms == null ? '—' : `${dateTime(ms)} (${re
 function SourceCard({ s, google }: { s: SourceView; google?: GoogleStatusView }) {
   const st = cardStatus(s);
   const isGoogle = s.source === 'gcal';
+  // Gmail and Google Photos are their own Google grants; Settings → Email & photos manages them.
+  const isProduct = s.source === 'gmail' || s.source === 'gphotos';
   const fix = isGoogle ? googleFix(s.fix, google) : (s.fix ?? null);
+  const reconnect = isGoogle ? google?.needsReconnect : isProduct && s.status === 'auth_required';
   const rows = countRows(s.counts);
   const top = s.cursors[0];
   const seen = hasData(s) || s.checkedAt != null;
@@ -30,7 +34,7 @@ function SourceCard({ s, google }: { s: SourceView; google?: GoogleStatusView })
         </span>
         <span className={TONE_CLASS[st.tone]}>{st.label}</span>
       </div>
-      {fix && <FixBox fix={fix} reconnect={isGoogle && google?.needsReconnect} />}
+      {fix && <FixBox fix={fix} reconnect={reconnect} />}
       {seen && (
         <dl>
           <dt>Last success</dt>
@@ -71,6 +75,16 @@ function SourceCard({ s, google }: { s: SourceView; google?: GoogleStatusView })
       )}
       {s.lastError && <div className="error-text">{s.lastError}</div>}
       {isGoogle && google?.connected && <CalendarSection g={google} />}
+      {isProduct && !fix && (
+        <p className="caption" style={{ margin: '8px 0 0' }}>
+          {s.source === 'gmail' && (s.counts?.tickets ?? 0) > 0 && (
+            <>
+              <Link to="/tickets">See tickets →</Link>{' '}
+            </>
+          )}
+          <Link to="/settings#email-photos">{s.source === 'gphotos' ? 'Pick screenshots in Settings →' : 'Manage in Settings →'}</Link>
+        </p>
+      )}
     </section>
   );
 }

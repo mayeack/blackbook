@@ -97,6 +97,7 @@ const KIND_LABELS: Record<SuggestionKind, string> = {
   commitment_due: 'Promise due',
   event_followup: 'Follow up',
   party_invite: 'Invite',
+  event_invite: 'Invite to a show',
   fading: 'Fading',
   travel_overlap: 'Travel',
   cooling: 'Cooling',

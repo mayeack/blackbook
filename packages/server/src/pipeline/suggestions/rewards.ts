@@ -2,8 +2,9 @@
  * Implicit reward attribution (job 'rewards', hourly; PLAN "Rewards"):
  *   - acted = 1: an outbound message from me (1:1, or a small group ≤7 with them), a call, an occasion/meeting
  *     together, or a `log:` entry with one of the item's people, after delivery and within the kind's window
- *     (72 h for reply debt / commitments / pre-event, 7 days otherwise); for a party invite, also one of its people
- *     joining the hosted event's guest list (a Partiful invite never shows up as a message);
+ *     (72 h for reply debt / commitments / pre-event, 7 days otherwise); for a party invite (or an event invite),
+ *     also one of its people joining the event's guest list (a Partiful invite or a ticket transfer never shows up
+ *     as a message);
  *   - counterfactual guard: if I was already messaging them in the 24 h before delivery, the action gets no credit
  *     (the item still closes as done, the learner learns nothing);
  *   - ignored = 0 at weight 0.5 when the window ends with no action and no other outcome (an opened item keeps its
@@ -94,7 +95,7 @@ export function firstAction(db: DB, persons: readonly string[], from: number, to
   return options.sort((a, b) => a.at - b.at)[0] ?? null;
 }
 
-/** party_invite: the first time one of `persons` joined the hosted event's guest list (any live status) in (from, to]. */
+/** party_invite / event_invite: the first time one of `persons` joined the event's guest list (any live status) in (from, to]. */
 export function guestListAction(db: DB, r: Pick<SuggestionRow, 'occasion_id' | 'event_id'>, persons: readonly string[], from: number, to: number): Action | null {
   if (!persons.length || to <= from || (!r.occasion_id && !r.event_id)) return null;
   const at = db
@@ -235,7 +236,7 @@ export async function attributeRewards(db: DB, o: { now?: number; log?: Logger; 
     const end = start + KIND_POLICY[r.kind].actWindowMs;
     const persons = personIdsOf(r).length ? personIdsOf(r) : r.circle_id ? circleMembers(db, r.circle_id) : [];
     const act =
-      [firstAction(db, persons, start, Math.min(now, end)), r.kind === 'party_invite' ? guestListAction(db, r, persons, start, Math.min(now, end)) : null]
+      [firstAction(db, persons, start, Math.min(now, end)), r.kind === 'party_invite' || r.kind === 'event_invite' ? guestListAction(db, r, persons, start, Math.min(now, end)) : null]
         .filter((a): a is Action => a !== null)
         .sort((a, b) => a.at - b.at)[0] ?? null;
     if (act) {

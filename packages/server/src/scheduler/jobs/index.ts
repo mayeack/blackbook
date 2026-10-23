@@ -9,6 +9,8 @@ import { COLLECTOR_DEFAULT_URL } from '@yb/shared/collector/v1';
 import { addressbookJobs, type AddressbookJobDeps } from '../../adapters/addressbook/jobs';
 import { beeperJobs, type BeeperJobDeps } from '../../adapters/beeper/jobs';
 import { calendarJobs, type CalendarJobDeps } from '../../adapters/calendar/jobs';
+import { gmailJobs, ticketParseJobs, type GmailJobDeps } from '../../adapters/gmail/jobs';
+import { gphotosJobs, type GphotosDeps } from '../../adapters/gphotos/jobs';
 import { callsJobs, type CallsJobDeps } from '../../adapters/calls/jobs';
 import { imessageJobs, type ImessageJobDeps } from '../../adapters/imessage/jobs';
 import { instagramDyiJobs, type InstagramDyiJobDeps } from '../../adapters/instagram/jobs';
@@ -22,6 +24,7 @@ import { extractionJobs } from '../../extraction/jobs';
 import { matcherJobs, type MatcherJobDeps } from '../../identity/matcherJobs';
 import { tiebreakJobs } from '../../identity/tiebreakJobs';
 import { intelJobs } from '../../intel/jobs';
+import { metAtJobs } from '../../intel/metAt/jobs';
 import { llmJobs } from '../../llm/jobs';
 import { pruneLogs, type Logger } from '../../ops/logger';
 import { circlesJobs } from '../../pipeline/circles/jobs';
@@ -65,6 +68,10 @@ export interface SourceJobDeps {
   instagramDyi: InstagramDyiJobDeps | null;
   partiful: PartifulJobDeps | null;
   calendar: CalendarJobDeps | null;
+  /** Gmail ticket emails (adapters/gmail; needs the Google OAuth client and SECRETS_KEY). */
+  gmail: GmailJobDeps | null;
+  /** Google Photos Picker screenshots (adapters/gphotos; needs the OAuth client, SECRETS_KEY and a data dir). */
+  gphotos: GphotosDeps | null;
   /** Database-only pipeline jobs (identity matcher, occasions): any server with a data dir. */
   matcher: MatcherJobDeps | null;
   occasions: OccasionJobDeps | null;
@@ -118,6 +125,11 @@ export function sourceJobDeps(deps: JobDeps): SourceJobDeps {
     instagramDyi: c.importsDir ? { importsDir: c.importsDir } : null,
     partiful: c.browserCdpUrl ? { browserCdpUrl: c.browserCdpUrl, secretsKey } : null,
     calendar: c.google && secretsKey ? { google: c.google, secretsKey } : null,
+    gmail: c.google && secretsKey ? { google: c.google, secretsKey } : null,
+    gphotos:
+      c.google && secretsKey && c.dataDir
+        ? { google: c.google, secretsKey, dataDir: c.dataDir, collectorUrl: collector?.collectorUrl, collectorTokenFile: collector?.collectorTokenFile }
+        : null,
     matcher: pipeline,
     occasions: pipeline,
   };
@@ -154,10 +166,15 @@ export function buildJobs(deps: JobDeps): JobDef[] {
     ...(s.calendar ? calendarJobs(s.calendar) : []),
     ...(s.matcher ? matcherJobs(s.matcher) : []),
     ...(s.occasions ? occasionJobs(s.occasions) : []),
+    ...(s.gmail ? gmailJobs(s.gmail) : []),
+    ...(s.gphotos ? gphotosJobs(s.gphotos) : []),
     // agent loop (scheduler/timetable.ts AGENT_TIMES)
     ...(a.llm ? tiebreakJobs(a.llm) : []),
     ...(a.llm ? extractionJobs(a.llm) : []),
     ...(a.llm ? llmJobs(a.llm) : []),
+    // Building it registers the 'ticket_parse' batch consumer that llm-collect hands results to.
+    ...(a.llm ? ticketParseJobs(a.llm) : []),
+    ...(a.pipeline ? metAtJobs(a.pipeline) : []),
     ...(a.pipeline ? graphJobs(a.pipeline) : []),
     ...(a.pipeline ? circlesJobs(a.pipeline) : []),
     ...(a.pipeline ? tiesJobs(a.pipeline) : []),

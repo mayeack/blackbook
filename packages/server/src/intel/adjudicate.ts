@@ -26,7 +26,7 @@
  *     confidence; their source, role and the rest stay, so the deterministic pass keeps owning them), never
  *     downgraded or withdrawn;
  *   - a "not social" verdict with nobody attending reclassifies the occasion (classified_by 'llm'), unless it is a
- *     Partiful event or the user classified it;
+ *     Partiful event, the owner holds a ticket to it (a live 'ticket' source), or the user classified it;
  *   - interactions and co_attend edges are re-derived afterwards (EFFECTS_DIRTY → job 'intel-effects').
  */
 import { localDate, localParts, uuidv7 } from '@yb/shared';
@@ -55,6 +55,7 @@ import { occasionChain, survivingOccasion } from '../pipeline/occasions/build';
 import { AdjudicationResult, buildAdjudicationPacket, occasionsAwaitingAdjudication } from '../pipeline/occasions/packet';
 import { isStandingOccasion, plansNear } from '../pipeline/occasions/plans';
 import { CAPPED, COUNTED, NAMED, POSSIBLE, type SignalType } from '../pipeline/occasions/signals';
+import { hasLiveTicket } from '../pipeline/occasions/tickets';
 import { hiddenNameRedactor } from '../routes/people';
 import { settingTimeZone } from '../settings/registry';
 import { ADJUDICATION_SYSTEM } from './adjudicationPrompt';
@@ -528,8 +529,9 @@ export function applyAdjudication(db: DB, subjectRef: string, value: Adjudicatio
   const runId = () => ensureRun(db, o.runId, o.now);
   const counts = { inserted: 0, updated: 0, withdrawn: 0, kept: 0, blocked: 0, reclassified: 0 };
 
-  // "Not a get-together": reclassify (derived) and take back the adjudicator's own rows only.
-  if (!value.is_social && value.kind !== 'social' && !occ.event_id && !attending) {
+  // "Not a get-together": reclassify (derived) and take back the adjudicator's own rows only. A show he holds tickets
+  // to stays social (like a Partiful event); the verdict then only settles its attendees.
+  if (!value.is_social && value.kind !== 'social' && !occ.event_id && !attending && !hasLiveTicket(db, occ.id)) {
     const own = rows.filter((r) => r.source === 'llm' && r.status !== 'withdrawn' && r.status !== 'rejected' && !lastChangeWasUndo(db, r.id));
     tx(db, () => {
       if (occ.classified_by !== 'user') {

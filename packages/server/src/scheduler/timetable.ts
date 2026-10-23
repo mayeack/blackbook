@@ -26,6 +26,8 @@ export const AGENT_TIMES = {
   extractSubmit: '03:10',
   llmCollectEveryMs: 5 * MIN,
   llmPurge: '04:30',
+  /** Met-at inference (intel/metAt): after identity-match 02:45 and occasions 03:00, before graph and intel. */
+  metAt: '06:40',
   graph: '06:50',
   circles: { dow: 0, at: '04:00' },
   ties: '06:55',

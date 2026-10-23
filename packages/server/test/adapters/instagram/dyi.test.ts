@@ -263,6 +263,47 @@ describe('DYI import', () => {
     expect(shape(b)).toEqual(shape(a));
   });
 
+  it('keeps the earliest follow time across exports (a re-follow or a later export never moves it later)', async () => {
+    const db = memDb();
+    const followed = () =>
+      db
+        .prepare(`SELECT i.key, f.direction, f.followed_at FROM instagram_follows f JOIN identities i ON i.id = f.identity_id ORDER BY i.key, f.direction`)
+        .all();
+    const first = dir();
+    writeFolder(first, {
+      [`${ROOT}/connections/followers_and_following/following.json`]: dyiJson(
+        followingJson([
+          { username: 'robin.example', at: T0 - 300 * DAY },
+          { username: 'sky.sample', at: T0 - 50 * DAY },
+          // The same username twice in one file: the earlier time wins.
+          { username: 'sky.sample', at: T0 - 60 * DAY },
+        ]),
+      ),
+    });
+    expect(await importInstagramDyi(db, { importsDir: first, now: T0 })).toMatchObject({ files_imported: 1 });
+    expect(followed()).toEqual([
+      { key: 'robin.example', direction: 'following', followed_at: T0 - 300 * DAY },
+      { key: 'sky.sample', direction: 'following', followed_at: T0 - 60 * DAY },
+    ]);
+    // A later export: Robin was unfollowed and re-followed (later date: ignored), Sky's follow is older than we knew.
+    const second = dir();
+    writeFolder(second, {
+      [`${ROOT}/connections/followers_and_following/following.json`]: dyiJson(
+        followingJson([
+          { username: 'robin.example', at: T0 - 10 * DAY },
+          { username: 'sky.sample', at: T0 - 90 * DAY },
+        ]),
+      ),
+    });
+    expect(await importInstagramDyi(db, { importsDir: second, now: T0 + DAY })).toMatchObject({ files_imported: 1 });
+    expect(followed()).toEqual([
+      { key: 'robin.example', direction: 'following', followed_at: T0 - 300 * DAY },
+      { key: 'sky.sample', direction: 'following', followed_at: T0 - 90 * DAY },
+    ]);
+    // last_seen_at still moves forward for both.
+    expect(db.prepare('SELECT DISTINCT last_seen_at FROM instagram_follows').pluck().all()).toEqual([T0 + DAY]);
+  });
+
   it('maps a thread onto its Beeper conversation: duplicates skipped, older history added, senders inherit identities', async () => {
     const db = memDb();
     // Beeper already has the recent part of the DM with Robin.

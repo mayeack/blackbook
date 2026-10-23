@@ -35,21 +35,14 @@ struct AttachmentImage {
     }
 }
 
-/// ImageIO decode (PNG, JPEG, HEIC, …) → orientation-corrected JPEG whose long edge is at most `maxEdge`
-/// (never upscaled). Nil when the file isn't a decodable image.
+/// ImageIO decode (PNG, JPEG, HEIC, WebP, …) → orientation-corrected image whose long edge is at most `maxEdge`
+/// (never upscaled), as a JPEG (attachments) or a CGImage (Vision OCR). Nil when the bytes aren't a decodable image.
 enum ImageTranscoder {
     static let defaultMaxEdge = 1568
 
     static func jpeg(contentsOf url: URL, maxEdge: Int, quality: Double = 0.8) -> AttachmentImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-              CGImageSourceGetCount(source) > 0 else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxEdge,
-        ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+              let image = upright(source, maxEdge: maxEdge) else { return nil }
         let out = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else {
             return nil
@@ -57,6 +50,38 @@ enum ImageTranscoder {
         CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return nil }
         return AttachmentImage(data: out as Data, width: image.width, height: image.height)
+    }
+
+    /// In-memory bytes → upright CGImage, decoded at most `maxEdge` on the long side and, when the original has more
+    /// than `maxPixels` pixels, scaled down to about that area. An image whose header declares more than
+    /// `maxDeclaredPixels` is refused before any decode (a decompression bomb: ImageIO may decode a PNG in full
+    /// before scaling it). Nothing touches disk.
+    static func uprightImage(data: Data, maxEdge: Int, maxPixels: Int, maxDeclaredPixels: Int = 100_000_000) -> CGImage? {
+        guard !data.isEmpty,
+              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0 else { return nil }
+        var edge = maxEdge
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let w = (props[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+           let h = (props[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue, w > 0, h > 0 {
+            guard w * h <= Double(maxDeclaredPixels) else { return nil }
+            let long = max(w, h)
+            let fit = w * h > Double(maxPixels) ? long * (Double(maxPixels) / (w * h)).squareRoot() : long
+            edge = max(1, min(maxEdge, Int(fit.rounded(.down))))
+        }
+        return upright(source, maxEdge: edge)
+    }
+
+    /// The first frame, orientation applied, long edge ≤ `maxEdge` (ImageIO never upscales a thumbnail).
+    private static func upright(_ source: CGImageSource, maxEdge: Int) -> CGImage? {
+        guard CGImageSourceGetCount(source) > 0 else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxEdge,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
 

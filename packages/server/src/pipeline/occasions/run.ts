@@ -1,6 +1,7 @@
 /**
  * One occasions pass (job 'occasions', nightly after Partiful and Google Calendar, and on demand):
- *   1. calendar treatments → calendar events in [now − 400 d, now + 90 d] → clusters → occasions (build.ts)
+ *   1. calendar treatments → calendar events in [now − 400 d, now + 90 d] → clusters, then the ticket events the
+ *      owner holds in the same window attach to them or stand alone (tickets.ts) → occasions (build.ts)
  *   2. per occasion: rule classification; for social ones the attendee candidates and scores (infer.ts), each
  *      message clue weighed against the owner's other plans (plans.ts, built once from this pass's occasions),
  *      corroboration of shared-calendar events, occasion_candidates (the LLM packet) and the journaled attendee
@@ -24,6 +25,7 @@ import { inferAttendees, type Candidate } from './infer';
 import { MessageScanner } from './messages';
 import { PeopleIndex } from './people';
 import { OccasionPlans } from './plans';
+import { attachTickets, loadTicketEvents } from './tickets';
 
 const DAY = 86_400_000;
 
@@ -32,7 +34,7 @@ export interface OccasionRunOptions {
   jobRunId?: number | null;
   /** IANA zone for date phrases and local dates (default: settings 'tz', else the system zone). */
   timeZone?: string;
-  /** How far back calendar events are (re)processed. */
+  /** How far back calendar and ticket events are (re)processed. */
   horizonDays?: number;
   aheadDays?: number;
   /** Checked between steps: an aborted pass stops there (its run closes 'partial'; effects wait for the next pass). */
@@ -54,6 +56,8 @@ export const SLICE_MS = 25;
 
 export interface OccasionRunStats extends EffectStats {
   calendarEvents: number;
+  /** Ticket events the owner holds in the window (ticket copies). */
+  ticketEvents: number;
   occasions: number;
   occasionsCreated: number;
   occasionsUpdated: number;
@@ -173,6 +177,7 @@ export function* occasionPass(db: DB, o: OccasionRunOptions): Generator<void, Oc
   const to = now + (o.aheadDays ?? 90) * DAY;
   const stats: OccasionRunStats = {
     calendarEvents: 0,
+    ticketEvents: 0,
     occasions: 0,
     occasionsCreated: 0,
     occasionsUpdated: 0,
@@ -197,9 +202,12 @@ export function* occasionPass(db: DB, o: OccasionRunOptions): Generator<void, Oc
   const treatments = calendarTreatments(db, ownerEmails(db));
   const excluded = new Set([...treatments].filter(([, t]) => t === 'excluded').map(([id]) => id));
   const events = loadCalendarEvents(db, treatments, from, to);
+  const tickets = loadTicketEvents(db, from, to);
   stats.calendarEvents = events.length;
-  const drafts = clusterEvents(events)
-    .map((c) => draftOccasion(db, c))
+  stats.ticketEvents = tickets.live.length;
+  const attached = attachTickets(clusterEvents(events), tickets, timeZone);
+  const drafts = attached.clusters
+    .map((c) => draftOccasion(db, c, { ticketReleased: attached.released.has(c) }))
     .sort((a, b) => a.startsAt - b.startsAt || (a.primary.id < b.primary.id ? -1 : 1));
   yield;
   if (aborted()) return { stats, complete: false };
@@ -239,12 +247,13 @@ export function* occasionPass(db: DB, o: OccasionRunOptions): Generator<void, Oc
       const d = occ.draft;
       const social = occ.isSocial && !occ.sensitive;
       const days = occasionDays(d.startsAt, d.endsAt, d.allDay, timeZone, d.primary.dates);
-      const inference = social && !d.selfDeclined ? inferAttendees({ db, people, scanner, days, plans }, d) : null;
+      const notGoing = d.selfDeclined || d.ticketReleased;
+      const inference = social && !notGoing ? inferAttendees({ db, people, scanner, days, plans }, d) : null;
       stats.messagesScanned += inference?.scanned ?? 0;
       tx(db, () => {
         const row = getOcc.get(occ.id) as OccasionRow;
         const corroborated = d.treatment !== 'candidate' || (inference?.corroborated ?? false);
-        const status = row.classified_by === 'user' ? row.status : d.selfDeclined ? 'excluded' : corroborated ? 'active' : 'candidate';
+        const status = row.classified_by === 'user' ? row.status : notGoing ? 'excluded' : corroborated ? 'active' : 'candidate';
         const rows = candidateRows(inference?.candidates ?? []);
         const changed = writeCandidates(db, occ.id, rows, now);
         updateChanged(db, occ.id, row, { status, corroborated: corroborated ? 1 : 0, candidate_count: rows.length, ...(changed ? { inferred_at: now } : {}) }, now);

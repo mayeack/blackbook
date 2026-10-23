@@ -83,7 +83,8 @@ export function EventsPage() {
         title="Events"
         sub={
           <>
-            Get-togethers from Partiful and your calendar, and who was there. <Link to="/trips">Trips →</Link>
+            Get-togethers from Partiful, your calendar and your tickets, and who was there. <Link to="/trips">Trips →</Link>{' '}
+            <Link to="/tickets">Tickets →</Link>
           </>
         }
       />

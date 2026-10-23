@@ -1452,6 +1452,99 @@ can lift a message-only candidate one tier at most; its rows for people who lost
 message shows "Unsent message"; an excluded conversation's messages never appear; ties and co_attend edges drop for
 the withdrawn rows after the effects job runs.
 **Platforms**: server + web. Verified locally on a copy of live data; not deployed.
+## 2026-10-21 — Tickets from Gmail, "met at" an event, contact screenshots, "Invite to a show"
+
+Four connected pieces (design: `docs/design/tickets-met-at.md`):
+- **Ticket ledger.** A read-only Gmail source keeps every concert and event ticket, with bought, sent, sold and
+  refunded counts and a status. Tickets you hold become events.
+- **Met at.** Someone you newly connected with near an event you went to gets a "Met at <event>" link: an
+  Instagram follow or first DM, a new contact card, or a contact screenshot.
+- **Contact screenshots.** Screenshots you pick in Google Photos are read on the Mac (the collector, Apple Vision),
+  and the people in them are linked.
+- **Invite to a show.** For a show you hold tickets to, suggests up to 3 people you met at a similar event.
+  Screenshot people come first, and nobody already going is suggested.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii && npm run build` from the repo root: 1876+ tests pass,
+   995 files clean, build OK. `collector/run-tests.sh`: 89 Swift tests pass. `xcodebuild -scheme BlackbookServer`
+   builds.
+2. Migration 026 (written as 025, renumbered after #79 took 025 for calls) on a copy of the production DB: applied in < 1 s, row counts of llm_requests / suggestions /
+   occasion_sources unchanged, foreign_key_check empty, quick_check ok.
+3. Met-at dry run on that copy, with real contact creation dates loaded:
+   - 597 bulk-imported cards excluded;
+   - 183 cards skipped as people already known;
+   - 12 links to comedy, jazz, lounge and Halloween events, each added the night of or the morning after.
+4. Triage over 30 real recent inbox subjects:
+   - kept as candidates: orders, transfers, resale sales, mobile-entry reminders, a registration and club RSVP
+     reminders;
+   - rejected: presales, "tomorrow!" upsells, Spotify, "You're invited to".
+5. Two real ticket emails were masked and parsed by Haiku 5.5 (on the DB copy, $0.0006):
+   - masking: the owner's name became `<me>`, addresses `<addr>`, long numbers `<num>`;
+   - DICE order: 2 tickets, venue, 10 PM local;
+   - Ticketmaster resale: 2 sold.
+
+### Scenario B — Owner setup (one time)
+1. Google Cloud console (project "My First Project"): enable **Gmail API** and **Google Photos Picker API**.
+2. yeackbot.com → Settings → **Email & photos** → **Connect Gmail**. Google shows "Google hasn't verified this app";
+   choose Advanced → continue, then allow read-only Gmail. **Expected**: back on Settings with "Gmail connected"; Sources
+   shows a **Gmail** card.
+3. Same panel → **Connect Google Photos** (same unverified-app screen). **Expected**: "Google Photos connected".
+4. Deploy the collector update (Vision OCR + contact creation dates). **Expected**: Sources → Collector ok; after the
+   next address-book pass, `created_at_filled` > 0 in the job stats.
+5. Optional: Settings → Agent → Features → **Extra ticket senders**: add your club's sender domain
+   (`gmail.extra_senders`), so its event registrations count as tickets, not only its "RSVP Reminder" mails.
+6. Optional: request an Instagram "Download your information" JSON export (followers and following) and drop the zip
+   in `~/Yeackbot Imports`, so Instagram follow dates exist.
+
+### Scenario C — Ticket ledger (after Gmail is connected)
+1. Wait one or two `gmail` runs (every 30 min) and one `ticket-parse` + `llm-collect` cycle, then open
+   **Events → Tickets**. **Expected**: upcoming and past shows. Each shows a status pill, "You hold N · bought …" and
+   a link to its event.
+2. A show you bought 4 tickets for and transferred 2: **Expected**: holds 2. Transferred all 4: **Expected**: "Gave
+   away", and the event drops off Events unless your own calendar has it.
+3. A show you resold (Ticketmaster "your listing just sold" / StubHub "You sold"): **Expected**: "Sold".
+4. A presale or "tomorrow!" marketing email: **Expected**: never a ticket.
+5. A cancelled show, then a "rescheduled" email: **Expected**: one row, on the new date, holding.
+6. Settings → Gmail → **Disconnect** while Calendar is connected. **Expected**: Calendar stays connected; tickets stay
+   (unless "delete data" was chosen); nothing more goes to the model until you reconnect.
+
+### Scenario D — Met at
+1. Add a new contact on your phone the night of a show you have tickets for (or follow someone on Instagram and
+   export DYI). The next morning, after 06:40, open that person. **Expected**: header reads
+   "Met at <show> · <date> · via contact added"; the Met at section lists it.
+2. Tap **Wrong?** → It's wrong. **Expected**: the line disappears and never comes back (undo in Today brings it back).
+3. Add a card for an old friend (someone you've texted before) during a show. **Expected**: no Met at link.
+4. Follow the headliner's account at the show. **Expected**: no link (performers are skipped).
+
+### Scenario E — Contact screenshots (Google Photos)
+1. Settings → Email & photos → **Pick screenshots**. In the Google tab, search "screenshots" and select a few
+   screenshots of Instagram profiles or contact cards, then press Done. **Expected**: the panel shows open →
+   downloading → reading → linked N.
+2. Open a linked person. **Expected**: a new or existing person with the screenshot's phone, email or handle.
+3. A screenshot of a group chat or a flyer with several numbers. **Expected**: counted as ambiguous; nobody is
+   created.
+4. **Expected** on disk: nothing stays in `~/Library/Application Support/Yeackbot/screenshots/` after reading (at
+   most 7 days if the collector is too old).
+
+### Scenario F — Invite to a show
+1. Hold tickets to a show 1–21 days out. Someone you screenshotted was met at a similar show (same artist or genre).
+   **Expected**: the brief / Today shows "You have tickets to <show> on <day>. Invite <name>? You met <name> at
+   <similar show>." Screenshot people are listed first.
+2. Transfer them a ticket (or they RSVP on Partiful). **Expected**: they drop out of the next brief; selling your
+   tickets drops the whole item.
+3. **Wrong** on a one-person item. **Expected**: that Met at link is rejected. On a multi-person item it only cools
+   down.
+
+**Edge cases**:
+- Gmail grant revoked → the Gmail card reads auth_required, with no retry storm.
+- A collector too old for OCR → the Photos panel says "update the collector" and files wait up to 7 days.
+- A hidden person is never shown in Met here chips or suggested.
+- Sensitive events never appear on /tickets.
+
+**Platforms**:
+- Server, web and collector (Swift).
+- Not deployed. Not checked in a browser or on the live Gmail / Google Photos APIs.
+- Haiku parse quality was checked on 2 real emails only.
 
 ---
 

@@ -1,3 +1,4 @@
+import Contacts
 import Foundation
 import Testing
 #if canImport(CollectorCore)
@@ -18,6 +19,7 @@ struct ContactsTests {
         var a = ContactCard(id: "A-0001", given: "Avery", family: "Sample")
         a.phones = [LabeledValue(label: nil, value: "+15555550101")]
         a.birthday = (y: 1990, m: 1, d: 31)
+        a.createdAt = ISOTime.parse("2026-03-03T18:04:05.250Z")
         return [b, a]
     }()
 
@@ -29,6 +31,38 @@ struct ContactsTests {
         var changed = Self.sampleCards
         changed[0].job = "Lead Guide"
         #expect(ContactsExport.payload(changed).hash != p1.hash)
+    }
+
+    @Test func createdAtIsOnTheWireButOutsideTheHash() throws {
+        let p = ContactsExport.payload(Self.sampleCards)
+        #expect(p.items.first?["created_at"] == .string("2026-03-03T18:04:05.250Z"))
+        #expect(p.items.last?["created_at"] == .null, "unknown creation date is an explicit null")
+        var undated = Self.sampleCards
+        undated[1].createdAt = nil
+        var moved = Self.sampleCards
+        moved[0].createdAt = refDate
+        #expect(ContactsExport.payload(undated).hash == p.hash)
+        #expect(ContactsExport.payload(moved).hash == p.hash)
+        #expect(undated[1] != Self.sampleCards[1], "equality still sees created_at")
+    }
+
+    @Test func systemCardCarriesTheCreationDate() {
+        let contact = CNMutableContact()
+        contact.givenName = "Robin"
+        contact.familyName = "Example"
+        let created = ISOTime.parse("2025-06-01T09:30:00.000Z")!
+        let card = SystemContactsSource.card(from: contact, createdAt: created)
+        #expect(card.id == contact.identifier)
+        #expect(card.json["created_at"] == .string("2025-06-01T09:30:00.000Z"))
+        #expect(SystemContactsSource.card(from: contact).json["created_at"] == .null)
+    }
+
+    @Test func contactsRouteEmitsCreatedAt() throws {
+        let h = try APIHarness()
+        h.contacts.cards = Self.sampleCards
+        let items = APIHarness.json(h.request("/v1/contacts"))["items"] as? [[String: Any]] ?? []
+        #expect(items.first?["created_at"] as? String == "2026-03-03T18:04:05.250Z")
+        #expect(items.last?["created_at"] is NSNull)
     }
 
     @Test func birthdayYearIsOptionalAndSocialUsesService() {
@@ -84,6 +118,24 @@ struct GoldenContractTests {
             body: Data("{\"to\":\"+15555550101\",\"text\":\"🅨 hi\",\"client_ref\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}".utf8)))
         #expect(refused.status == 403)
         #expect(try checkGolden("error-recipient-not-allowed", refused.body))
+
+        // Fixed lines through the real route and envelope (a fake recognizer: real recognition varies across macOS
+        // versions; the route tests cover actual Vision output).
+        let recognizer = FakeRecognizer()
+        recognizer.result = OCRResult(width: 1179, height: 2556, lines: [
+            OCRLine(text: "Ada Example", confidence: 1, x: 0.2104, y: 0.1187, w: 0.5791, h: 0.0213),
+            OCRLine(text: "+1 212 555 0142", confidence: 0.5, x: 0.0712, y: 0.2484, w: 0.4402, h: 0.0151),
+            OCRLine(text: "ada@example.com", confidence: 0.3, x: 0.0712, y: 0.2873, w: 0.3896, h: 0.0151),
+        ])
+        let oh = try APIHarness(ocr: recognizer)
+        let ocr = oh.api.evaluate(oh.loopbackRequest("POST", "/v1/vision/ocr",
+            body: Data("{\"data_base64\":\"\(Data("synthetic".utf8).base64EncodedString())\"}".utf8)))
+        #expect(ocr.status == 200)
+        #expect(try checkGolden("vision-ocr", ocr.body))
+        let unreadable = h.api.evaluate(h.loopbackRequest("POST", "/v1/vision/ocr",
+            body: Data("{\"data_base64\":\"\(Data("not an image".utf8).base64EncodedString())\"}".utf8)))
+        #expect(unreadable.status == 422)
+        #expect(try checkGolden("error-image-unreadable", unreadable.body))
     }
 
     private static func wrap(_ value: JSON) -> JSON {

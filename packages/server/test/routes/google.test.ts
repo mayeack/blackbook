@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import crypto from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
-import { CALENDAR_SCOPE, REFRESH_TOKEN_SECRET } from '../../src/adapters/calendar/google';
+import { CALENDAR_SCOPE, GMAIL_REFRESH_TOKEN_SECRET, REFRESH_TOKEN_SECRET } from '../../src/adapters/calendar/google';
 import { runCalendarSync } from '../../src/adapters/calendar/jobs';
 import { STATE_TTL_MS } from '../../src/adapters/calendar/oauth';
 import { upsertCalendars } from '../../src/adapters/calendar/sync';
@@ -15,7 +15,7 @@ import { errorHandler } from '../../src/http/errors';
 import { undoBatch } from '../../src/journal/undo';
 import type { LogFields, Logger } from '../../src/ops/logger';
 import { createGoogleRouter } from '../../src/routes/google';
-import { getSecret } from '../../src/security/secrets';
+import { getSecret, setSecret } from '../../src/security/secrets';
 import { calendarEntries, CAL, CLIENT, DAY, FakeGoogle, s256, T0, timed } from '../adapters/calendar/fakeGoogle';
 import { memDb } from '../helpers';
 
@@ -263,6 +263,30 @@ describe('POST /google/disconnect', () => {
     expect(res.body).toEqual({ connected: false, revoked: true, deleted: { events: 1, calendars } });
     expect(h.db.prepare('SELECT (SELECT count(*) FROM calendar_events) + (SELECT count(*) FROM gcal_calendars)').pluck().get()).toBe(0);
     expect((await request(h.app).post('/api/v1/google/disconnect').set(JSON_HEADERS).send({ deleteData: 'yes' })).status).toBe(400);
+  });
+
+  it('revokes only when Gmail and Photos hold no token; a revoke disables all three health rows', async () => {
+    // Gmail still connected: Google's revoke would take it down too, so only the calendar token goes.
+    const h = harness();
+    await connectFully(h);
+    h.g.refreshTokens.add('test-refresh-gmail');
+    setSecret(h.db, KEY, GMAIL_REFRESH_TOKEN_SECRET, 'test-refresh-gmail', T0);
+    const kept = await request(h.app).post('/api/v1/google/disconnect').set(JSON_HEADERS).send({});
+    expect(kept.body).toEqual({ connected: false, revoked: false });
+    expect(h.g.revoked).toEqual([]);
+    expect(h.db.prepare('SELECT name FROM secrets').pluck().all()).toEqual([GMAIL_REFRESH_TOKEN_SECRET]);
+    expect(h.db.prepare(`SELECT source, status FROM source_health ORDER BY source`).all()).toEqual([{ source: 'gcal', status: 'disabled' }]);
+
+    // Calendar alone: the grant is revoked and every product reads as disconnected.
+    const solo = harness();
+    await connectFully(solo);
+    const res = await request(solo.app).post('/api/v1/google/disconnect').set(JSON_HEADERS).send({});
+    expect(res.body).toEqual({ connected: false, revoked: true });
+    expect(solo.db.prepare(`SELECT source, status FROM source_health ORDER BY source`).all()).toEqual([
+      { source: 'gcal', status: 'disabled' },
+      { source: 'gmail', status: 'disabled' },
+      { source: 'gphotos', status: 'disabled' },
+    ]);
   });
 
   it('still disconnects locally when Google refuses the revocation', async () => {

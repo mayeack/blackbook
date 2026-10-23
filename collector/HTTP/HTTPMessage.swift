@@ -76,9 +76,22 @@ enum HTTPStatus {
 
 struct HTTPLimits {
     var maxHeaderBytes = 64 * 1024
+    /// Body cap for every route not listed in `routeBodyBytes`.
     var maxBodyBytes = 1 << 20
+    /// Larger caps for single routes, keyed `"METHOD /path"` (exact path; the query string is ignored). Only
+    /// on-device OCR carries a whole image in its body: a ≤6 MiB base64 image plus its JSON wrapper.
+    var routeBodyBytes: [String: Int] = ["POST /v1/vision/ocr": 8 << 20]
     var idleTimeout: TimeInterval = 30
     var maxConcurrentConnections = 32
+
+    /// The body cap for one request, decided from its request line before any body byte is buffered.
+    func bodyLimit(method: String, path: String) -> Int {
+        routeBodyBytes["\(method) \(path)"] ?? maxBodyBytes
+    }
+
+    static func describe(_ bytes: Int) -> String {
+        bytes % (1 << 20) == 0 ? "\(bytes >> 20) MiB" : "\(bytes) bytes"
+    }
 }
 
 enum HTTPParseResult {
@@ -151,8 +164,11 @@ enum HTTPRequestParser {
         } else if bodyMethods.contains(method) {
             return .failure(status: 411, code: "length_required", message: "Content-Length required")
         }
-        if contentLength > limits.maxBodyBytes {
-            return .failure(status: 413, code: "payload_too_large", message: "body exceeds 1 MiB")
+        // The cap is per route (HTTPLimits.routeBodyBytes), so the path is known before the body is buffered.
+        let (path, query) = splitTarget(target)
+        let bodyLimit = limits.bodyLimit(method: method, path: path)
+        if contentLength > bodyLimit {
+            return .failure(status: 413, code: "payload_too_large", message: "body exceeds \(HTTPLimits.describe(bodyLimit))")
         }
 
         let bodyStart = end.upperBound
@@ -160,7 +176,6 @@ enum HTTPRequestParser {
         if available < contentLength { return .needMore }
         let body = Data(buffer[bodyStart..<(bodyStart + contentLength)])
 
-        let (path, query) = splitTarget(target)
         return .complete(LoopbackRequest(method: method, path: path, query: query, headers: headers, body: body))
     }
 

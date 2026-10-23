@@ -21,8 +21,8 @@ const SETTINGS: NavItem = { to: '/settings', label: 'Settings', icon: Icons.sett
 const SIDEBAR = [TODAY, PEOPLE, ASK, NETWORK, CIRCLES, EVENTS, SOURCES, SETTINGS];
 /** Screens reached through the More tab on mobile. */
 export const MORE_ITEMS = [CIRCLES, EVENTS, SOURCES, SETTINGS];
-/** Detail screens of the More items: events and trips belong to Events, collections to Circles. */
-const EVENT_PATHS = ['/e', '/trips'];
+/** Detail screens of the More items: events, trips and tickets belong to Events, collections to Circles. */
+const EVENT_PATHS = ['/e', '/trips', '/tickets'];
 const CIRCLE_PATHS = ['/c', '/tags', '/locations'];
 const MORE_PATHS = ['/more', ...EVENT_PATHS, ...CIRCLE_PATHS, ...MORE_ITEMS.map((i) => i.to)];
 const under = (pathname: string, paths: readonly string[]) => paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -32,7 +32,7 @@ const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' :
 export function AppShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const inMore = under(pathname, MORE_PATHS);
-  // A person page belongs to People; an event or trips page to Events; a circle, tag or place to Circles.
+  // A person page belongs to People; an event, trips or tickets page to Events; a circle, tag or place to Circles.
   const inPeople = pathname.startsWith('/p/');
   const inEvents = under(pathname, EVENT_PATHS);
   const inCircles = under(pathname, CIRCLE_PATHS);

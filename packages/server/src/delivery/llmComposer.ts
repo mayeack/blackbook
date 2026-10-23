@@ -3,8 +3,9 @@
  * route (llm/models.ts: Haiku 5.5, effort low, thinking off, structured output; a refusal keeps the template) that
  * writes headline / body / ≤2
  * conversation-starter drafts per item, from a pseudonymized packet:
- *   per item: kind, the person's token + first name, tie signals as text, ≤5 non-sensitive facts, ≤3 short
- *   message quotes, open commitments / reply debts — each line carrying a local ref id (c1, c2, …) the copy cites.
+ *   per item: kind, the person's token + first name, tie signals as text, the event (and, for an event invite,
+ *   where each person was met), ≤5 non-sensitive facts, ≤3 short message quotes, open commitments / reply debts —
+ *   each line carrying a local ref id (c1, c2, …) the copy cites.
  *   A first name that wouldn't pin down one person (the owner's own, or one shared with someone the brief names by
  *   full last name: text.ts briefNames) is left out, so the copy names that person by token, and tokens become the
  *   brief's names locally (never sent: last names stay initials in every packet).
@@ -17,6 +18,7 @@ import { z } from 'zod';
 import type Anthropic from '@anthropic-ai/sdk';
 import type { DB } from '../db/connection';
 import { ownerNames } from '../identity/ownerNames';
+import { happeningOf, metRefOf } from '../intel/eventInvites';
 import { estimatePromptTokens, estimateRouteUsd } from '../llm/models';
 import { routePromptVersion, type Egress, type LlmClient, type LlmUsage } from '../llm/types';
 import type { Logger } from '../ops/logger';
@@ -76,6 +78,7 @@ const KIND_HINT: Record<string, string> = {
   commitment_due: 'a promise that is due',
   event_followup: 'follow up after a recent event',
   party_invite: 'the owner is hosting an event soon; friends worth inviting who are not on the guest list yet',
+  event_invite: 'the owner has tickets to a show or event soon; people he recently met at a similar event who might want to come',
   fading: 'they have gone quiet compared with their usual rhythm',
   travel_overlap: 'they will be in the same place as the owner',
   cooling: 'contact is slowing down',
@@ -218,14 +221,27 @@ function signalLine(db: DB, item: SelectedItem): string | null {
   return parts.length ? `signals: ${parts.join(' · ')}` : null;
 }
 
-function contextLine(db: DB, item: SelectedItem, tz: string, now: number): string | null {
+/** event_invite: where each person was met (the met-at event's title and date), so copy naming it is grounded. */
+function metAtLines(db: DB, item: SelectedItem, tokenOf: (personId: string) => string, tz: string, now: number): string[] {
+  const out: string[] = [];
+  for (const p of item.people) {
+    const ref = metRefOf(db, p.id, item.payload);
+    const h = ref ? happeningOf(db, ref) : null;
+    const title = safeFragment(h?.title, 60);
+    out.push(`met: ${tokenOf(p.id)} at ${title ?? 'a similar event'}${h?.startsAt ? ` · ${shortDay(h.startsAt, tz, now)}` : ''}`);
+  }
+  return out;
+}
+
+function contextLine(db: DB, item: SelectedItem, tz: string, now: number, tokenOf?: (personId: string) => string): string | null {
   if (item.links.occasionId) {
     const o = db.prepare('SELECT title, starts_at, sensitive FROM occasions WHERE id = ?').get(item.links.occasionId) as
       | { title: string | null; starts_at: number; sensitive: number }
       | undefined;
     if (o && !o.sensitive) {
       const title = safeFragment(o.title, 60);
-      return `event: ${title ?? 'untitled'} · ${shortDay(o.starts_at, tz, now)} ${shortTime(o.starts_at, tz)}`;
+      const line = `event: ${title ?? 'untitled'} · ${shortDay(o.starts_at, tz, now)} ${shortTime(o.starts_at, tz)}`;
+      return item.kind === 'event_invite' && tokenOf ? [`${line} · the owner has tickets`, ...metAtLines(db, item, tokenOf, tz, now)].join('\n') : line;
     }
   }
   if (item.links.circleId) {
@@ -267,7 +283,7 @@ export function buildPacket(
     }
     const sig = signalLine(db, item);
     if (sig) lines.push(sig);
-    const ctx = contextLine(db, item, o.timeZone, o.now);
+    const ctx = contextLine(db, item, o.timeZone, o.now, (id) => egress.tokenFor(id));
     if (ctx) lines.push(ctx);
     const tpl = templates.get(item.suggestionId);
     if (tpl) {

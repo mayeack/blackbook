@@ -23,6 +23,8 @@ struct APIError: Error, Equatable {
     static let attachmentNotFound = APIError(status: 404, code: "attachment_not_found", message: "no such attachment")
     static func attachmentNotAllowed(_ detail: String) -> APIError { APIError(status: 403, code: "attachment_not_allowed", message: detail) }
     static let attachmentUnreadable = APIError(status: 422, code: "attachment_unreadable", message: "the attachment is not a decodable image")
+    static let imageUnreadable = APIError(status: 422, code: "image_unreadable", message: "the image could not be decoded")
+    static func payloadTooLarge(_ detail: String) -> APIError { APIError(status: 413, code: "payload_too_large", message: detail) }
     static func callHistoryUnavailable(status: Int, _ detail: String) -> APIError {
         APIError(status: status, code: "callhistory_unavailable", message: detail)
     }

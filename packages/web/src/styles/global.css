@@ -1254,3 +1254,43 @@ select.input-sm {
   margin-top: 3px;
   flex: none;
 }
+
+/* ---------------------------------------------------------------- Email & photos (Settings), Tickets */
+.product-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.product-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.pick-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0 2px;
+}
+.pick-progress.active {
+  color: var(--accent-text);
+}
+.badge.src-ticket {
+  border-style: dotted;
+}
+.ticket-counts {
+  padding: 8px 14px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.ticket-card .ev-head:is(div):hover {
+  background: none;
+}
+.met-here-label {
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+

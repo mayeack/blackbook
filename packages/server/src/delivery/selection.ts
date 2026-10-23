@@ -6,7 +6,11 @@
  * instead (compose / delivery / routes all take `select`). Items whose people are no longer visible (hidden,
  * merged away, roster-only since the ranker ran) are dropped here, so nothing hidden ever reaches a text; so is a
  * "Who to invite" item whose Partiful guest list went stale or that now names someone already invited
- * (intel/invites.ts partyInviteStale), so a duplicate invite never goes out.
+ * (intel/invites.ts partyInviteStale), so a duplicate invite never goes out, and an "Invite to a show" item whose
+ * tickets are no longer held (or whose Partiful list went stale) loses the whole item, while people who joined the
+ * event since, or whose met-at link the owner has marked wrong since, drop out of it (intel/eventInvites.ts
+ * eventInviteStale); in a digest read it carries template copy for the people left, which compose.ts shows once
+ * its stored copy names someone who dropped out. With `now`, `more`'s item by id gets the same checks.
  */
 import {
   SUGGESTION_KINDS,
@@ -22,7 +26,12 @@ import {
   type WildcardGenerator,
 } from '@yb/shared';
 import type { DB } from '../db/connection';
+import { ownerNames } from '../identity/ownerNames';
+import { eventInviteStale } from '../intel/eventInvites';
 import { partyInviteStale } from '../intel/invites';
+import { settingTimeZone } from '../settings/registry';
+import { templateCopy, type ItemCopy } from './template';
+import { briefNames } from './text';
 
 export interface DigestRow {
   id: string;
@@ -90,6 +99,11 @@ export interface SelectedItem {
   title: string | null;
   body: string | null;
   openers: string[];
+  /**
+   * "Invite to a show" items in a digest read: template copy for the people the item shows now, for when its stored
+   * composition named someone who has dropped out since (compose.ts storedComposition).
+   */
+  currentCopy?: ItemCopy;
 }
 
 export interface DigestSelection {
@@ -97,7 +111,10 @@ export interface DigestSelection {
   items: SelectedItem[];
   /** Items the ranker picked whose people are no longer visible (not shown anywhere). */
   droppedHidden: number;
-  /** "Who to invite" items dropped because their guest list went stale or someone on them is invited by now. */
+  /**
+   * "Who to invite" items dropped because their guest list went stale or someone on them is invited by now; "Invite
+   * to a show" items whose tickets are gone or whose people have all joined the event.
+   */
   droppedStale?: number;
 }
 
@@ -210,16 +227,26 @@ export const readDigestSelection: SelectDigestItems = (db, { localDate, now }) =
        WHERE di.digest_id = ? ORDER BY di.ordinal`,
     )
     .all(digest.id) as SuggestionRow[];
-  return { digest, ...toSelectedItems(db, rows, now) };
+  const sel = toSelectedItems(db, rows, now);
+  // People drop out of an invite to a show as they join it: copy for those it shows now, named as compose would.
+  const invites = sel.items.filter((i) => i.kind === 'event_invite');
+  if (invites.length) {
+    const ctx = { db, now, timeZone: settingTimeZone(db), names: briefNames(sel.items.flatMap((i) => i.people), ownerNames(db)) };
+    for (const i of invites) i.currentCopy = templateCopy(i, ctx);
+  }
+  return { digest, ...sel };
 };
 
-/** One suggestion as a digest item with the given ordinal (e.g. the next one `more` texts), or null if hidden. */
-export function selectedItemById(db: DB, suggestionId: string, ordinal: number): SelectedItem | null {
+/**
+ * One suggestion as a digest item with the given ordinal (e.g. the next one `more` texts), or null if hidden. With
+ * `now` (anything about to be shown), the same invite checks as the brief: null when stale, joined people left out.
+ */
+export function selectedItemById(db: DB, suggestionId: string, ordinal: number, now?: number): SelectedItem | null {
   const row = db.prepare('SELECT ? AS ordinal, s.* FROM suggestions s WHERE s.id = ?').get(ordinal, suggestionId) as SuggestionRow | undefined;
-  return row ? (toSelectedItems(db, [row]).items[0] ?? null) : null;
+  return row ? (toSelectedItems(db, [row], now).items[0] ?? null) : null;
 }
 
-/** `now` (digest reads) also re-checks "Who to invite" items against their guest list (see the header). */
+/** `now` (digest reads) also re-checks "Who to invite" / "Invite to a show" items against their guest list (see the header). */
 function toSelectedItems(db: DB, rows: SuggestionRow[], now?: number): { items: SelectedItem[]; droppedHidden: number; droppedStale: number } {
   const personIdsOf = (r: SuggestionRow): string[] => {
     const listed = strings(parseJson(r.person_ids ?? null));
@@ -235,7 +262,18 @@ function toSelectedItems(db: DB, rows: SuggestionRow[], now?: number): { items: 
   for (const r of rows) {
     const kind = normalizeKind(r.kind);
     if (!kind) continue;
-    const personIds = personIdsOf(r);
+    let personIds = personIdsOf(r);
+    if (now !== undefined && kind === 'event_invite') {
+      // Gone from the tickets (or a stale Partiful list): the whole item; someone who joined since (or whose met-at
+      // link the owner has marked wrong since): just them.
+      const st = eventInviteStale(db, { occasionId: r.occasion_id, eventId: r.event_id, personIds, payload: parseSignals(r.signals).payload }, now);
+      const left = personIds.filter((id) => !st.drop.has(id));
+      if (st.stale || !left.length) {
+        droppedStale++;
+        continue;
+      }
+      personIds = left;
+    }
     // The people the item is about must all be visible (both for an intro); extra attendees just drop out.
     const required = personIds.slice(0, kind === 'intro' ? 2 : 1);
     if (required.some((id) => !people.get(id))) {
@@ -292,7 +330,10 @@ export const toChip = (p: PersonInfo): PersonChip => ({ id: p.id, displayName: p
 export function targetOf(item: Pick<SelectedItem, 'kind' | 'people' | 'links'>): SuggestionTarget | null {
   const [a, b] = item.people;
   if (item.kind === 'intro' && a && b) return { type: 'pair', id: a.id, otherId: b.id, href: `/p/${a.id}/with/${b.id}` };
-  if ((item.kind === 'pre_event_brief' || item.kind === 'event_followup' || item.kind === 'party_invite' || item.kind === 'memory') && (item.links.occasionId || item.links.eventId)) {
+  if (
+    (item.kind === 'pre_event_brief' || item.kind === 'event_followup' || item.kind === 'party_invite' || item.kind === 'event_invite' || item.kind === 'memory') &&
+    (item.links.occasionId || item.links.eventId)
+  ) {
     const id = (item.links.occasionId ?? item.links.eventId)!;
     return { type: 'event', id, otherId: null, href: `/e/${id}` };
   }

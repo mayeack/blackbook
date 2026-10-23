@@ -1,6 +1,7 @@
 /**
- * Contract round-trips: a synthetic, fully-populated payload for every agent-loop DTO parses back to itself
- * (so no field is silently stripped or renamed), and the key validation rules hold. All data is invented.
+ * Contract round-trips: a synthetic, fully-populated payload for every agent-loop DTO (and the ticket, Gmail and
+ * Google Photos ones) parses back to itself (so no field is silently stripped or renamed), and the key validation
+ * rules hold. All data is invented.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -21,10 +22,18 @@ import {
   EvalLabelInput,
   EvalReport,
   EventBrief,
+  GmailDisconnectResult,
+  GmailStatus,
+  GoogleProductDisconnect,
+  GphotosDisconnectResult,
+  GphotosSessionStart,
+  GphotosSessionView,
+  GphotosStatus,
   LearnerReset,
   LearnerState,
   LoopAction,
   MergeHistory,
+  MetAtList,
   NetworkGraph,
   NetworkQuery,
   NoteCreate,
@@ -39,6 +48,8 @@ import {
   Starters,
   SuggestionFeedback,
   SuggestionFeedbackResult,
+  TicketList,
+  TicketsQuery,
   TieStats,
   TodayResponse,
   TripsResponse,
@@ -459,6 +470,82 @@ describe('agent-loop DTO round-trips', () => {
       visitors: [{ person: chip(B, 'Blake Ruin'), startsOn: '2026-10-20', endsOn: null, factId: 'F2', suggestionId: null }],
       home: 'Shelbyville',
     });
+  });
+
+  it('tickets, met at, Gmail and Google Photos', () => {
+    const ticket = {
+      id: 'tk-1',
+      title: 'Neon Nights',
+      performers: ['DJ Sample', 'MC Example'],
+      category: 'club' as const,
+      genres: ['house'],
+      venue: 'The Hall',
+      city: 'Springfield',
+      startsAt: T,
+      endsAt: T + 6 * 3_600_000,
+      localDate: '2026-10-14',
+      status: 'holding' as const,
+      held: 2,
+      quantities: { bought: 4, received: 0, sent: 2, sold: 0, refunded: 0 },
+      vendors: ['dice'],
+      occasionId: C,
+      metHere: [chip(A, 'Avery Quill')],
+      metHereCount: 1,
+    };
+    roundTrip(TicketList, { items: [ticket, { ...ticket, id: 'tk-2', status: 'unconfirmed', held: null, occasionId: null, metHere: [], metHereCount: 0 }], nextCursor: `${T}:tk-2` });
+    expect(TicketsQuery.parse({})).toEqual({ when: 'upcoming', limit: 30 });
+    expect(TicketsQuery.parse({ when: 'past', limit: '5', cursor: `${T}:tk-1` })).toEqual({ when: 'past', limit: 5, cursor: `${T}:tk-1` });
+    expect(TicketsQuery.safeParse({ when: 'soon' }).success).toBe(false);
+    expect(TicketList.safeParse({ items: [{ ...ticket, status: 'lost' }], nextCursor: null }).success).toBe(false);
+
+    roundTrip(MetAtList, {
+      personId: A,
+      links: [
+        {
+          id: B,
+          target: { type: 'occasion', id: C },
+          title: 'Neon Nights',
+          startsAt: T,
+          venue: 'The Hall',
+          href: `/e/${C}`,
+          signal: 'contact_screenshot',
+          signalAt: T + 3_600_000,
+          confidence: 0.85,
+          screenshot: true,
+        },
+      ],
+    });
+
+    const health = { status: 'ok', lastOkAt: T, lastError: null, checkedAt: T };
+    roundTrip(GmailStatus, {
+      configured: true,
+      secretsAvailable: true,
+      connected: true,
+      connectedAt: T,
+      needsReconnect: false,
+      lastSyncAt: T,
+      health,
+      counts: { scanned: 40, ticketEmails: 12, parsed: 10, pending: 2, events: 6, upcoming: 2 },
+    });
+    roundTrip(GmailDisconnectResult, { connected: false, revoked: false, deleted: { messages: 40, tickets: 6, parties: 3 } });
+    roundTrip(GoogleProductDisconnect, { deleteData: true });
+    expect(GoogleProductDisconnect.safeParse({ deleteData: 'yes' }).success).toBe(false);
+    const session = { id: 'sess-1', status: 'done' as const, itemsTotal: 12, itemsNew: 9, processed: 9, linked: 6, createdAt: T, expiresAt: T + 3_600_000 };
+    roundTrip(GphotosSessionView, session);
+    roundTrip(GphotosSessionStart, { sessionId: 'sess-1', pickerUri: 'https://photos.google.com/picker/sess-1', expiresAt: null });
+    roundTrip(GphotosStatus, {
+      configured: true,
+      secretsAvailable: true,
+      connected: true,
+      connectedAt: T,
+      needsReconnect: false,
+      health: null,
+      lastPickAt: T,
+      counts: { screenshots: 9, linked: 6, pendingOcr: 0 },
+      session,
+    });
+    roundTrip(GphotosDisconnectResult, { connected: false, revoked: true, filesDeleted: 2, sessionsCancelled: 1, deleted: { screenshots: 9 } });
+    expect(GphotosDisconnectResult.safeParse({ connected: true, revoked: true, filesDeleted: 0, sessionsCancelled: 0 }).success).toBe(false);
   });
 
   it('settings PATCH is strict about keys', () => {

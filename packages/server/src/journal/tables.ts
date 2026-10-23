@@ -40,6 +40,8 @@ export const JOURNALED: Readonly<Record<string, JournaledTable>> = {
   notes: { key: ['id'], onUndoInsert: 'tombstone', tombstone: retracted },
   settings: { key: ['key'], onUndoInsert: 'delete' },
   event_attendees: { key: ['id'], onUndoInsert: 'tombstone', tombstone: () => ({ status: 'rejected' }) },
+  // 'rejected' is the sticky "Wrong": intel/metAt never re-creates that (person, event) link.
+  person_met_at: { key: ['id'], onUndoInsert: 'tombstone', tombstone: () => ({ status: 'rejected' }) },
   interactions: { key: ['id'], onUndoInsert: 'tombstone', tombstone: (now) => ({ retracted_at: now }) },
 };
 

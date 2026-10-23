@@ -11,6 +11,7 @@ import { EvalPage } from './pages/EvalPage';
 import { BriefPage } from './pages/events/BriefPage';
 import { EventPage } from './pages/events/EventPage';
 import { EventsPage } from './pages/events/EventsPage';
+import { TicketsPage } from './pages/events/TicketsPage';
 import { MorePage, NotFoundPage } from './pages/MorePages';
 import { NetworkPage } from './pages/NetworkPage';
 import { PairPage } from './pages/PairPage';
@@ -85,6 +86,7 @@ export function App() {
               <Route path="/e/:id" element={<EventPage />} />
               <Route path="/e/:id/brief" element={<BriefPage />} />
               <Route path="/trips" element={<TripsPage />} />
+              <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/sources" element={<SourcesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/digest" element={<DigestSettingsPage />} />

@@ -17,6 +17,8 @@
  *   GET    /api/v1/people/:id/collections                → PersonCollections
  *   POST   /api/v1/people/:id/collections                CollectionMembershipEdit → BatchRef
  *   GET    /api/v1/people/:a/with/:b                     → PairView   (web: /p/:a/with/:b)
+ *   GET    /api/v1/people/:id/met                        → MetAtList  (where the owner met them)
+ *   POST   /api/v1/people/:id/met/:linkId/wrong          {} → BatchRef  (sticky: that link is never re-created)
  */
 import { z } from 'zod';
 import { CollectionChip, CollectionType, EdgeTier, EvidenceRef, LocalDate, Ms, PersonChip, TieState } from './common';
@@ -274,3 +276,32 @@ export const PairView = z.object({
   batchIds: z.array(z.string()),
 });
 export type PairView = z.infer<typeof PairView>;
+
+// ------------------------------------------------------------------------------------------------ met at
+
+/** What placed the person at the event: an Instagram follow / first DM, a new contact card, a contact screenshot. */
+export const MetAtSignal = z.enum(['instagram_follow', 'instagram_dm', 'contact_added', 'contact_screenshot', 'user']);
+export type MetAtSignal = z.infer<typeof MetAtSignal>;
+
+/** One active person_met_at link (intel/metAt): the owner met this person at an event he attended. */
+export const MetAtLink = z.object({
+  id: z.string(),
+  /** The surviving get-together, or a Partiful event no get-together covers. */
+  target: z.object({ type: z.enum(['occasion', 'event']), id: z.string() }),
+  title: z.string().nullable(),
+  startsAt: Ms,
+  venue: z.string().nullable(),
+  /** Web link to the event (`/e/<id>`). */
+  href: z.string(),
+  signal: MetAtSignal,
+  /** When they connected (the signal's time). */
+  signalAt: Ms,
+  confidence: z.number(),
+  /** The owner took a screenshot of their contact info (such people come first for event invites). */
+  screenshot: z.boolean(),
+});
+export type MetAtLink = z.infer<typeof MetAtLink>;
+
+/** Earliest event first (at most one active link per person today). */
+export const MetAtList = z.object({ personId: z.string(), links: z.array(MetAtLink) });
+export type MetAtList = z.infer<typeof MetAtList>;

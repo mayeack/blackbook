@@ -178,6 +178,7 @@ function heldOutEvent(e: GradedEvent): CalEvent {
   const location = (e.location ?? '').trim();
   return {
     id: `eval:${e.id}`,
+    source: 'calendar',
     calendarId: 'eval',
     treatment: 'attending',
     title: e.title,
@@ -193,9 +194,12 @@ function heldOutEvent(e: GradedEvent): CalEvent {
     dates: null,
     partifulIds: [],
     reservation: false,
+    fromGmail: false,
     selfDeclined: false,
     attendees: [],
     social: true,
+    kind: 'social',
+    ticket: null,
     series: null,
   };
 }

@@ -3,11 +3,13 @@
  * can't ground). Per kind, a short action as the headline ("Check in with Sam R.") and one or two plain sentences
  * of context as the body ("It's been 6 weeks. You usually talk about once a week."), from the generator payload
  * plus a few local lookups (silence and usual gap, the occasion title and time, the circle name, the commitment's
- * due date). Names are first name + last initial (the full last name when that would be ambiguous: briefNames);
- * every dynamic fragment goes through safeFragment (no URLs, phones, emails, amounts, long digit runs).
+ * due date, the event an invite's people were met at: intel/eventInvites.ts). Names are first name + last initial
+ * (the full last name when that would be ambiguous: briefNames); every dynamic fragment goes through safeFragment
+ * (no URLs, phones, emails, amounts, long digit runs).
  */
 import type { DB } from '../db/connection';
 import { ownerNames } from '../identity/ownerNames';
+import { happeningOf, metRefOf } from '../intel/eventInvites';
 import { preferredPeople } from '../pipeline/circles/preferences';
 import type { SelectedItem } from './selection';
 import { briefNames, endSentence, firstNameOnly, humanDuration, humanEvery, peopleList, plural, safeFragment, shortDay, truncate, whenPhrase, type BriefNames } from './text';
@@ -193,6 +195,29 @@ export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy
         const why = !listed.length ? '' : !many ? " They're on your Party invites list." : listed.length === names.length ? ' All of them are on your Party invites list.' : ` ${peopleList(listed, 5)} ${listed.length > 1 ? 'are' : 'is'} on your Party invites list.`;
         body = `${hosting} ${peopleList(names, 5)} ${many ? "aren't" : "isn't"} on the guest list yet.${why}`;
       } else body = hosting;
+      break;
+    }
+    case 'event_invite': {
+      const occ = occasionOf(ctx.db, item);
+      const title = mid(occ?.sensitive ? null : safeFragment(occ?.title, 40));
+      const start = occ?.startsAt ?? num(p.startsAt);
+      const day = start ? shortDay(start, ctx.timeZone, ctx.now) : null;
+      const list = peopleList(names);
+      headline = names.length
+        ? title
+          ? `Invite ${list} to ${title}?`
+          : `Invite ${list} to your show${day ? ` on ${day}` : ''}?`
+        : title
+          ? `Who to bring to ${title}`
+          : `Who to bring${day ? ` on ${day}` : ''}`;
+      const tickets = `You have tickets to ${title ?? 'a show'}${day ? ` on ${day}` : ''}.`;
+      // Where they met: the first person's met-at event, named (never a sensitive one); "them" when all met there.
+      const metRefs = item.people.map((x) => metRefOf(ctx.db, x.id, p));
+      const where = metRefs[0] ? mid(safeFragment(happeningOf(ctx.db, metRefs[0])?.title, 40)) : null;
+      const f = item.people[0] ? firstNameOnly(item.people[0]) : null;
+      const firstRef = f && !named.ambiguousFirstNames.has(f) && item.people.filter((x) => firstNameOnly(x) === f).length === 1 ? f : who;
+      const allThere = names.length > 1 && metRefs.every((m) => m !== null && m === metRefs[0]);
+      body = names.length ? `${tickets} You met ${allThere ? 'them' : firstRef} at ${where ?? 'a similar event'}.` : tickets;
       break;
     }
     case 'fading': {
