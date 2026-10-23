@@ -23,6 +23,7 @@ import * as digestParts from './migrations/021_digest_parts';
 import * as askPeopleList from './migrations/022_ask_people_list';
 import * as partyInvite from './migrations/023_party_invite';
 import * as partifulGuestNames from './migrations/024_partiful_guest_names';
+import * as calls from './migrations/025_calls';
 
 export interface Migration {
   version: number;
@@ -77,6 +78,7 @@ export const MIGRATIONS: Migration[] = [
   slot(22, 'ask_people_list', askPeopleList),
   slot(23, 'party_invite', partyInvite),
   slot(24, 'partiful_guest_names', partifulGuestNames),
+  slot(25, 'calls', calls),
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

@@ -128,7 +128,20 @@ export interface InteractionItem {
   eventId?: string | null;
 }
 
-export type TimelineItem = SessionItem | InteractionItem;
+/** A call from the Mac's call log with one of the person's numbers or emails (answered or missed). */
+export interface CallItem {
+  type: 'call';
+  id: string;
+  channel: 'phone' | 'facetime';
+  service: 'phone' | 'facetime_audio' | 'facetime_video' | 'other';
+  startedAt: number;
+  /** null when the call log has no length (calls answered on the iPhone). */
+  endedAt: number | null;
+  outgoing: boolean;
+  answered: boolean;
+}
+
+export type TimelineItem = SessionItem | InteractionItem | CallItem;
 
 export interface TimelinePage {
   items: TimelineItem[];
@@ -172,6 +185,7 @@ export interface SourceCounts {
   calendarEvents?: number;
   occasions?: number;
   contactCards?: number;
+  calls?: number;
 }
 
 /** The server's fix kinds, plus 'google_secrets_missing', which the client derives from /google/status. */

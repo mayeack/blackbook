@@ -95,7 +95,7 @@ final class CollectorRuntime {
         let health = HealthReporter(reader: reader, whatsapp: whatsapp, probe: LiveSystemProbe(), startedAt: Date())
         let api = CollectorAPI(port: Self.port, dependencies: .init(
             token: { tokens.current() }, reader: reader, contacts: SystemContactsSource(),
-            whatsapp: whatsapp, send: send, attachments: attachments, health: health, now: Date.init))
+            whatsapp: whatsapp, calls: CallHistoryReader(), send: send, attachments: attachments, health: health, now: Date.init))
         let server = LoopbackHTTPServer(port: Self.port, handler: { api.handle($0) })
         server.onStateChange = { [weak self] state in
             guard let self else { return }

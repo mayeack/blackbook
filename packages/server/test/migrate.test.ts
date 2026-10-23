@@ -69,6 +69,26 @@ describe('migrations', () => {
     expect(db.prepare('SELECT source FROM pending_reactions').pluck().get()).toBe('imessage');
   });
 
+  it('025 keeps existing derived interactions unique and allows one derived call interaction per call', () => {
+    const db = openDatabase(':memory:');
+    migrate(db, 24);
+    db.prepare(`INSERT INTO people (id, display_name, origin, created_at, updated_at) VALUES ('p1', 'Pat', 'test', 1, 1)`).run();
+    db.prepare(
+      `INSERT INTO interactions (id, person_id, kind, event_id, started_at, origin, created_at, updated_at) VALUES ('i1', 'p1', 'event', 'e1', 1, 'derived', 1, 1)`,
+    ).run();
+    migrate(db);
+    const derived = db.prepare(
+      `INSERT INTO interactions (id, person_id, kind, event_id, call_id, started_at, origin, created_at, updated_at) VALUES (?, 'p1', ?, ?, ?, 1, 'derived', 1, 1)`,
+    );
+    expect(db.prepare(`SELECT dedupe_key FROM interactions WHERE id = 'i1'`).pluck().get()).toBe('p1|event||e1||');
+    expect(() => derived.run('i2', 'event', 'e1', null)).toThrow(/UNIQUE/);
+    for (const c of ['c1', 'c2'])
+      db.prepare(`INSERT INTO calls (id, source_uid, source_rowid, started_at, service, outgoing, answered, created_at, updated_at) VALUES (?, ?, 1, 1, 'phone', 0, 1, 1, 1)`).run(c, c);
+    derived.run('i3', 'call', null, 'c1');
+    derived.run('i4', 'call', null, 'c2');
+    expect(() => derived.run('i5', 'call', null, 'c1')).toThrow(/UNIQUE/);
+  });
+
   it('refuses a database from a newer build', () => {
     const db = memDb();
     db.pragma(`user_version = ${LATEST_VERSION + 1}`);

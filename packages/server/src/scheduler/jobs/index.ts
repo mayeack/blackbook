@@ -9,6 +9,7 @@ import { COLLECTOR_DEFAULT_URL } from '@yb/shared/collector/v1';
 import { addressbookJobs, type AddressbookJobDeps } from '../../adapters/addressbook/jobs';
 import { beeperJobs, type BeeperJobDeps } from '../../adapters/beeper/jobs';
 import { calendarJobs, type CalendarJobDeps } from '../../adapters/calendar/jobs';
+import { callsJobs, type CallsJobDeps } from '../../adapters/calls/jobs';
 import { imessageJobs, type ImessageJobDeps } from '../../adapters/imessage/jobs';
 import { instagramDyiJobs, type InstagramDyiJobDeps } from '../../adapters/instagram/jobs';
 import { partifulJobs, type PartifulJobDeps } from '../../adapters/partiful/jobs';
@@ -59,6 +60,7 @@ export interface SourceJobDeps {
   imessage: ImessageJobDeps | null;
   whatsapp: WhatsappJobDeps | null;
   addressbook: AddressbookJobDeps | null;
+  calls: CallsJobDeps | null;
   beeper: BeeperJobDeps | null;
   instagramDyi: InstagramDyiJobDeps | null;
   partiful: PartifulJobDeps | null;
@@ -110,6 +112,7 @@ export function sourceJobDeps(deps: JobDeps): SourceJobDeps {
     imessage: collector,
     whatsapp: collector,
     addressbook: collector,
+    calls: collector,
     // The token comes from the environment or the secrets table (which needs SECRETS_KEY).
     beeper: c.beeper && (c.beeper.token || secretsKey) ? { url: c.beeper.url, token: c.beeper.token, secretsKey } : null,
     instagramDyi: c.importsDir ? { importsDir: c.importsDir } : null,
@@ -143,6 +146,7 @@ export function buildJobs(deps: JobDeps): JobDef[] {
     // imessage-tail (10 s) + imessage-overlap (02:30)
     ...(s.imessage ? imessageJobs(s.imessage) : []),
     ...(s.addressbook ? addressbookJobs(s.addressbook) : []),
+    ...(s.calls ? callsJobs(s.calls) : []),
     ...(s.whatsapp ? whatsappJobs(s.whatsapp) : []),
     ...(s.beeper ? beeperJobs(s.beeper) : []),
     ...(s.instagramDyi ? instagramDyiJobs(s.instagramDyi) : []),
