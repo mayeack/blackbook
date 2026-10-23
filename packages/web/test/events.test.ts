@@ -11,6 +11,7 @@ import {
   normalizeOccasion,
   normalizeOccasionDetail,
   googleOutcome,
+  relativeToEvent,
   occasionTitle,
   safeHttpsUrl,
   sortOccasions,
@@ -85,6 +86,22 @@ describe('attendee tiers (≥0.75 counts, 0.5–0.75 possible, below never shown
       'Bea Brook',
       'Dee Dunn',
     ]);
+  });
+
+  it("the adjudicator's verdict is not counted as a clue", () => {
+    const row = { personId: 'p', displayName: 'Ana Arroyo', status: 'attended', source: 'llm', confidence: 0.9 };
+    const evidence = [
+      { type: 'llm', weight: 0.9, messageIds: [3], ref: null },
+      { type: 'after_dm', weight: 0.45, messageIds: [3], ref: null },
+    ];
+    expect(normalizeAttendee({ ...row, evidence })!.evidenceCount).toBe(1);
+  });
+
+  it('dates a clue against the event', () => {
+    expect(relativeToEvent(T - 2 * HOUR, T, T + 3 * HOUR)).toBe('2 h before it');
+    expect(relativeToEvent(T + HOUR, T, T + 3 * HOUR)).toBe('during it');
+    expect(relativeToEvent(T + 31 * HOUR, T, T + 3 * HOUR)).toBe('28 h after it ended');
+    expect(relativeToEvent(T - 5 * 24 * HOUR, T, null)).toBe('5 days before it');
   });
 
   it('trusts the server’s counted flag and counts evidence entries', () => {

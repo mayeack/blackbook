@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/http/app';
 import { runOccasions } from '../../src/pipeline/occasions/run';
-import { hiddenNameRedactor, type EventDetail, type EventsPage } from '../../src/routes/events';
+import { hiddenNameRedactor, type AttendeeClues, type EventDetail, type EventsPage } from '../../src/routes/events';
 import { normalizeOccasionDetail } from '../../../web/src/lib/events';
 import { buildWorld, CAL, calEvent, evening, NOW, occasionOf, TZ, updateCalEvent, type World } from '../pipeline/occasions/world';
 
@@ -180,5 +180,34 @@ describe('GET /api/v1/events/:id', () => {
     await get(`/api/v1/events/${occ('dentist')}`, 404);
     await get('/api/v1/events/01a00000-0000-7000-8000-000000000000', 404);
     await get('/api/v1/events/not-an-id', 400);
+  });
+});
+
+describe('GET /api/v1/events/:id/clues/:personId', () => {
+  it("one attendee's clues with the messages behind them, oldest first", async () => {
+    const c = await get<AttendeeClues>(`/api/v1/events/${occ('concert')}/clues/${w.romy.id}`);
+    expect(c).toMatchObject({ personId: w.romy.id, displayName: 'Romy Castell' });
+    const texts = c.clues.flatMap((x) => x.messages.map((m) => m.text));
+    expect(texts).toEqual(expect.arrayContaining(['are you going to fernhollow at copperline hall tmrw?', 'where are you? near the stage', 'fun night! the encore was wild']));
+    const mention = c.clues.find((x) => x.type === 'mention_dm')!;
+    expect(mention.messages[0]).toMatchObject({ fromMe: false, sender: 'Romy Castell', where: 'dm', chat: null, attachment: false });
+    // the detail itself still carries no text
+    expect(JSON.stringify(await get(`/api/v1/events/${occ('concert')}`))).not.toContain('encore');
+  });
+
+  it('a group clue names its chat; an excluded conversation never shows; the hidden person is never served', async () => {
+    const crew = await get<AttendeeClues>(`/api/v1/events/${occ('crewDinner')}/clues/${w.romy.id}`);
+    expect(crew.clues.find((x) => x.type === 'group_nickname')).toMatchObject({ refTitle: 'Climbing Crew 🧗', messages: [] });
+    w.db.prepare('UPDATE conversations SET agent_excluded = 1 WHERE id = ?').run(w.romy.dm.id);
+    try {
+      const c = await get<AttendeeClues>(`/api/v1/events/${occ('concert')}/clues/${w.romy.id}`);
+      expect(c.clues.length).toBeGreaterThan(0);
+      expect(c.clues.flatMap((x) => x.messages)).toEqual([]);
+    } finally {
+      w.db.prepare('UPDATE conversations SET agent_excluded = 0 WHERE id = ?').run(w.romy.dm.id);
+    }
+    await get(`/api/v1/events/${occ('lunchHidden')}/clues/${w.hallie.id}`, 404);
+    await get(`/api/v1/events/${occ('concert')}/clues/${w.quillB.id}`, 404);
+    await get(`/api/v1/events/${occ('concert')}/clues/not-an-id`, 400);
   });
 });

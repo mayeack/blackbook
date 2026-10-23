@@ -6,7 +6,9 @@
  * ≥ 0.05). Decisions the agent must not redo:
  *   - 'rejected' rows (an undone insert, or the user's "wasn't there") block that person on the occasion and on
  *     every occasion merged into it;
- *   - rows from the user, the LLM adjudicator or legacy data are never touched;
+ *   - rows from the user or legacy data are never touched, and the LLM adjudicator's only when nothing supports
+ *     them any more (the person is no longer a candidate at all, e.g. a clue now belongs to another plan): then
+ *     they are withdrawn like the agent's own;
  *   - a row whose last change was an undo stays as the undo left it.
  * Agent rows that lose their support are retracted with status 'withdrawn' (journaled), never deleted.
  */
@@ -95,14 +97,16 @@ export function lastChangeWasUndo(db: DB, rowId: string): boolean {
 
 /**
  * Brings the occasion's attendee rows in line with `candidates` (pass [] to withdraw everything the agent
- * inferred, e.g. when the occasion stops being social, is cancelled or was merged away).
+ * inferred, e.g. when the occasion stops being social, is cancelled or was merged away). `support`: everyone the
+ * pass still holds as a candidate (persons kept for the adjudicator, names' and groups' people); the adjudicator's
+ * rows for anyone else are withdrawn. Without it they are left alone.
  */
 export function applyAttendees(
   db: DB,
   people: PeopleIndex,
   occ: OccasionRef,
   candidates: readonly PersonCandidate[],
-  o: { runId: () => string; now: number },
+  o: { runId: () => string; now: number; support?: ReadonlySet<string> },
 ): ApplyStats {
   const stats: ApplyStats = { inserted: 0, updated: 0, withdrawn: 0, blocked: 0 };
   const rows = db
@@ -112,11 +116,14 @@ export function applyAttendees(
   const foreign = new Set<string>();
   const mine = new Map<string, AttendeeRow>();
   const stale: AttendeeRow[] = [];
+  const unsupported: AttendeeRow[] = [];
   for (const r of rows) {
     const c = people.canonicalOf(r.person_id);
     if (r.status === 'rejected') blocked.add(c);
-    else if (!AGENT_SOURCES.has(r.source)) foreign.add(c);
-    else if (r.occasion_id === occ.id && !mine.has(c)) mine.set(c, r);
+    else if (!AGENT_SOURCES.has(r.source)) {
+      foreign.add(c);
+      if (o.support && r.source === 'llm' && r.occasion_id === occ.id && r.status !== 'withdrawn' && !o.support.has(c)) unsupported.push(r);
+    } else if (r.occasion_id === occ.id && !mine.has(c)) mine.set(c, r);
     else stale.push(r);
   }
 
@@ -146,7 +153,7 @@ export function applyAttendees(
     if (targeted.has(pid) || row.status === 'withdrawn' || lastChangeWasUndo(db, row.id)) continue;
     ops.push({ kind: 'withdraw', row, personId: pid, patch: { status: 'withdrawn' } });
   }
-  for (const row of stale) {
+  for (const row of [...stale, ...unsupported]) {
     if (row.status === 'withdrawn' || lastChangeWasUndo(db, row.id)) continue;
     ops.push({ kind: 'withdraw', row, personId: people.canonicalOf(row.person_id), patch: { status: 'withdrawn' } });
   }

@@ -62,6 +62,20 @@ interface CalendarStats {
 
 const PLAIN_ADDRESS = /^[^@\s#]+@(?!(?:group|import|group\.v)\.calendar\.google\.com$)[^@\s]+\.[a-z]{2,}$/i;
 
+/**
+ * The owner's own calendar(s): Google's primary (the calendar adapter's flag), else any calendar whose id is a plain
+ * address. Recurring events elsewhere (an owned "Recurring Events" calendar of weekly happenings) are listings of
+ * things he could go to, not plans (see `isStanding` in plans.ts).
+ */
+export function primaryCalendars(db: DB): Set<string> {
+  const ids = db.prepare('SELECT DISTINCT calendar_id FROM calendar_events').pluck().all() as string[];
+  if (hasRelation(db, 'gcal_calendars')) {
+    const flagged = db.prepare('SELECT calendar_id FROM gcal_calendars WHERE is_primary = 1').pluck().all() as string[];
+    if (flagged.length) return new Set(flagged);
+  }
+  return new Set(ids.filter((id) => PLAIN_ADDRESS.test(id) || id === 'primary'));
+}
+
 /** Treatment of every calendar that has events in calendar_events. */
 export function calendarTreatments(db: DB, known: Set<string> = ownerEmails(db)): Map<string, CalendarTreatment> {
   const set = adapterTreatments(db);

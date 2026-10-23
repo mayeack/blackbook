@@ -99,6 +99,18 @@ describe('yb eval', () => {
     expect((await run(['shadow-report', '--json'])).out).toMatch(/"promptVersion"/);
   });
 
+  it('attendance: read-only, counts and rates only (text and JSON)', async () => {
+    const { run } = await setup();
+    let r = await run(['attendance']);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^attendance eval \(\d{4}-\d{2}-\d{2}\): \d+ past Partiful events you went to, guest lists held out/);
+    expect(r.out).toMatch(/possible ≥ 0\.5 +precision/);
+    noPii(r.out);
+    r = await run(['attendance', '--json', '--without-plans']);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out)).toMatchObject({ events: expect.any(Number), deduction: { possible: { n: expect.any(Number) } } });
+  });
+
   it('reset needs one set and --yes; bad input exits 2', async () => {
     const { run } = await setup();
     await run(['sample', '--set', 'ask']);
