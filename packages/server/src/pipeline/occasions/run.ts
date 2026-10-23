@@ -2,10 +2,11 @@
  * One occasions pass (job 'occasions', nightly after Partiful and Google Calendar, and on demand):
  *   1. calendar treatments → calendar events in [now − 400 d, now + 90 d] → clusters, then the ticket events the
  *      owner holds in the same window attach to them or stand alone (tickets.ts) → occasions (build.ts)
- *   2. per occasion: rule classification; for social ones the attendee candidates and scores (infer.ts),
+ *   2. per occasion: rule classification; for social ones the attendee candidates and scores (infer.ts), each
+ *      message clue weighed against the owner's other plans (plans.ts, built once from this pass's occasions),
  *      corroboration of shared-calendar events, occasion_candidates (the LLM packet) and the journaled attendee
- *      rows (attendees.ts); non-social, cancelled, excluded, uncorroborated and merged-away occasions get their
- *      agent rows withdrawn
+ *      rows (attendees.ts; the adjudicator's rows for people no longer among the candidates are withdrawn too);
+ *      non-social, cancelled, excluded, uncorroborated and merged-away occasions get their agent rows withdrawn
  *   3. interactions + co_attend edges from the counted attendees (effects.ts)
  * Idempotent: a second pass over unchanged data writes nothing and opens no run.
  * The pass is a generator of small steps (one occasion each, its writes in one transaction): runOccasionsAsync, what
@@ -23,6 +24,7 @@ import { deriveOccasionEffects, type EffectStats } from './effects';
 import { inferAttendees, type Candidate } from './infer';
 import { MessageScanner } from './messages';
 import { PeopleIndex } from './people';
+import { OccasionPlans } from './plans';
 import { attachTickets, loadTicketEvents } from './tickets';
 
 const DAY = 86_400_000;
@@ -72,7 +74,7 @@ export interface OccasionRunStats extends EffectStats {
 }
 
 /** Minimum person score kept in occasion_candidates (lower ones are noise for the adjudicator too). */
-const KEEP_CANDIDATE = 0.25;
+export const KEEP_CANDIDATE = 0.25;
 const AGENT_SOURCES = `('inferred','calendar_explicit','calendar_text','partiful','calendar','inference')`;
 
 function settingTimeZone(db: DB): string | undefined {
@@ -98,6 +100,18 @@ interface CandidateRowOut {
   score: number;
   signals: string;
   alternatives: string;
+}
+
+/** Everyone the candidate rows still hold: kept persons, the people a name could be, a group's members. */
+function supportOf(cands: readonly Candidate[]): Set<string> {
+  const out = new Set<string>();
+  for (const c of cands) {
+    if (c.kind === 'person') {
+      if (c.score >= KEEP_CANDIDATE) out.add(c.personId);
+    } else if (c.kind === 'name') for (const id of c.alternatives) out.add(id);
+    else for (const id of c.members) out.add(id);
+  }
+  return out;
 }
 
 function candidateRows(cands: readonly Candidate[]): CandidateRowOut[] {
@@ -206,6 +220,12 @@ export function* occasionPass(db: DB, o: OccasionRunOptions): Generator<void, Oc
 
   const people = new PeopleIndex(db);
   const scanner = new MessageScanner(db, people, timeZone);
+  const plans = OccasionPlans.build(
+    db,
+    people,
+    synced.occasions.map((s) => ({ draft: s.draft, kind: s.kind, sensitive: s.sensitive })),
+    { timeZone },
+  );
   const run = sourceRun(db, 'occasions', { now, jobRunId: o.jobRunId ?? null, kind: 'nightly', actor: 'agent' });
   const runId = () => run.ctx.runId();
   const getOcc = db.prepare('SELECT * FROM occasions WHERE id = ?');
@@ -228,7 +248,7 @@ export function* occasionPass(db: DB, o: OccasionRunOptions): Generator<void, Oc
       const social = occ.isSocial && !occ.sensitive;
       const days = occasionDays(d.startsAt, d.endsAt, d.allDay, timeZone, d.primary.dates);
       const notGoing = d.selfDeclined || d.ticketReleased;
-      const inference = social && !notGoing ? inferAttendees({ db, people, scanner, days }, d) : null;
+      const inference = social && !notGoing ? inferAttendees({ db, people, scanner, days, plans }, d) : null;
       stats.messagesScanned += inference?.scanned ?? 0;
       tx(db, () => {
         const row = getOcc.get(occ.id) as OccasionRow;
@@ -249,7 +269,7 @@ export function* occasionPass(db: DB, o: OccasionRunOptions): Generator<void, Oc
             people,
             { id: occ.id, chain, endsAt: d.endsAt, localDate: [...days][0] ?? localDate(d.startsAt, timeZone) },
             counting ? inference.people : [],
-            { runId, now },
+            { runId, now, ...(counting ? { support: supportOf(inference.candidates) } : {}) },
           ),
         );
         for (const id of chain) handled.add(id);

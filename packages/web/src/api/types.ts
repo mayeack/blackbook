@@ -128,7 +128,20 @@ export interface InteractionItem {
   eventId?: string | null;
 }
 
-export type TimelineItem = SessionItem | InteractionItem;
+/** A call from the Mac's call log with one of the person's numbers or emails (answered or missed). */
+export interface CallItem {
+  type: 'call';
+  id: string;
+  channel: 'phone' | 'facetime';
+  service: 'phone' | 'facetime_audio' | 'facetime_video' | 'other';
+  startedAt: number;
+  /** null when the call log has no length (calls answered on the iPhone). */
+  endedAt: number | null;
+  outgoing: boolean;
+  answered: boolean;
+}
+
+export type TimelineItem = SessionItem | InteractionItem | CallItem;
 
 export interface TimelinePage {
   items: TimelineItem[];
@@ -177,6 +190,7 @@ export interface SourceCounts {
   tickets?: number;
   screenshots?: number;
   screenshotsLinked?: number;
+  calls?: number;
 }
 
 /** The server's fix kinds, plus 'google_secrets_missing', which the client derives from the Google status routes. */
@@ -241,6 +255,37 @@ export interface AttendeeView {
   confidence: number;
   evidenceCount: number;
   tier: AttendeeTier;
+}
+
+/** GET /events/:id/clues/:personId — why yeackbot put someone at an event (routes/events.ts AttendeeClues). */
+export interface ClueMessage {
+  id: number;
+  sentAt: number;
+  fromMe: boolean;
+  sender: string | null;
+  where: 'dm' | 'group';
+  chat: string | null;
+  text: string | null;
+  attachment: boolean;
+}
+
+export interface Clue {
+  /** Signal type (signals.ts), or 'llm' for the adjudicator's verdict. */
+  type: string;
+  weight: number;
+  messages: ClueMessage[];
+  refTitle: string | null;
+}
+
+export interface AttendeeClues {
+  personId: string;
+  displayName: string;
+  status: string;
+  source: string;
+  confidence: number;
+  startsAt: number;
+  endsAt: number | null;
+  clues: Clue[];
 }
 
 export interface OccasionSummary {

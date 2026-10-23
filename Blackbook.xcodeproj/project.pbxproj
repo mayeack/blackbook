@@ -37,6 +37,7 @@
 		25A80D3929B5841C1D224E29 /* TagModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12AE2904F18728288E8C2218 /* TagModelTests.swift */; };
 		25F4C43A32CF59B6B592D404 /* DateHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815CE74C56D359F1D0990254 /* DateHelpers.swift */; };
 		264F82AF586E5CA45E98051A /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA16574DE27E1A8A48DC9564 /* NetworkGraphView.swift */; };
+		269231F932AFF12DD248421C /* CallHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D8ED2C7A067EFC65DAFD6D1 /* CallHistoryTests.swift */; };
 		27956EEE4BB572147FBD8494 /* Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A2B2419CA33490186B4DAB4 /* Location.swift */; };
 		28092BCCCBD27C677F28E65F /* ContactMergeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA40028F884B4B1161FA87B0 /* ContactMergeServiceTests.swift */; };
 		28D30061B05714E65E0FAA2C /* ForgotPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23843A28716C56CF55E7614C /* ForgotPasswordView.swift */; };
@@ -84,6 +85,7 @@
 		5D39F9346797E02A57734291 /* RecipientAllowlist.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07AE2DB55EB7908B9276DCF /* RecipientAllowlist.swift */; };
 		5D65835C77649F257190DEB3 /* SyncTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F49D100318268DC2B37475CA /* SyncTypes.swift */; };
 		602660ACAADE6BA2A9A82676 /* WhatsAppSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DC334909A1D9C81ED9B3FE /* WhatsAppSnapshotTests.swift */; };
+		61659F301321E9E2EB0B1B0D /* CallHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 170CED383B6A97F710FA2FCB /* CallHistory.swift */; };
 		621D41D8C9FA0212D6730A6E /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73CB8F7063A295D786A0459 /* NotificationService.swift */; };
 		62218CD59C45E6A0B43B84AA /* RejectedCalendarEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88153A388C33AA1F9FCA3424 /* RejectedCalendarEvent.swift */; };
 		627F00BB1C55B4CD93AD362C /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B68EA01CC90E403184F8383 /* DashboardView.swift */; };
@@ -217,6 +219,7 @@
 		F9C8E6C6BBBDE1468720591E /* ContactListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBCBC491C2BFAA0AABA68B3 /* ContactListViewModelTests.swift */; };
 		FA0527F27C39C281C7287EBE /* IMessageSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530F5990544546A519FE2390 /* IMessageSyncService.swift */; };
 		FA992EA56F0A795E5F1E088F /* NotificationsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0940DAFA5EFF5AEB3F54BE9 /* NotificationsTests.swift */; };
+		FC408007B02CA545C58FAE7D /* CallHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 170CED383B6A97F710FA2FCB /* CallHistory.swift */; };
 		FC428EE351F1C7F125A3E819 /* AIInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C58C1200FB5DE674799040E /* AIInsightsView.swift */; };
 		FC4D35EB1F0F93963E0499E2 /* DateHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B242CFE0D00227BB630A5801 /* DateHelpersTests.swift */; };
 		FD356F0646511FD58F59CCEF /* RelationshipScoreEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7B07D8F95B7197892AB8D6 /* RelationshipScoreEngineTests.swift */; };
@@ -247,6 +250,7 @@
 		107F0516F43606F715A04CAC /* ServerMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerMenuView.swift; sourceTree = "<group>"; };
 		12AE2904F18728288E8C2218 /* TagModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagModelTests.swift; sourceTree = "<group>"; };
 		133AA71B29FFC455C0911878 /* ContactsExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsExporter.swift; sourceTree = "<group>"; };
+		170CED383B6A97F710FA2FCB /* CallHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallHistory.swift; sourceTree = "<group>"; };
 		17EC8523C36F3E4A2948A392 /* ContactTagPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactTagPickerView.swift; sourceTree = "<group>"; };
 		1837970957580D296D714FDF /* LocationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationListView.swift; sourceTree = "<group>"; };
 		1D046FD999BC660D58C26E32 /* PhotoStorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoStorageService.swift; sourceTree = "<group>"; };
@@ -321,6 +325,7 @@
 		7503F22C84791441C01DEC94 /* Blackbook.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Blackbook.entitlements; sourceTree = "<group>"; };
 		75F47D5E806EFA1DA2D5935A /* ContactDetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDetailViewModelTests.swift; sourceTree = "<group>"; };
 		7A2B2419CA33490186B4DAB4 /* Location.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Location.swift; sourceTree = "<group>"; };
+		7D8ED2C7A067EFC65DAFD6D1 /* CallHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallHistoryTests.swift; sourceTree = "<group>"; };
 		7DB7F634E85EAB2589E6F041 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		8063928B446FF6A8971BAF17 /* AttachmentImages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentImages.swift; sourceTree = "<group>"; };
 		815CE74C56D359F1D0990254 /* DateHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateHelpers.swift; sourceTree = "<group>"; };
@@ -458,6 +463,7 @@
 			isa = PBXGroup;
 			children = (
 				CB72773FE5A1D95AE7E5E7FF /* AttachmentTests.swift */,
+				7D8ED2C7A067EFC65DAFD6D1 /* CallHistoryTests.swift */,
 				0D1856C2405660C28F505DF4 /* ContactCreationDatesTests.swift */,
 				DC555780C1246D69358D6177 /* ContactsAndGoldenTests.swift */,
 				D013C140BD61E02DB3CEF4C0 /* HTTPAPITests.swift */,
@@ -568,6 +574,14 @@
 			path = Locations;
 			sourceTree = "<group>";
 		};
+		77C733A800BC32FC9B7D643D /* Calls */ = {
+			isa = PBXGroup;
+			children = (
+				170CED383B6A97F710FA2FCB /* CallHistory.swift */,
+			);
+			path = Calls;
+			sourceTree = "<group>";
+		};
 		7C890F9A1125911CCFF8F2DF /* HTTP */ = {
 			isa = PBXGroup;
 			children = (
@@ -640,6 +654,7 @@
 			children = (
 				A70E12E7808055F990F43320 /* API */,
 				64BCC415B4B1BB593B61C008 /* App */,
+				77C733A800BC32FC9B7D643D /* Calls */,
 				5600889DB8D897C017490D0C /* Contacts */,
 				5B2770FB8404B179DD8A8422 /* Core */,
 				967C9D23AB5F062B780B0A49 /* Generated */,
@@ -1199,6 +1214,8 @@
 				F1AEE8275FE88D52F36CE525 /* APIError.swift in Sources */,
 				6F36CF24BD62C8D765F7F749 /* AttachmentImages.swift in Sources */,
 				AB6AA160C7C760232EBD1386 /* AttachmentTests.swift in Sources */,
+				FC408007B02CA545C58FAE7D /* CallHistory.swift in Sources */,
+				269231F932AFF12DD248421C /* CallHistoryTests.swift in Sources */,
 				7341E282FE7C684A316788E4 /* ChatDB.swift in Sources */,
 				C53BCDE22565D22701723C59 /* CollectorAPI.swift in Sources */,
 				AED03FF411FC27D9BE402ED3 /* CollectorRuntime.swift in Sources */,
@@ -1286,6 +1303,7 @@
 				E9C12D0FA76386A83E75A5A7 /* BackupMetadata.swift in Sources */,
 				9CFACF1D237FBFDB8BE35DA2 /* BackupServer.swift in Sources */,
 				3D6714171EE7057CBE848A07 /* BlackbookServerApp.swift in Sources */,
+				61659F301321E9E2EB0B1B0D /* CallHistory.swift in Sources */,
 				D8F872FEEF43489625EBF0F4 /* ChatDB.swift in Sources */,
 				D7B1E9445A14E11671F695E4 /* CollectorAPI.swift in Sources */,
 				F6B64AB63BFDA8158B904EE2 /* CollectorRuntime.swift in Sources */,

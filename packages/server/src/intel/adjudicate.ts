@@ -5,7 +5,8 @@
  *   - queue: live social occasions with candidates that the adjudicator hasn't seen since their last inference
  *     (pipeline/occasions/packet.ts occasionsAwaitingAdjudication), plus the DAY-AFTER re-run: occasions that ended
  *     20–72 h ago and were last adjudicated before their next-day messages ("great seeing you") could exist;
- *   - each occasion's packet (packet.ts buildAdjudicationPacket) is rendered with the cited messages and goes through
+ *   - each occasion's packet (packet.ts buildAdjudicationPacket) is rendered with the cited messages, the owner's
+ *     other plans around it and whether it is one week of a recurring listing (pipeline/occasions/plans.ts), and goes through
  *     the egress choke point: people become P… tokens, phones / emails / handles / street addresses are scrubbed,
  *     hidden people's names are blanked, excluded people and conversations never appear (an occasion that would
  *     need them is skipped). A raw identifier left anywhere skips that occasion (fail closed);
@@ -16,7 +17,10 @@
  * llm/batches.ts calls fail('refused') — and the deterministic attendees stand):
  *   - confidence ≥ 0.75 → counted ('attended' past / 'going' upcoming); 0.5–0.75 → 'possible'; lower, omitted or
  *     mentioned_only → the agent's own row is withdrawn — all as source 'llm' rows through the journal (one undoable
- *     'attendee' batch per occasion), which the deterministic step then never touches;
+ *     'attendee' batch per occasion), which the deterministic step then leaves alone while the person is still a
+ *     candidate there;
+ *   - the verdict moves a message-only candidate up one tier at most: one the deterministic score kept below
+ *     "possible" (nothing names them, not a name's or a group's person) can become possible, never counted;
  *   - never overwritten: the user's rows, legacy rows, 'rejected' rows (a sticky "wasn't there"), rows whose last
  *     change was an undo; explicit invites and Partiful guest-list rows are only ever upgraded (status and
  *     confidence; their source, role and the rest stay, so the deterministic pass keeps owning them), never
@@ -49,7 +53,8 @@ import { nullLogger, type Logger } from '../ops/logger';
 import { lastChangeWasUndo } from '../pipeline/occasions/attendees';
 import { occasionChain, survivingOccasion } from '../pipeline/occasions/build';
 import { AdjudicationResult, buildAdjudicationPacket, occasionsAwaitingAdjudication } from '../pipeline/occasions/packet';
-import { COUNTED, POSSIBLE } from '../pipeline/occasions/signals';
+import { isStandingOccasion, plansNear } from '../pipeline/occasions/plans';
+import { CAPPED, COUNTED, NAMED, POSSIBLE, type SignalType } from '../pipeline/occasions/signals';
 import { hasLiveTicket } from '../pipeline/occasions/tickets';
 import { hiddenNameRedactor } from '../routes/people';
 import { settingTimeZone } from '../settings/registry';
@@ -247,16 +252,24 @@ export function renderPacket(
 
   const occ = packet.occasion;
   const endsAt = occ.ends_at ?? occ.starts_at;
+  const occasionId0 = occ.ref.replace(/^o:/, '');
+  const standing = isStandingOccasion(db, occasionId0);
+  const plans = plansNear(db, occasionId0).map(
+    (p) =>
+      `- ${redact(clip(p.title ?? '(untitled)', 80)) ?? '(untitled)'} · ${localStamp(p.startsAt, o.timeZone)} → ${localStamp(p.endsAt, o.timeZone)}${p.standing ? ' · recurring listing' : ''}`,
+  );
   const occLines = [
     `title: ${redact(clip(occ.title ?? '(untitled)', 200)) ?? '(untitled)'}`,
     `venue: ${occ.venue ? clip(occ.venue, 200) : 'none'}`,
     `when: ${localStamp(occ.starts_at, o.timeZone)}${occ.ends_at ? ` → ${localStamp(occ.ends_at, o.timeZone)}` : ''}${occ.all_day ? ' (all day)' : ''} · ${endsAt <= o.now ? 'past' : 'upcoming'}`,
     `rules kind: ${occ.kind}`,
     `tickets: ${occ.ticket_count ?? 'none'}`,
+    `listing: ${standing ? 'yes, one week of a recurring listing on a calendar of things to do' : 'no'}`,
     `notes: ${occ.notes.length ? redact(clip(occ.notes.join(' / '), ADJUDICATION.maxNoteChars)) : 'none'}`,
   ];
   const sections = [
     { name: 'occasion', text: occLines.join('\n') },
+    { name: 'other plans', text: plans.length ? plans.join('\n') : 'none' },
     { name: 'candidates', text: lines.join('\n') },
     { name: 'messages', text: msgLines.length ? msgLines.join('\n') : 'none' },
   ];
@@ -449,6 +462,31 @@ function ensureRun(db: DB, runId: string | null, now: number): string {
   return id;
 }
 
+/**
+ * The highest confidence a verdict may give each person on an occasion: anyone named (title, notes, invite,
+ * Partiful), a name's or a group's possible people, or already "possible" on messages alone can be raised to any
+ * level; a message-only candidate below "possible" (or no longer a candidate) at most to possible (CAPPED).
+ */
+function verdictCeiling(db: DB, occasionId: string): (personId: string) => number {
+  const rows = db.prepare('SELECT kind, person_id, score, signals, alternatives FROM occasion_candidates WHERE occasion_id = ?').all(occasionId) as {
+    kind: string;
+    person_id: string | null;
+    score: number;
+    signals: string;
+    alternatives: string;
+  }[];
+  const open = new Set<string>();
+  for (const r of rows) {
+    if (r.kind !== 'person') {
+      for (const id of JSON.parse(r.alternatives) as string[]) open.add(visibleCanonical(db, id) ?? id);
+      continue;
+    }
+    const types = (JSON.parse(r.signals) as { t: string }[]).map((x) => x.t as SignalType);
+    if (r.person_id && (r.score >= POSSIBLE || types.some((t) => NAMED.has(t)))) open.add(visibleCanonical(db, r.person_id) ?? r.person_id);
+  }
+  return (personId) => (open.has(personId) ? 1 : CAPPED);
+}
+
 /** Applies one adjudication answer (see the module header). 'rejected' when it no longer applies. */
 export function applyAdjudication(db: DB, subjectRef: string, value: AdjudicationResult, o: { now: number; runId: string | null }): 'applied' | 'rejected' {
   const ref = parseSubjectRef(subjectRef);
@@ -526,6 +564,7 @@ export function applyAdjudication(db: DB, subjectRef: string, value: Adjudicatio
   for (const r of rows) if (r.occasion_id === occ.id && r.status !== 'rejected' && !mine.has(canon(r.person_id))) mine.set(canon(r.person_id), r);
   const candidateIds = new Set(refs.candidates.map((id) => visibleCanonical(db, id)).filter((x): x is string => !!x));
   const signalsOf = db.prepare('SELECT signals FROM occasion_candidates WHERE occasion_id = ? AND cand_key = ?').pluck();
+  const ceiling = verdictCeiling(db, occ.id);
   const ended = (occ.ends_at ?? occ.starts_at) <= o.now;
 
   type Op = { kind: 'insert'; personId: string; patch: Record<string, unknown> } | { kind: 'update'; row: AttRow; personId: string; patch: Record<string, unknown> };
@@ -535,7 +574,8 @@ export function applyAdjudication(db: DB, subjectRef: string, value: Adjudicatio
       counts.blocked++;
       continue;
     }
-    const v = verdicts.get(pid) ?? null;
+    const said = verdicts.get(pid) ?? null;
+    const v = said && { ...said, conf: Math.min(said.conf, ceiling(pid)) };
     const target = v && v.role !== 'mentioned_only' ? (v.conf >= COUNTED ? 2 : v.conf >= POSSIBLE ? 1 : 0) : 0;
     const row = mine.get(pid);
     const status = target === 2 ? (ended ? 'attended' : 'going') : 'possible';

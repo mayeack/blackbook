@@ -10,8 +10,10 @@ import {
   plainText,
   reservationVenue,
   ticketCount,
+  titleNameWords,
   venueFromTitle,
   venueKey,
+  venueName,
 } from '../../../src/pipeline/occasions/text';
 import { partifulUid } from './world';
 
@@ -143,5 +145,24 @@ describe('scoring', () => {
     expect(combine([{ type: 'logistics_dm', weight: 0.5 }])).toBe(0.5);
     expect(combine([{ type: 'logistics_dm', weight: 0.5 }, { type: 'logistics_dm', weight: 0.3 }, { type: 'mention_dm', weight: 0.45 }])).toBe(0.73);
     expect(mergeSignals([{ type: 'mention_dm', weight: 0.45, m: [3] }, { type: 'mention_dm', weight: 0.45, m: [1, 3] }])).toEqual([{ type: 'mention_dm', weight: 0.45, m: [1, 3] }]);
+  });
+});
+
+describe('clue tokens', () => {
+  it('days, months, chat words and address parts never make a mention', () => {
+    expect(distinctiveTokens(['Taco Tuesday', 'Sounds at the Orchard'])).toEqual(['orchard', 'taco']);
+    expect(distinctiveTokens(['Rooftop party', venueName('100 Example St, Springfield')])).toEqual(['rooftop']);
+  });
+
+  it("a venue's own name, never its street address", () => {
+    expect(venueName('The Birch Loft, 1 Example Ave, Springfield')).toBe('The Birch Loft');
+    expect(venueName('100 Example St, Springfield')).toBe('');
+    expect(venueName(null)).toBe('');
+  });
+
+  it('title words that could be a name: capitalized, not an event, venue or filler word', () => {
+    expect(titleNameWords('Spotlight for Nico')).toEqual(['spotlight', 'nico']);
+    expect(titleNameWords("Ari's Lakeside Birthday")).toEqual(['ari', 'lakeside']);
+    expect(titleNameWords('dinner w/ sam at the Bar')).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ import { SourceWordBadges } from '../../components/SourceBadge';
 import { attendeeLine, occasionTitle, whenLine } from '../../lib/events';
 import { plural } from '../../lib/format';
 import { attendeeSourceLabel, attendeeStatusLabel, channelOf, occasionKindLabel } from '../../lib/labels';
+import { WithClues } from './AttendeeClues';
 import { DateTile } from './eventFormat';
 
 const SECTIONS: { tier: AttendeeTier; title: string; note?: string }[] = [
@@ -29,27 +30,29 @@ function SourcePill({ source }: { source: string }) {
   return <span className={`badge src-${label === 'Inferred' ? 'inference' : channelOf(source)}`}>{label}</span>;
 }
 
-function AttendeeRow({ a }: { a: AttendeeView }) {
+function AttendeeRow({ a, eventId }: { a: AttendeeView; eventId: string }) {
   const possible = a.tier === 'possible';
   return (
-    <EntityRow
-      personId={a.personId ?? undefined}
-      className={possible ? 'possible' : undefined}
-      icon={a.personId ? <Avatar id={a.personId} name={a.name} /> : <IconTile>{Icons.people}</IconTile>}
-      title={
-        <>
-          {a.name}
-          {possible && (
-            <span className="tier-mark" aria-label="possibly">
-              {' '}
-              ?
-            </span>
-          )}
-        </>
-      }
-      subtitle={attendeeLine(a, { withSource: false }) + (a.personId ? '' : ' · not in your people yet')}
-      trailing={<SourcePill source={a.source} />}
-    />
+    <WithClues eventId={eventId} personId={a.personId} enabled={a.evidenceCount > 0}>
+      <EntityRow
+        personId={a.personId ?? undefined}
+        className={possible ? 'possible' : undefined}
+        icon={a.personId ? <Avatar id={a.personId} name={a.name} /> : <IconTile>{Icons.people}</IconTile>}
+        title={
+          <>
+            {a.name}
+            {possible && (
+              <span className="tier-mark" aria-label="possibly">
+                {' '}
+                ?
+              </span>
+            )}
+          </>
+        }
+        subtitle={attendeeLine(a, { withSource: false }) + (a.personId ? '' : ' · not in your people yet')}
+        trailing={<SourcePill source={a.source} />}
+      />
+    </WithClues>
   );
 }
 
@@ -162,7 +165,7 @@ export function EventPage() {
               {sec.note && <p className="caption" style={{ margin: '0 0 6px' }}>{sec.note}</p>}
               <div className={sec.tier === 'possible' ? 'card-list possible-list' : 'card-list'}>
                 {rows.map((a, i) => (
-                  <AttendeeRow key={a.personId ?? `g${i}`} a={a} />
+                  <AttendeeRow key={a.personId ?? `g${i}`} a={a} eventId={o.id} />
                 ))}
               </div>
             </section>

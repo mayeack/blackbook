@@ -1,5 +1,5 @@
 /**
- * 025 tickets, "met at" and contact screenshots (owner request 2026-10-21; design docs/design/tickets-met-at.md).
+ * 026 tickets, "met at" and contact screenshots (owner request 2026-10-21; design docs/design/tickets-met-at.md).
  *
  *   ticket_events (D)         one real-world event the owner holds (or held) tickets to, assembled from its ticket
  *                             emails by adapters/gmail/ledger.ts: title, performers, inferred genres and category,

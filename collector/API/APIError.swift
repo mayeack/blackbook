@@ -25,6 +25,9 @@ struct APIError: Error, Equatable {
     static let attachmentUnreadable = APIError(status: 422, code: "attachment_unreadable", message: "the attachment is not a decodable image")
     static let imageUnreadable = APIError(status: 422, code: "image_unreadable", message: "the image could not be decoded")
     static func payloadTooLarge(_ detail: String) -> APIError { APIError(status: 413, code: "payload_too_large", message: detail) }
+    static func callHistoryUnavailable(status: Int, _ detail: String) -> APIError {
+        APIError(status: status, code: "callhistory_unavailable", message: detail)
+    }
     static func internalError(_ detail: String) -> APIError { APIError(status: 500, code: "internal", message: detail) }
 
     var response: LoopbackResponse {
@@ -36,6 +39,14 @@ struct APIError: Error, Equatable {
         case .accessDenied: return .fdaMissing
         case .notFound: return .chatdbUnavailable("chat.db not found")
         case let .unavailable(detail): return .chatdbUnavailable(detail)
+        }
+    }
+
+    static func from(callHistory error: CallHistoryError) -> APIError {
+        switch error {
+        case .accessDenied: return .fdaMissing
+        case .notFound: return .callHistoryUnavailable(status: 404, "call history not found")
+        case let .unavailable(detail): return .callHistoryUnavailable(status: 503, detail)
         }
     }
 }

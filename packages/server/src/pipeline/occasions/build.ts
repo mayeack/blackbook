@@ -18,7 +18,7 @@ import { addDays, localDate, uuidv7 } from '@yb/shared';
 import { z } from 'zod';
 import type { DB } from '../../db/connection';
 import { tx } from '../../db/tx';
-import type { CalendarTreatment } from './calendars';
+import { primaryCalendars, type CalendarTreatment } from './calendars';
 import { classifyOccasion, type Classification, type OccasionKind } from './classify';
 import { parseMentions, partifulIdFromUid, partifulIdsIn, plainText, reservationVenue, venueFromTitle, venueKey, ticketCount, words, type Mention } from './text';
 import type { TicketCopy } from './tickets';
@@ -85,6 +85,8 @@ export interface CalEvent {
   kind: OccasionKind;
   /** The ledger row behind a ticket copy; null for calendar copies. */
   ticket: TicketCopy | null;
+  /** The recurring series it is an instance of, when that series is on a calendar other than the owner's own. */
+  series: string | null;
 }
 
 /** A copy's key in claims, roles and keep-sets: ids of different sources never collide. */
@@ -109,6 +111,7 @@ interface CalRow {
   self_response: string | null;
   start_date: string | null;
   end_date: string | null;
+  recurring_event_id: string | null;
 }
 
 const RESPONSE: Record<string, ExplicitAttendee['response']> = {
@@ -164,12 +167,14 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
       `SELECT id, calendar_id, ical_uid, status, summary, description, location, starts_at, ends_at, all_day, creator_email,
               attendees, html_link, partiful_event_id,
               coalesce(${col('event_type', 'NULL')}, CASE WHEN json_valid(raw) THEN json_extract(raw, '$.eventType') END) AS event_type,
-              ${col('self_response', 'NULL')} AS self_response, ${col('start_date', 'NULL')} AS start_date, ${col('end_date', 'NULL')} AS end_date
+              ${col('self_response', 'NULL')} AS self_response, ${col('start_date', 'NULL')} AS start_date, ${col('end_date', 'NULL')} AS end_date,
+              recurring_event_id
        FROM calendar_events
        WHERE starts_at IS NOT NULL AND starts_at BETWEEN ? AND ? AND status <> 'cancelled'
        ORDER BY starts_at, id`,
     )
     .all(from, to) as CalRow[];
+  const own = primaryCalendars(db);
   const out: CalEvent[] = [];
   for (const r of rows) {
     const treatment = treatments.get(r.calendar_id) ?? 'attending';
@@ -190,7 +195,7 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
     const allDay = r.all_day === 1;
     const endsAt = r.ends_at && r.ends_at > r.starts_at ? r.ends_at : r.starts_at + (allDay ? DAY : DEFAULT_LENGTH);
     const partifulIds = [...new Set(ids)];
-    const own = classifyOccasion({
+    const rule = classifyOccasion({
       titles: [title],
       notes: [notes],
       location: location || null,
@@ -223,9 +228,10 @@ export function loadCalendarEvents(db: DB, treatments: ReadonlyMap<string, Calen
       fromGmail: r.event_type === 'fromGmail',
       selfDeclined,
       attendees: list,
-      social: own.isSocial,
-      kind: own.kind,
+      social: rule.isSocial,
+      kind: rule.kind,
       ticket: null,
+      series: r.recurring_event_id && !own.has(r.calendar_id) ? `${r.calendar_id}|${r.recurring_event_id}` : null,
     });
   }
   return out;

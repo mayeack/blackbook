@@ -1377,6 +1377,81 @@ changes); "Venice" alone is the LA neighborhood ("Venice, Italy" stays Venice, I
 Monica") is not a place.
 **Platforms**: server + web. Not visually checked in a browser; not deployed; no live LLM run of the new prompt.
 
+---
+
+## Calls on the person timeline + round avatar in the tie ring (2026-10-21)
+
+The collector serves the Mac's call log (`GET /v1/calls`, CallHistory.storedata, read-only). The `calls` job (every
+5 min) stores every call (`calls`, `call_handles`, migration 025) and turns answered calls with a known person into
+derived `call` interactions (tie strength, "last talked", commitments). The person Timeline shows calls (answered and
+missed) from the call log with Phone / FaceTime filters; Sources has a "Phone & FaceTime calls" card. The Mac only logs
+calls that rang or were placed on it: incoming iPhone calls via Continuity and FaceTime, with no length for calls
+answered on the iPhone and no outgoing iPhone calls. The header avatar is now a circle inside the circular ring.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1466 tests pass.
+2. `collector/run-tests.sh` (72 Swift tests, incl. `CallHistoryTests`: paging, participants join found by suffix,
+   missing store / unknown layout / bad params) and `xcodebuild build test -scheme BlackbookServer` succeed.
+3. `test/adapters/calls/ingest.test.ts` (mapping, normalization, linking, missed/unknown/me/service excluded, cursor
+   paging + rebuilt-store reset, later contacts pick up past calls, job error handling), `test/routes/people-sources.test.ts`
+   (calls on the timeline once each, channels + filters + paging), `test/migrate.test.ts` (025 dedupe key).
+4. `swift run yb-collector-verify` against the real call log (counts only): 1,204 calls, 548 answered, 33 FaceTime.
+5. Local preview on a migrated copy of the live DB: 1,204 calls stored, 209 linked as interactions; a person's Timeline
+   shows "Call from …" / "Missed call from …" cards and Phone / FaceTime chips; Sources shows the Calls card healthy.
+
+### Scenario B — Web (owner, after deploying the server AND swapping in the rebuilt collector)
+1. yeackbot.com → Sources. **Expected**: a "Phone & FaceTime calls" card, Healthy, with a Calls count within ~5 min.
+   (Before the collector swap it reads "The Mac helper needs an update to read calls.")
+2. Open someone you talk to on the phone → Timeline. **Expected**: phone-call cards between the chats ("Call from
+   <first name>", "Missed call from …", "You called …"), and Phone / FaceTime chips that filter to calls only.
+3. Call yourself from another phone (or FaceTime a friend), wait 5 minutes, reload. **Expected**: the new call on top.
+4. Look at the avatar at the top of any person page. **Expected**: a round avatar centered in the ring, no square corners.
+
+**Edge cases**: a call from a number that later becomes a contact shows up on that person once the next calls run
+links it; a group FaceTime shows on each known participant; a missed call never changes tie strength; a call
+from a hidden person never appears on anyone's page.
+**Platforms**: collector (Swift) + server + web. Not deployed.
+
+## 2026-10-21 — Attendee clues on hover; clues weighed against the owner's other plans
+
+Hovering an attendee on an event page (or tapping **Clues**) shows why yeackbot listed them: each clue in plain words,
+its strength, and the message behind it with when it was sent relative to the event, plus the AI review's score. The
+deduction now weighs every time-based clue ("thanks for coming", "omw", photos, "tonight?") against the owner's other
+plans that day: a thank-you right after a friend's own show ("Spotlight for <friend>") no longer puts that friend at a
+wine tasting two nights earlier. Recurring listings (weekly entries on the "Recurring Events" calendar) need a message
+about that listing; venue addresses, day names and everyday words no longer count as "talked about it"; the AI review
+can lift a message-only candidate one tier at most; its rows for people who lost all their clues are withdrawn.
+`yb eval attendance` grades the clues against Partiful guest lists of past events (held out).
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/pipeline/occasions/plans.test.ts`: thank-you after the friend's own show → no candidate on the listing and the
+   old AI row withdrawn; listing needs a message about it, lands on the nearest week; two plans share a vague
+   "great seeing you", a plan naming the person takes it; "last night" and "brunch" pick the right plan; no other
+   plans → unchanged; everyday words ("sunset") are no mention. 4 of these fail with the plans switched off.
+3. `test/intel/adjudicate.test.ts`: packet has `### other plans` and `listing:`; a 0.45 message-only candidate given
+   0.95 by the model is stored as possible at 0.74. `test/routes/events.test.ts`: clues endpoint (text only there,
+   excluded chats omitted, hidden person 404). `test/eval/attendance.test.ts`, `test/eval/cli.test.ts`.
+4. On a copy of live data: the Oct 1 wine-tasting listing has no attendee; `yb eval attendance` reports
+   possible 36 calls (9 confirmed) vs 152 (15) before, attended 5 (3) vs 25 (6).
+5. Browser (local copy, desktop + 375px): hover card on an event's inferred rows; tap opens it in the list; no horizontal
+   scroll; no console errors.
+
+### Scenario B — Web (owner, after deploy and the next 03:00 occasions run)
+1. yeackbot.com → Events → Past → the wine-tasting listing on Thu, Oct 1. **Expected**: the friend whose own show was the
+   next night is no longer listed.
+2. Open an event with inferred people (e.g. a brunch or dinner). Hover a person's row. **Expected**: a card "Why
+   <name> is listed" with each clue, the quoted message, "You · <date> · 2 h before it", and "AI review … % sure".
+3. On the iPhone, tap **Clues** on a row. **Expected**: the card opens under the row; tapping the row itself still
+   opens the person.
+4. Look at a few weekly "Recurring Events" listings (the jazz and comedy nights). **Expected**: few
+   or no people, and only people who texted about that listing.
+5. Terminal: `npm run yb -- eval attendance`. **Expected**: counts and rates only, no names or message text.
+
+**Edge cases**: a row with no clues has no Clues button; a Partiful-only guest shows "Going on Partiful"; an unsent
+message shows "Unsent message"; an excluded conversation's messages never appear; ties and co_attend edges drop for
+the withdrawn rows after the effects job runs.
+**Platforms**: server + web. Verified locally on a copy of live data; not deployed.
 ## 2026-10-21 — Tickets from Gmail, "met at" an event, contact screenshots, "Invite to a show"
 
 Four connected pieces (design: `docs/design/tickets-met-at.md`):
@@ -1393,7 +1468,7 @@ Four connected pieces (design: `docs/design/tickets-met-at.md`):
 1. `npm run typecheck && npx vitest run && npm run lint:pii && npm run build` from the repo root: 1876+ tests pass,
    995 files clean, build OK. `collector/run-tests.sh`: 89 Swift tests pass. `xcodebuild -scheme BlackbookServer`
    builds.
-2. Migration 025 on a copy of the production DB: applied in < 1 s, row counts of llm_requests / suggestions /
+2. Migration 026 (written as 025, renumbered after #79 took 025 for calls) on a copy of the production DB: applied in < 1 s, row counts of llm_requests / suggestions /
    occasion_sources unchanged, foreign_key_check empty, quick_check ok.
 3. Met-at dry run on that copy, with real contact creation dates loaded:
    - 597 bulk-imported cards excluded;

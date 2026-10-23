@@ -10,19 +10,26 @@
  *   - photos sent in a 1:1 thread during or just after it.
  * In a 1:1 thread the counterpart gets the signal whoever wrote; in a group the sender does, and a small group
  * that discussed the occasion gives each member a weak 'group_discussed' signal. Message text never leaves this
- * module: only ids and signal types do.
+ * module: only ids, send times and signal types do (plans.ts decides which plan a timed clue belongs to).
+ * A title or venue word that is everyday vocabulary across all messages (≥ COMMON_SHARE of them, at least COMMON_MIN:
+ * "sunset", "works", "found", "halloween" — venue and party names that are also plain words) is chatter, not a
+ * mention. (How many threads used it that week says nothing: a dinner for eight is discussed in eight threads.)
  * Occasions are scanned in start order, so consecutive windows mostly overlap: the scanner keeps the rows of its
  * current window (and their analyses) and reads only the new tail from SQLite, instead of every window's rows.
  */
 import * as chrono from 'chrono-node';
-import { localParts } from '@yb/shared';
+import { addDays, localDate, localParts } from '@yb/shared';
 import type { DB } from '../../db/connection';
 import { SMALL_GROUP, type PeopleIndex } from './people';
-import { WEIGHTS, type Signal } from './signals';
-import { words } from './text';
+import type { TimedSignal } from './plans';
+import { WEIGHTS } from './signals';
+import { kindWordsOf, words } from './text';
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
+/** A token in this share of all messages (and at least COMMON_MIN of them) is an everyday word. */
+export const COMMON_SHARE = 0.001;
+export const COMMON_MIN = 50;
 
 export interface OccasionWindow {
   startsAt: number;
@@ -38,7 +45,8 @@ export interface OccasionWindow {
 }
 
 export interface MessageEvidence {
-  byPerson: Map<string, Signal[]>;
+  /** Every clue carries its message's send time (`at`) for attribution. */
+  byPerson: Map<string, TimedSignal[]>;
   /** Messages about the occasion written by the owner (corroborates a shared-calendar event). */
   aboutFromMe: number[];
   /** Messages about it from the other side of 1:1 threads. */
@@ -54,7 +62,11 @@ const LOGISTICS =
 const JUST_HERE = /^\s*(?:ok(?:ay)?\s+|i'?m\s+|we'?re\s+)?here\s*[!.]*\s*$/i;
 export const isLogistics = (text: string): boolean => LOGISTICS.test(text) || JUST_HERE.test(text);
 const AFTER =
-  /\b((so )?(great|good|nice|lovely|fun|awesome|amazing) (to see|seeing|catching up|hanging)|thanks? (you )?(so much )?for (coming|dinner|drinks|last night|tonight|having (me|us)|hosting|the invite|inviting)|ty for (coming|dinner|last night)|(had|such) an? (great|fun|good|amazing|awesome|lovely) (time|night)|fun (last night|tonight|night)|last night was|that was (so )?(fun|great)|let'?s do (it|that) again|home safe|got home)\b/i;
+  /\b((so )?(great|good|nice|lovely|fun|awesome|amazing) (to see|seeing|catching up|hanging)|thanks? (you )?(so much )?for (coming|dinner|drinks|last night|tonight|having (me|us)|hosting|the invite|inviting)|ty for (coming|dinner|last night)|(had|such) an? (great|fun|good|amazing|awesome|lovely) (time|night)|fun (last night|tonight|night)|last night was|that was (so )?(fun|great)|let'?s do (it|that) again)\b/i;
+/** "Thank you for last night", "so fun today": the day an after-message is about. */
+const LAST_NIGHT = /\b(last night|yesterday)\b/i;
+const TONIGHT = /\btonight\b/i;
+const TODAY = /\b(today|this (morning|afternoon|evening))\b/i;
 const TICKETS = /\b(tix|tickets?)\b/i;
 const DATEISH =
   /\b(tonight|tomorrow|tmrw|tmr|tomo|today|this (weekend|week|evening|afternoon|morning)|next (week|weekend|mon|tue|wed|thu|fri|sat|sun)\w*|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thu|thur|thurs|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)\b|\b\d{1,2}\/\d{1,2}\b|\b\d{1,2}(st|nd|rd|th)\b/i;
@@ -87,6 +99,18 @@ export function tzOffsetMinutes(ms: number, timeZone?: string): number {
   return Math.round((Date.UTC(y, mo - 1, d, h, mi) - Math.floor(ms / 60_000) * 60_000) / 60_000);
 }
 
+/**
+ * When an after-message points back to: "last night" / "yesterday" the night before and "tonight" this night (a
+ * night is named by the date it starts on and runs to 05:00), "today" / "this afternoon" the day it was sent.
+ */
+export function afterWhen(text: string, sentAt: number, timeZone?: string): { night: string } | { day: string } | null {
+  const night = localDate(sentAt - 5 * HOUR, timeZone);
+  if (LAST_NIGHT.test(text)) return { night: addDays(night, -1) };
+  if (TONIGHT.test(text)) return { night };
+  if (TODAY.test(text)) return { day: localDate(sentAt, timeZone) };
+  return null;
+}
+
 /** Local dates a message's date phrases resolve to (relative to when it was sent). */
 export function messageDates(text: string, sentAt: number, timeZone?: string): Set<string> {
   const out = new Set<string>();
@@ -107,6 +131,10 @@ export function messageDates(text: string, sentAt: number, timeZone?: string): S
 export class MessageScanner {
   private readonly cache = new Map<number, Analysis>();
   private readonly stmt;
+  /** token → whether it is an everyday word across all messages (messages_fts counts, cached for the run). */
+  private readonly everyday = new Map<string, boolean>();
+  private readonly countStmt;
+  private readonly commonAt: number;
   /** The rows with sent_at in [lo, hi], in (sent_at, id) order. */
   private rows: Row[] = [];
   private lo = 0;
@@ -125,6 +153,19 @@ export class MessageScanner {
          AND m.kind IN ('text', 'link', 'attachment')
        ORDER BY m.sent_at, m.id`,
     );
+    const fts = db.prepare(`SELECT 1 FROM sqlite_schema WHERE name = 'messages_fts'`).get() !== undefined;
+    const total = fts ? (db.prepare('SELECT count(*) FROM messages').pluck().get() as number) : 0;
+    this.commonAt = Math.max(COMMON_MIN, Math.ceil(total * COMMON_SHARE));
+    this.countStmt = fts ? db.prepare(`SELECT count(*) FROM (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ? LIMIT ?)`).pluck() : null;
+  }
+
+  private isEveryday(token: string): boolean {
+    let v = this.everyday.get(token);
+    if (v === undefined) {
+      v = this.countStmt !== null && (this.countStmt.get(`"${token.replace(/"/g, '""')}"`, this.commonAt) as number) >= this.commonAt;
+      this.everyday.set(token, v);
+    }
+    return v;
   }
 
   private analyze(r: Row): Analysis {
@@ -169,6 +210,13 @@ export class MessageScanner {
     return a;
   }
 
+  /** What an after-message says about which plan it means: the night or day it points back to, the kind of thing. */
+  private afterRefs(r: Row): Pick<TimedSignal, 'night' | 'day' | 'kinds'> {
+    const text = r.text ?? '';
+    const kinds = [...kindWordsOf(text)];
+    return { ...afterWhen(text, r.sent_at, this.timeZone), ...(kinds.length ? { kinds } : {}) };
+  }
+
   /** Date phrases are parsed (chrono) only for messages that could point forward to the occasion. */
   private dates(r: Row, a: Analysis): Set<string> {
     if (a.dates === null) a.dates = r.text ? messageDates(r.text, r.sent_at, this.timeZone) : new Set();
@@ -177,7 +225,7 @@ export class MessageScanner {
 
   scan(w: OccasionWindow): MessageEvidence {
     const out: MessageEvidence = { byPerson: new Map(), aboutFromMe: [], aboutFromOthersDm: [], groupsDiscussed: new Map(), scanned: 0 };
-    const add = (personId: string | null, s: Signal) => {
+    const add = (personId: string | null, s: TimedSignal) => {
       if (!personId) return;
       const list = out.byPerson.get(personId) ?? [];
       list.push(s);
@@ -185,14 +233,15 @@ export class MessageScanner {
     };
     const n = this.window(Math.floor(w.startsAt - 14 * DAY), Math.ceil(w.endsAt + 2 * DAY));
     const rows = this.rows;
-    const groupAbout = new Map<string, { ids: number[]; fromMe: boolean }>();
+    const tokens = w.tokens.filter((t) => !this.isEveryday(t));
+    const groupAbout = new Map<string, { ids: number[]; fromMe: boolean; at: number }>();
     for (let i = 0; i < n; i++) {
       const r = rows[i]!;
       out.scanned++;
       const group = r.conv_kind === 'group' ? this.people.groups.get(r.conversation_id) : undefined;
       if (r.conv_kind === 'group' && (!group || group.size > 41)) continue;
       const a = this.analyze(r);
-      const hits = w.tokens.filter((t) => a.words.has(t));
+      const hits = tokens.filter((t) => a.words.has(t));
       const dateHit = r.sent_at <= w.endsAt && [...this.dates(r, a)].some((d) => w.days.has(d));
       const about = hits.length >= 2 || hits.some((t) => w.strong.has(t)) || (hits.length === 1 && (dateHit || a.tickets));
       const keyword = [...w.kindWords].some((k) => a.words.has(k));
@@ -201,6 +250,7 @@ export class MessageScanner {
       const photos = !w.allDay && r.kind === 'attachment' && r.sent_at >= w.startsAt && r.sent_at <= w.endsAt + 12 * HOUR;
       const sender = r.is_from_me ? null : this.people.personOfIdentity(r.sender_identity_id);
       const m = [r.id];
+      const at = r.sent_at;
 
       if (about) {
         if (r.is_from_me) out.aboutFromMe.push(r.id);
@@ -208,30 +258,31 @@ export class MessageScanner {
       }
       if (r.conv_kind === 'direct') {
         const who = this.people.dmCounterpart.get(r.conversation_id) ?? null;
-        if (about) add(who, { type: 'mention_dm', weight: WEIGHTS.mentionDm, m });
-        else if (dateHit) add(who, { type: 'date_dm', weight: keyword ? WEIGHTS.dateKeywordDm : WEIGHTS.dateDm, m });
-        else if (a.tickets && r.sent_at <= w.startsAt) add(who, { type: 'tickets_dm', weight: WEIGHTS.ticketsDm, m });
-        if (nearStart && a.logistics) add(who, { type: 'logistics_dm', weight: WEIGHTS.logisticsDm, m });
-        if (after) add(who, { type: 'after_dm', weight: WEIGHTS.afterDm, m });
-        if (photos) add(who, { type: 'photos_dm', weight: WEIGHTS.photosDm, m });
+        if (about) add(who, { type: 'mention_dm', weight: WEIGHTS.mentionDm, m, at });
+        else if (dateHit) add(who, { type: 'date_dm', weight: keyword ? WEIGHTS.dateKeywordDm : WEIGHTS.dateDm, m, at });
+        else if (a.tickets && r.sent_at <= w.startsAt) add(who, { type: 'tickets_dm', weight: WEIGHTS.ticketsDm, m, at });
+        if (nearStart && a.logistics) add(who, { type: 'logistics_dm', weight: WEIGHTS.logisticsDm, m, at });
+        if (after) add(who, { type: 'after_dm', weight: WEIGHTS.afterDm, m, at, ...this.afterRefs(r) });
+        if (photos) add(who, { type: 'photos_dm', weight: WEIGHTS.photosDm, m, at });
         continue;
       }
       // group chat
       if (about) {
-        add(sender, { type: 'mention_group', weight: WEIGHTS.mentionGroup, m, ref: `conv:${r.conversation_id}` });
-        const g = groupAbout.get(r.conversation_id) ?? { ids: [], fromMe: false };
+        add(sender, { type: 'mention_group', weight: WEIGHTS.mentionGroup, m, at, ref: `conv:${r.conversation_id}` });
+        const g = groupAbout.get(r.conversation_id) ?? { ids: [], fromMe: false, at: r.sent_at };
         g.ids.push(r.id);
         g.fromMe ||= r.is_from_me === 1;
         groupAbout.set(r.conversation_id, g);
       }
-      if (nearStart && a.logistics && group!.size <= 9) add(sender, { type: 'logistics_group', weight: WEIGHTS.logisticsGroup, m });
-      if (after && group!.size <= SMALL_GROUP + 1) add(sender, { type: 'after_group', weight: WEIGHTS.afterGroup, m });
+      if (nearStart && a.logistics && group!.size <= 9) add(sender, { type: 'logistics_group', weight: WEIGHTS.logisticsGroup, m, at });
+      if (after && group!.size <= SMALL_GROUP + 1) add(sender, { type: 'after_group', weight: WEIGHTS.afterGroup, m, at, ...this.afterRefs(r) });
     }
     for (const [conv, g] of groupAbout) {
       const info = this.people.groups.get(conv)!;
       if (info.size > SMALL_GROUP + 1 || !(g.fromMe || g.ids.length >= 2)) continue;
       out.groupsDiscussed.set(conv, g.ids);
-      for (const pid of info.members) add(pid, { type: 'group_discussed', weight: WEIGHTS.groupDiscussed, m: g.ids.slice(0, 5), ref: `conv:${conv}` });
+      for (const pid of info.members)
+        add(pid, { type: 'group_discussed', weight: WEIGHTS.groupDiscussed, m: g.ids.slice(0, 5), ref: `conv:${conv}`, at: g.at });
     }
     return out;
   }

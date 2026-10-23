@@ -15,6 +15,8 @@ final class APIHarness {
     let contacts = FakeContacts()
     let api: CollectorAPI
     let whatsappSource: URL
+    /// Stands in for ~/Library/Application Support/CallHistoryDB/CallHistory.storedata (absent until a test writes it).
+    let callHistoryPath: String
     /// Stands in for ~/Library/Messages/Attachments.
     let attachmentsRoot: URL
 
@@ -23,6 +25,7 @@ final class APIHarness {
         world = try SyntheticWorld()
         dataDir = TestPaths.tempDir("ybdata")
         whatsappSource = dataDir.appendingPathComponent("wa-source", isDirectory: true)
+        callHistoryPath = dataDir.appendingPathComponent("CallHistory.storedata").path
         token = try CollectorToken.loadOrCreate(at: dataDir.appendingPathComponent("collector.token"))
         let reader = world.reader
         let clock = FakeClock()
@@ -38,8 +41,8 @@ final class APIHarness {
                                     info: ["CFBundleShortVersionString": "2.0.0", "CFBundleVersion": "2"], macOSVersion: "26.0.0")
         let tok = token
         api = CollectorAPI(port: port, dependencies: .init(token: { tok }, reader: reader, contacts: contacts,
-                                                           whatsapp: whatsapp, send: send, attachments: attachments,
-                                                           ocr: ocr, health: health, now: { refDate }))
+                                                           whatsapp: whatsapp, calls: CallHistoryReader(path: callHistoryPath),
+                                                           send: send, attachments: attachments, ocr: ocr, health: health, now: { refDate }))
     }
 
     deinit { try? FileManager.default.removeItem(at: dataDir) }
@@ -295,6 +298,7 @@ struct CollectorAPITests {
         let api = CollectorAPI(port: 4321, dependencies: .init(
             token: { h.token }, reader: missing, contacts: h.contacts,
             whatsapp: WhatsAppSnapshotter(sourceDir: h.whatsappSource, destRoot: h.dataDir),
+            calls: CallHistoryReader(path: h.callHistoryPath),
             send: SendService(allowlist: RecipientAllowlist(compiledHandles: [], ownAddresses: { [] }),
                               ledger: SendLedger(fileURL: nil), sender: MessagesSender(runner: h.runner), rows: missing,
                               clock: FakeClock()),

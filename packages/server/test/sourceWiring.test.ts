@@ -44,7 +44,7 @@ describe('job registry', () => {
   it('gates each source on what it needs', () => {
     const plain = loadConfig(base);
     const s = sourceJobDeps({ config: plain });
-    expect(s.imessage && s.whatsapp && s.addressbook).toBeTruthy();
+    expect(s.imessage && s.whatsapp && s.addressbook && s.calls).toBeTruthy();
     expect(s.beeper).toBeNull(); // no token anywhere yet
     expect(s.calendar).toBeNull(); // no OAuth client
     expect(s.gmail).toBeNull();
@@ -64,12 +64,13 @@ describe('job registry', () => {
     expect(sourceJobDeps({ config: loadConfig({ ...base, BEEPER_TOKEN: 'synthetic' }) }).beeper?.token).toBe('synthetic');
     // Every source's jobs are registered through the real registry, in order, with their cadences. Agent-loop
     // jobs follow them (gated and checked in agentWiring.test.ts).
-    expect(buildJobs({ config: full }).slice(0, 16).map((j) => [j.name, j.schedule])).toEqual([
+    expect(buildJobs({ config: full }).slice(0, 17).map((j) => [j.name, j.schedule])).toEqual([
       ['backup', { kind: 'daily', at: '02:15' }],
       ['logs-prune', { kind: 'daily', at: '04:45' }],
       ['imessage-tail', { kind: 'interval', everyMs: 10_000 }],
       ['imessage-overlap', { kind: 'daily', at: '02:30' }],
       ['addressbook', expect.anything()],
+      ['calls', { kind: 'interval', everyMs: 5 * 60_000 }],
       ['whatsapp', expect.anything()],
       ['beeper-instagram', { kind: 'interval', everyMs: 30 * 60_000 }],
       ['instagram-dyi', expect.anything()],

@@ -1,13 +1,17 @@
 /**
  * Events screen API: occasions (merged calendar copies and the ticket the owner holds, maybe linked to a Partiful
  * event) plus Partiful events no occasion covers, with who was there. Every person comes through person_canon →
- * person_visible, so hidden and merged-away people never appear; evidence is signal types, weights and message ids
- * only (never message text). Sensitive occasions (medical) and non-social kinds (logistics, appointments, work) are
- * never listed, and a sensitive one is not served at all. Sources come from occasion_sources ('ticket' = the ticket
- * ledger; its title is the vendor's).
+ * person_visible, so hidden and merged-away people never appear; in the list and the detail, evidence is signal
+ * types, weights and message ids only (never message text). Sensitive occasions (medical) and non-social kinds
+ * (logistics, appointments, work) are never listed, and a sensitive one is not served at all. Sources come from
+ * occasion_sources ('ticket' = the ticket ledger; its title is the vendor's).
  *
  *   GET /events?when=upcoming|past&kind=social|trips|all&cursor=&limit=
- *   GET /events/:id          an occasion (a merged-away id answers with its survivor) or a Partiful event
+ *   GET /events/:id                 an occasion (a merged-away id answers with its survivor) or a Partiful event
+ *   GET /events/:id/clues/:personId  one attendee's clues with the messages behind them, asked for when the owner
+ *                                    opens them: only the ids that row cites, never from an excluded conversation,
+ *                                    unsent ones without text, emails and phone numbers masked, hidden people's
+ *                                    names blanked
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -66,6 +70,39 @@ export interface AttendeeView extends AttendeeChip {
   /** Counted in ties and edges (≥ 0.75); otherwise "possible". */
   counted: boolean;
   evidence: EvidenceView[];
+}
+
+export interface ClueMessageView {
+  id: number;
+  sentAt: number;
+  fromMe: boolean;
+  /** Who wrote it when it wasn't the owner: a visible person's name, else null ("someone"). */
+  sender: string | null;
+  /** 'dm' (a 1:1 thread) or 'group' (with the group chat's title when it has one). */
+  where: 'dm' | 'group';
+  chat: string | null;
+  /** Masked and clipped; null when it was unsent or is an attachment without text. */
+  text: string | null;
+  attachment: boolean;
+}
+
+export interface ClueView {
+  type: string;
+  weight: number;
+  messages: ClueMessageView[];
+  /** What a non-message clue points at: the group chat, Partiful event or calendar entry's title. */
+  refTitle: string | null;
+}
+
+export interface AttendeeClues {
+  personId: string;
+  displayName: string;
+  status: string;
+  source: string;
+  confidence: number;
+  startsAt: number;
+  endsAt: number | null;
+  clues: ClueView[];
 }
 
 export interface EventSourceView {
@@ -395,6 +432,92 @@ export function eventDetail(db: DB, rawId: string): EventDetail {
   };
 }
 
+// ---------------------------------------------------------------------------------------------- clues
+
+const CLUE_TEXT_MAX = 240;
+
+/** One attendee's clues with their messages (see the module header). 404 when the person isn't shown there. */
+export function attendeeClues(db: DB, rawId: string, personId: string): AttendeeClues {
+  const detail = eventDetail(db, rawId);
+  const canonical = (db.prepare('SELECT canonical_id FROM person_canon WHERE person_id = ?').pluck().get(personId) as string | undefined) ?? personId;
+  const a = detail.attendees.find((x) => x.personId === canonical);
+  if (!a) throw notFound('Attendee');
+  const ids = [...new Set(a.evidence.flatMap((e) => e.messageIds))];
+  const rows = ids.length
+    ? (db
+        .prepare(
+          `SELECT m.id, m.sent_at, m.is_from_me, m.kind, m.text, m.retracted_at, c.kind AS conv_kind, c.title AS chat, pv.display_name AS sender
+           FROM messages m JOIN conversations c ON c.id = m.conversation_id
+           LEFT JOIN identities i ON i.id = m.sender_identity_id
+           LEFT JOIN person_canon pc ON pc.person_id = i.person_id
+           LEFT JOIN person_visible pv ON pv.id = pc.canonical_id
+           WHERE m.id IN (SELECT value FROM json_each(?)) AND c.agent_excluded = 0 AND m.is_spam = 0`,
+        )
+        .all(JSON.stringify(ids)) as {
+        id: number;
+        sent_at: number;
+        is_from_me: number;
+        kind: string;
+        text: string | null;
+        retracted_at: number | null;
+        conv_kind: string;
+        chat: string | null;
+        sender: string | null;
+      }[])
+    : [];
+  const redact = hiddenNameRedactor(db);
+  const clip = (t: string) => (t.length <= CLUE_TEXT_MAX ? t : `${t.slice(0, CLUE_TEXT_MAX - 1).trimEnd()}…`);
+  const byId = new Map(
+    rows.map((r): [number, ClueMessageView] => {
+      const raw = r.retracted_at == null && r.text ? r.text.replace(/\s+/g, ' ').trim() : '';
+      return [
+        r.id,
+        {
+          id: r.id,
+          sentAt: r.sent_at,
+          fromMe: r.is_from_me === 1,
+          sender: r.is_from_me === 1 || !r.sender ? null : maskText(r.sender),
+          where: r.conv_kind === 'group' ? 'group' : 'dm',
+          chat: r.conv_kind === 'group' && r.chat ? redact(maskText(r.chat)) : null,
+          text: raw ? redact(clip(maskText(raw))) : null,
+          attachment: r.kind === 'attachment',
+        },
+      ];
+    }),
+  );
+  const refTitle = db
+    .prepare(
+      `SELECT CASE
+       WHEN @ref LIKE 'conv:%' THEN (SELECT title FROM conversations WHERE id = substr(@ref, 6) AND agent_excluded = 0)
+       WHEN @ref LIKE 'event:%' THEN (SELECT title FROM events WHERE id = substr(@ref, 7))
+       WHEN @ref LIKE 'cal:%' THEN (SELECT summary FROM calendar_events WHERE id = substr(@ref, 5))
+       WHEN @ref LIKE 'circle:%' THEN (SELECT name FROM circles WHERE id = substr(@ref, 8))
+     END`,
+    )
+    .pluck();
+  return {
+    personId: a.personId,
+    displayName: a.displayName,
+    status: a.status,
+    source: a.source,
+    confidence: a.confidence,
+    startsAt: detail.startsAt,
+    endsAt: detail.endsAt,
+    clues: a.evidence.map((e) => {
+      const title = e.ref ? (refTitle.get({ ref: e.ref }) as string | null | undefined) : null;
+      return {
+        type: e.type,
+        weight: e.weight,
+        messages: e.messageIds
+          .map((id) => byId.get(id))
+          .filter((m): m is ClueMessageView => !!m)
+          .sort((x, y) => x.sentAt - y.sentAt),
+        refTitle: title ? redact(maskText(title)) : null,
+      };
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------------------------- routes
 
 const ListQuery = z.object({
@@ -404,6 +527,7 @@ const ListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
 const IdParam = z.object({ id: z.string().regex(/^[0-9a-f-]{36}$/i) });
+const CluesParam = z.object({ id: z.string().regex(/^[0-9a-f-]{36}$/i), personId: z.string().regex(/^[0-9a-f-]{36}$/i) });
 
 export function eventsRouter({ db }: RouteDeps): Router {
   const r = Router();
@@ -414,6 +538,10 @@ export function eventsRouter({ db }: RouteDeps): Router {
   r.get('/events/:id', (req, res) => {
     const { id } = IdParam.parse(req.params);
     res.json(eventDetail(db, id) satisfies EventDetail);
+  });
+  r.get('/events/:id/clues/:personId', (req, res) => {
+    const { id, personId } = CluesParam.parse(req.params);
+    res.json(attendeeClues(db, id, personId) satisfies AttendeeClues);
   });
   return r;
 }

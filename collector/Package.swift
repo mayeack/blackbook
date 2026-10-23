@@ -23,7 +23,7 @@ let package = Package(
             path: ".",
             exclude: ["Tests", "Tools", "Generated/SelfHandles.example.swift", "run-tests.sh"],
             // The fallback (empty) self-handle list; SelfHandles.generated.swift is app-only.
-            sources: ["API", "App", "Contacts", "Core", "Generated/SelfHandlesFallback.swift", "Health", "HTTP",
+            sources: ["API", "App", "Calls", "Contacts", "Core", "Generated/SelfHandlesFallback.swift", "Health", "HTTP",
                       "IMessage", "Send", "Vision", "WhatsApp"]
         ),
         .executableTarget(

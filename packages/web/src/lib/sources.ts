@@ -40,6 +40,7 @@ const COUNT_ROWS: { key: keyof SourceCounts; label: string }[] = [
   { key: 'tickets', label: 'Ticketed events' },
   { key: 'screenshots', label: 'Screenshots read' },
   { key: 'screenshotsLinked', label: 'Linked to people' },
+  { key: 'calls', label: 'Calls' },
 ];
 
 /** The count rows to show, in a fixed order (zeroes and absent keys left out). */
@@ -109,7 +110,7 @@ export function fixCopy(fix: SourceFix): FixCopy {
     case 'collector_setup':
       return {
         title: 'Check the Mac helper',
-        body: 'The yeackbot Mac helper reads iMessage on this Mac. Make sure it is running and has Full Disk Access.',
+        body: 'The yeackbot Mac helper reads iMessage and the call log on this Mac. Make sure it is running and has Full Disk Access.',
       };
     case 'contract_broken':
       return {

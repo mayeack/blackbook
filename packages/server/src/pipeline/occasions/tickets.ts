@@ -187,6 +187,8 @@ export function loadTicketEvents(db: DB, from: number, to: number): TicketCopies
       attendees: [],
       social: true,
       kind: 'social',
+      // A ticket is one happening, never an instance of a standing calendar series.
+      series: null,
       ticket: {
         id: r.id,
         aliases: aliases.get(r.id) ?? [],

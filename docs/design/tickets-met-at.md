@@ -108,7 +108,7 @@ Four pieces, each usable on its own:
 - **Health.** `recordSourceHealth('gmail', …)`. 403 insufficientPermissions → `auth_required` (no backoff).
   invalid_grant → `auth_required`. Logs carry counts only.
 
-### Tables (migration 025)
+### Tables (migration 026; 025 went to calls, #79)
 
 `gmail_messages` (E), `ticket_events` (D, stable ids, pointer merge), `ticket_parties` (E). See the migration
 header for columns. Bodies are never stored.

@@ -11,7 +11,7 @@ import { DAY } from './world';
 
 const devApp = (db = memDb()) => createApp({ db, auth: { mode: 'dev-bypass', email: 'owner@example.com' } });
 
-const CORE = ['imessage', 'whatsapp', 'beeper', 'instagram_dyi', 'partiful', 'gcal', 'addressbook', 'gmail', 'gphotos'];
+const CORE = ['imessage', 'whatsapp', 'beeper', 'instagram_dyi', 'partiful', 'gcal', 'addressbook', 'gmail', 'gphotos', 'calls'];
 
 function seedMessages(db: ReturnType<typeof memDb>, source: string, times: number[]) {
   const conv = uuidv7();
@@ -55,6 +55,7 @@ describe('GET /api/v1/sources', () => {
     // Gmail and Google Photos ride on the same OAuth client.
     expect(card(view, 'gmail')).toMatchObject({ configured: false, fix: { kind: 'google_not_configured' } });
     expect(card(view, 'gphotos')).toMatchObject({ configured: false, fix: { kind: 'google_not_configured' } });
+    expect(card(view, 'calls').fix).toEqual({ kind: 'collector_setup' });
   });
 
   it('joins health, cursors and message counts per source, with errors redacted', async () => {

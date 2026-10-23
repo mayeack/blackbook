@@ -5,7 +5,9 @@
  *   group-chat titles), Partiful GOING/MAYBE guests and host, the people the owner's ticket emails name as
  *   transfer counterparties (ticket_parties resolved to a person: named ticket holders), and the message
  *   cross-reference (messages.ts; a ticket-only occasion has no calendar notes, so its title, performers and venue
- *   carry the scan).
+ *   carry the scan), each message clue weighed against the owner's other plans around it (plans.ts). A standing
+ *   listing (one week of a recurring "Recurring Events" entry) takes no names from its title: they belong to the
+ *   listing.
  * Names resolve only against visible people: first name (+ nickname table), or first + last; an ambiguous first
  * name is settled by 1:1 recency around the occasion, message evidence for it, and co-membership with the other
  * people named, else it stays an unresolved name candidate for the LLM step. A ticket count caps how many
@@ -16,8 +18,9 @@ import type { DB } from '../../db/connection';
 import type { OccasionDraft } from './build';
 import type { MessageEvidence, MessageScanner, OccasionWindow } from './messages';
 import type { PeopleIndex } from './people';
+import { isStanding, type ClueAttribution, type OccasionPlans } from './plans';
 import { BELOW_POSSIBLE, CAPPED, combine, COUNTED, isNamed, MAX_UNNAMED, mergeSignals, WEIGHTS, type Signal, type SignalType } from './signals';
-import { distinctiveTokens, VENUE_WORDS, venueKey, words, type Mention } from './text';
+import { distinctiveTokens, kindWordsOf, VENUE_WORDS, venueKey, venueName, type Mention, words } from './text';
 
 export type AttendeeRole = 'companion' | 'host' | 'guest' | 'ticket_holder';
 
@@ -69,9 +72,6 @@ export interface Inference {
 /** A written name to resolve: a title/notes mention, or an invitee known only by display name. */
 type NameInput = Mention & { explicit?: boolean };
 
-const KIND_WORDS = new Set(
-  'dinner lunch brunch breakfast drinks drink coffee cocktails party bday birthday concert show gig tickets tix game match movie festival date'.split(' '),
-);
 const GOING = new Set(['going', 'approved', 'checked_in', 'attended', 'host']);
 const MAYBE = new Set(['maybe']);
 
@@ -89,6 +89,10 @@ export interface InferContext {
   people: PeopleIndex;
   scanner: MessageScanner;
   days: ReadonlySet<string>;
+  /** The owner's plans around the occasion. Without them every clue counts for every occasion it reaches. */
+  plans?: OccasionPlans;
+  /** Plans that are this occasion under another key (the eval's held-out Partiful event). */
+  exclude?: { keys?: Iterable<string>; eventId?: string | null };
 }
 
 /** The message-scan window for an occasion: tokens from its titles and venue, minus the people's names. */
@@ -96,17 +100,17 @@ export function occasionWindow(d: OccasionDraft, days: ReadonlySet<string>): Occ
   const names = d.mentions.map((m) => m.surface);
   const texts = [
     ...d.events.filter((e) => !e.reservation).map((e) => e.title),
-    d.venueText,
+    venueName(d.venueText),
     d.eventTitle,
-    ...d.events.filter((e) => e.reservation).map((e) => e.venue),
+    ...d.events.filter((e) => e.reservation).map((e) => venueName(e.venue)),
     ...(d.ticket?.performers ?? []),
   ];
   const tokens = distinctiveTokens(texts, names, 10);
   // Alone, only the venue's own name or a title's single rare word makes a message about this occasion.
-  const venueWords = words(venueKey(d.venueText)).filter((w) => w.length >= 4 && !VENUE_WORDS.has(w) && tokens.includes(w));
+  const venueWords = words(venueKey(venueName(d.venueText))).filter((w) => w.length >= 4 && !VENUE_WORDS.has(w) && tokens.includes(w));
   const titleTokens = distinctiveTokens([d.title, d.eventTitle], names, 10);
   const strong = new Set([...venueWords.slice(0, 2), ...(titleTokens.length === 1 && titleTokens[0]!.length >= 6 ? titleTokens : [])]);
-  const kindWords = new Set(words([d.title, d.eventTitle ?? ''].join(' ')).filter((w) => KIND_WORDS.has(w)));
+  const kindWords = kindWordsOf(d.title, d.eventTitle);
   return { startsAt: d.startsAt, endsAt: d.endsAt, allDay: d.allDay, days, tokens, strong, kindWords };
 }
 
@@ -114,14 +118,20 @@ export function inferAttendees(ctx: InferContext, d: OccasionDraft): Inference {
   const { db, people } = ctx;
   const window = occasionWindow(d, ctx.days);
   const msgs: MessageEvidence = ctx.scanner.scan(window);
+  const standing = isStanding(d);
+  const attribution: ClueAttribution | null = ctx.plans ? ctx.plans.attribution(d, ctx.days, ctx.exclude) : null;
   const byPerson = new Map<string, Signal[]>();
-  for (const [pid, list] of msgs.byPerson) if (pid !== people.me) byPerson.set(pid, [...list]);
+  for (const [pid, list] of msgs.byPerson) {
+    if (pid === people.me) continue;
+    const kept = attribution ? attribution.attribute(pid, list) : list.map(({ at: _at, ...s }) => s);
+    if (kept.length) byPerson.set(pid, kept);
+  }
   const surfaceOf = new Map<string, string>();
   const names: NameCandidate[] = [];
   const groups: GroupCandidate[] = [];
 
   // explicit invitees
-  const nameMentions: NameInput[] = [...d.mentions];
+  const nameMentions: NameInput[] = standing ? [] : [...d.mentions];
   for (const a of d.attendees) {
     if (a.response === 'declined') continue;
     const pid = a.email ? people.personOfEmail(a.email) : null;
