@@ -1,0 +1,62 @@
+{
+  "api": "v1",
+  "generated_at": "2026-10-01T12:00:00.000Z",
+  "items": [
+    {
+      "rowid": 1,
+      "unique_id": "CALL-0001",
+      "date": "2026-10-01T10:00:00.000Z",
+      "duration_s": 0.0,
+      "call_type": 1,
+      "provider": "com.apple.Telephony",
+      "originated": false,
+      "answered": true,
+      "handles": [
+        "+15555550101"
+      ]
+    },
+    {
+      "rowid": 2,
+      "unique_id": "CALL-0002",
+      "date": "2026-10-01T11:00:00.000Z",
+      "duration_s": 125.5,
+      "call_type": 8,
+      "provider": "com.apple.FaceTime",
+      "originated": true,
+      "answered": true,
+      "handles": [
+        "friend@example.com"
+      ]
+    },
+    {
+      "rowid": 4,
+      "unique_id": "CALL-0004",
+      "date": "2026-10-01T11:59:00.000Z",
+      "duration_s": 0.0,
+      "call_type": 16,
+      "provider": "com.apple.FaceTime",
+      "originated": false,
+      "answered": true,
+      "handles": [
+        "+15555550102",
+        "+15555550103"
+      ]
+    },
+    {
+      "rowid": 5,
+      "unique_id": "CALL-0005",
+      "date": "2026-10-01T12:00:00.000Z",
+      "duration_s": 0.0,
+      "call_type": 1,
+      "provider": "com.apple.Telephony",
+      "originated": false,
+      "answered": false,
+      "handles": [
+        "+15555550101"
+      ]
+    }
+  ],
+  "next_after_rowid": 5,
+  "has_more": false,
+  "max_rowid": 5
+}

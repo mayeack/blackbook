@@ -9,6 +9,7 @@ import { uuidv7 } from '@yb/shared';
 import { createApp } from '../../src/http/app';
 import type { PeoplePage, PersonDetail, TimelinePage } from '../../src/routes/people';
 import { channelOf, identityValue } from '../../src/routes/people';
+import { rebuildCallInteractions } from '../../src/adapters/calls/interactions';
 import { seedIdentity, T0 } from '../helpers';
 import { buildWorld, DAY, MIN, type World } from './world';
 
@@ -170,5 +171,54 @@ describe('timeline channels', () => {
     const t = await get<TimelinePage>(`/api/v1/people/${w.alice}/timeline`);
     expect(t.items.find((x) => x.id === i)).toMatchObject({ title: 'Dinner w/ Alice & … …', occasionId: dinner });
     expect(JSON.stringify(t)).not.toMatch(/Halvard|Hushwell/);
+  });
+});
+
+describe('calls on the timeline', () => {
+  /** A call-log row with its handles, as adapters/calls/ingest.ts stores it. */
+  function logCall(at: number, handles: [string, string][], o: { service?: string; answered?: 0 | 1; outgoing?: 0 | 1; durationMs?: number } = {}) {
+    const id = uuidv7();
+    w.db
+      .prepare(
+        `INSERT INTO calls (id, source_uid, source_rowid, started_at, duration_ms, service, outgoing, answered, created_at, updated_at)
+         VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, id, at, o.durationMs ?? 0, o.service ?? 'phone', o.outgoing ?? 0, o.answered ?? 1, T0, T0);
+    for (const [kind, key] of handles) w.db.prepare('INSERT INTO call_handles (call_id, kind, key) VALUES (?, ?, ?)').run(id, kind, key);
+    return id;
+  }
+
+  it('shows answered and missed calls once each, with phone and FaceTime as channels and filters', async () => {
+    const answered = logCall(T0 + 3 * DAY, [['phone', '+15555550101']]);
+    const missed = logCall(T0 + 4 * DAY, [['phone', '+15555550101']], { answered: 0 });
+    const facetime = logCall(T0 + 5 * DAY, [['email', 'alice@example.com']], { service: 'facetime_video', outgoing: 1, durationMs: 12 * MIN });
+    const beas = logCall(T0 + 6 * DAY, [['phone', '+15555550102']]);
+    const stranger = logCall(T0 + 7 * DAY, [['phone', '+15555550199']]);
+    // The derived interactions of the answered calls must not show a second time.
+    expect(rebuildCallInteractions(w.db, T0).upserted).toBe(3);
+
+    const t = await get<TimelinePage>(`/api/v1/people/${w.alice}/timeline`);
+    const ids = t.items.map((i) => i.id);
+    expect(ids.slice(0, 3)).toEqual([facetime, missed, answered]);
+    expect(ids).not.toContain(beas);
+    expect(ids).not.toContain(stranger);
+    // The owner's own logged call (no call log row) is still there.
+    expect(ids).toContain(w.callId);
+    expect(t.items.filter((i) => i.type === 'interaction' && i.kind === 'call')).toHaveLength(1);
+    expect(t.channels).toEqual(['imessage', 'phone', 'facetime']);
+
+    const [ft, miss, ans] = t.items;
+    expect(ft).toEqual({ type: 'call', id: facetime, channel: 'facetime', service: 'facetime_video', startedAt: T0 + 5 * DAY, endedAt: T0 + 5 * DAY + 12 * MIN, outgoing: true, answered: true });
+    expect(miss).toMatchObject({ type: 'call', channel: 'phone', service: 'phone', endedAt: null, outgoing: false, answered: false });
+    expect(ans).toMatchObject({ type: 'call', answered: true });
+
+    const onlyFacetime = await get<TimelinePage>(`/api/v1/people/${w.alice}/timeline?source=facetime`);
+    expect(onlyFacetime.items.map((i) => i.id)).toEqual([facetime]);
+    const page1 = await get<TimelinePage>(`/api/v1/people/${w.alice}/timeline?limit=2`);
+    const page2 = await get<TimelinePage>(`/api/v1/people/${w.alice}/timeline?limit=2&cursor=${encodeURIComponent(page1.nextCursor!)}`);
+    expect([...page1.items, ...page2.items].map((i) => i.id)).toEqual(ids.slice(0, 4));
+    // Bea only has the phone channel besides iMessage; a hidden person's calls never reach anyone's page.
+    expect((await get<TimelinePage>(`/api/v1/people/${w.bea}/timeline`)).channels).toEqual(['imessage', 'phone']);
+    expect(JSON.stringify(t)).not.toContain('+1555555');
   });
 });

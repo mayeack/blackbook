@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
   AttachmentImageResponse,
+  CallsResponse,
   ChatsResponse,
   CollectorError,
   ContactsResponse,
@@ -24,6 +25,7 @@ import {
 const GOLDEN = path.resolve(import.meta.dirname, '../../../collector/Tests/Golden');
 
 const SCHEMAS: Record<string, z.ZodType> = {
+  'calls.json': CallsResponse,
   'contacts.json': ContactsResponse,
   'error-recipient-not-allowed.json': CollectorError,
   'health.json': Health,

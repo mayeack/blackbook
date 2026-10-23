@@ -1376,3 +1376,38 @@ changes); "Venice" alone is the LA neighborhood ("Venice, Italy" stays Venice, I
 ("lives with Charlotte") or a street ("Hollywood Blvd") is never a place; a two-city value ("Calabasas or Santa
 Monica") is not a place.
 **Platforms**: server + web. Not visually checked in a browser; not deployed; no live LLM run of the new prompt.
+
+---
+
+## Calls on the person timeline + round avatar in the tie ring (2026-10-21)
+
+The collector serves the Mac's call log (`GET /v1/calls`, CallHistory.storedata, read-only). The `calls` job (every
+5 min) stores every call (`calls`, `call_handles`, migration 025) and turns answered calls with a known person into
+derived `call` interactions (tie strength, "last talked", commitments). The person Timeline shows calls (answered and
+missed) from the call log with Phone / FaceTime filters; Sources has a "Phone & FaceTime calls" card. The Mac only logs
+calls that rang or were placed on it: incoming iPhone calls via Continuity and FaceTime, with no length for calls
+answered on the iPhone and no outgoing iPhone calls. The header avatar is now a circle inside the circular ring.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1466 tests pass.
+2. `collector/run-tests.sh` (72 Swift tests, incl. `CallHistoryTests`: paging, participants join found by suffix,
+   missing store / unknown layout / bad params) and `xcodebuild build test -scheme BlackbookServer` succeed.
+3. `test/adapters/calls/ingest.test.ts` (mapping, normalization, linking, missed/unknown/me/service excluded, cursor
+   paging + rebuilt-store reset, later contacts pick up past calls, job error handling), `test/routes/people-sources.test.ts`
+   (calls on the timeline once each, channels + filters + paging), `test/migrate.test.ts` (025 dedupe key).
+4. `swift run yb-collector-verify` against the real call log (counts only): 1,204 calls, 548 answered, 33 FaceTime.
+5. Local preview on a migrated copy of the live DB: 1,204 calls stored, 209 linked as interactions; a person's Timeline
+   shows "Call from …" / "Missed call from …" cards and Phone / FaceTime chips; Sources shows the Calls card healthy.
+
+### Scenario B — Web (owner, after deploying the server AND swapping in the rebuilt collector)
+1. yeackbot.com → Sources. **Expected**: a "Phone & FaceTime calls" card, Healthy, with a Calls count within ~5 min.
+   (Before the collector swap it reads "The Mac helper needs an update to read calls.")
+2. Open someone you talk to on the phone → Timeline. **Expected**: phone-call cards between the chats ("Call from
+   <first name>", "Missed call from …", "You called …"), and Phone / FaceTime chips that filter to calls only.
+3. Call yourself from another phone (or FaceTime a friend), wait 5 minutes, reload. **Expected**: the new call on top.
+4. Look at the avatar at the top of any person page. **Expected**: a round avatar centered in the ring, no square corners.
+
+**Edge cases**: a call from a number that later becomes a contact shows up on that person once the next calls run
+links it; a group FaceTime shows on each known participant; a missed call never changes tie strength; a call
+from a hidden person never appears on anyone's page.
+**Platforms**: collector (Swift) + server + web. Not deployed.

@@ -224,7 +224,7 @@ Worked examples:
 | Tapback-only day | 0.1 |
 | Partiful co-attendance (both GOING, event in the past) | 1.5 |
 | `log:` interaction / calendar event with them | 1.5 |
-| Call (if call history is added later) | 1.2 |
+| Call (answered, from the Mac's call log: adapters/calls) | 1.2 |
 
 A **contact day** is a day with U ≥0.3. `H` (365-day window) uses all sources; the WhatsApp and Instagram backfill extends history before 2025-10-03.
 

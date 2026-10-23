@@ -46,6 +46,8 @@ export interface SourceCounts {
   calendarEvents?: number;
   occasions?: number;
   contactCards?: number;
+  /** Calls in the Mac's call log. */
+  calls?: number;
 }
 
 /** What the owner can do about a source; the web app words it and adds the button. */
@@ -115,6 +117,7 @@ const CARDS: readonly CardDef[] = [
   { source: 'partiful', aliases: [], core: true },
   { source: 'gcal', aliases: ['calendar', 'google_calendar'], core: true },
   { source: 'addressbook', aliases: ['contacts'], core: true },
+  { source: 'calls', aliases: [], core: true },
 ];
 
 /** The card a source name reports into (itself when it isn't a known alias). */
@@ -221,6 +224,7 @@ function fixFor(
       break;
     case 'imessage':
     case 'collector':
+    case 'calls':
       if (needsYou || neverRan) return { kind: 'collector_setup' };
       break;
   }
@@ -265,6 +269,9 @@ function countsByCard(db: DB, now: number): Map<string, SourceCounts> {
 
   const cards = db.prepare(`SELECT count(*) FROM identities WHERE kind = 'addressbook_id' AND status <> 'detached'`).pluck().get() as number;
   if (cards > 0) add('addressbook', 'contactCards', cards);
+
+  const calls = db.prepare('SELECT count(*) FROM calls').pluck().get() as number;
+  if (calls > 0) add('calls', 'calls', calls);
 
   const ev = db
     .prepare(`SELECT count(*) AS n, coalesce(sum(starts_at >= ?), 0) AS up FROM events WHERE source = 'partiful'`)
