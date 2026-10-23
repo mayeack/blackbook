@@ -1,9 +1,11 @@
 /**
  * Rule classification of an occasion (PLAN "Calendar attendee inference" step 2). Rules first; the LLM step may
- * later override with classified_by='llm', and a user decision ('user') is never overwritten.
- * Precedence: medical (sensitive appointment) → flights/travel → lodging/multi-day all-day → household and service
- * logistics → personal-care appointments → explicit work meetings → social → unknown. Only 'social' feeds attendee
- * inference, interactions, edges and digests.
+ * later override with classified_by='llm' (unless the owner holds a ticket to it), and a user decision ('user') is
+ * never overwritten.
+ * Precedence: a ticket to a show (concert, club, festival, comedy, theater, sports, party) → medical (sensitive
+ * appointment) → any other ticket → flights/travel → lodging/multi-day all-day → household and service logistics →
+ * personal-care appointments → explicit work meetings → social → unknown. Only 'social' feeds attendee inference,
+ * interactions, edges and digests.
  */
 import type { Mention } from './text';
 import { withoutUrls } from './text';
@@ -24,6 +26,8 @@ export interface ClassifyInput {
   mentions: readonly Mention[];
   /** Explicit attendees other than the owner. */
   explicitAttendees: number;
+  /** The category of the ticket the owner holds for it (ticket_events.category); absent without one. */
+  ticketCategory?: string | null;
 }
 
 export interface Classification {
@@ -35,6 +39,9 @@ export interface Classification {
 }
 
 const DAY = 86_400_000;
+
+/** Ticket categories whose ticket outranks the medical rule (a band called "Doctor Velvet" plays a show, not a clinic). */
+export const SHOW_CATEGORIES: ReadonlySet<string> = new Set(['concert', 'club', 'festival', 'comedy', 'theater', 'sports', 'party']);
 
 const MEDICAL =
   /\b(doctor|dr\.? ?appt|dentist|dental|orthodont\w*|dermatolog\w*|therap(y|ist)|physio\w*|clinic|hospital|urgent care|check-?up|physical exam|annual physical|blood (work|test|draw)|lab work|labs\b|vaccin\w*|flu shot|booster|optometr\w*|ophthalm\w*|eye exam|psychiatr\w*|psycholog\w*|counsel(l?ing|l?or)|medical|surgery|mri|x-?ray|ultrasound|colonoscopy|mammogram|obgyn|ob-gyn|pediatric\w*|prescription|pharmacy|chiropract\w*|acupunct\w*)\b/i;
@@ -69,8 +76,11 @@ export function classifyOccasion(i: ClassifyInput): Classification {
   const companions = i.mentions.some((m) => m.where === 'title' && m.pattern !== 'pair');
   const spanDays = i.endsAt != null ? (i.endsAt - i.startsAt) / DAY : 0;
 
+  const ticket = i.ticketCategory != null;
+  if (ticket && SHOW_CATEGORIES.has(i.ticketCategory!)) return out('social', 0.9, 'ticket');
   if (MEDICAL.test(title)) return out('appointment', 0.85, 'medical_title', true);
   if (MEDICAL.test(notes) && !SOCIAL.test(title)) return out('appointment', 0.6, 'medical_notes', true);
+  if (ticket) return out('social', 0.9, 'ticket');
   if (FLIGHT.test(title) || FLIGHT_NUMBER.test(title)) return out('travel', 0.85, 'flight');
   if (LODGING.test(title) && !(SOCIAL.test(title) && !i.allDay)) return out('lodging', 0.8, 'lodging');
   if (i.allDay && spanDays >= 1.5) {

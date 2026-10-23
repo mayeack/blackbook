@@ -66,6 +66,7 @@ export const ROUTE_OF_KIND: Readonly<Record<LlmKind, LlmRoute>> = {
   command: 'draft_openers',
   brief: 'digest_compose',
   ask: 'ask_web',
+  ticket: 'ticket_parse',
 };
 
 /** A ledger row as the consumer sees it (the pseudonymized request it was built from, for re-runs). */

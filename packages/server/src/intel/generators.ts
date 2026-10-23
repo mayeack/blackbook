@@ -5,11 +5,14 @@
  *   pre_event_brief   today's social events with ≥ 2 known attendees (events.ts)
  *   event_followup    the morning after an event you went to: new / gone-quiet people, the host (events.ts)
  *   party_invite      a party / event you host 2–14 days out: whom to invite, Party invites people first (invites.ts)
+ *   event_invite      a show you hold tickets to 1–21 days out: people you met at a similar event, contact-screenshot
+ *                     people first (eventInvites.ts)
  *   travel_overlap    trips in 2–10 days with people there, and visitors coming to your city (travel.ts)
  *   intro             the best eligible intro pairs (intros.ts; setting intros.enabled)
  *   🎲 intro_pair     a mid-score intro pair (intros.ts)
  */
 import type { CandidateGenerator, WildcardSource } from '../pipeline/suggestions/types';
+import { eventInviteCandidates } from './eventInvites';
 import { followupCandidates, preEventCandidates } from './events';
 import { introCandidates, midScorePair } from './intros';
 import { partyInviteCandidates } from './invites';
@@ -30,6 +33,11 @@ export const partyInviteGenerator: CandidateGenerator = {
   generate: (ctx) => partyInviteCandidates(ctx.db, ctx.now, ctx.timeZone),
 };
 
+export const eventInviteGenerator: CandidateGenerator = {
+  kind: 'event_invite',
+  generate: (ctx) => eventInviteCandidates(ctx.db, ctx.now, ctx.timeZone),
+};
+
 export const travelOverlapGenerator: CandidateGenerator = {
   kind: 'travel_overlap',
   generate: (ctx) => [...tripCandidates(ctx.db, ctx.now, ctx.timeZone), ...visitorCandidates(ctx.db, ctx.now, ctx.timeZone)],
@@ -45,6 +53,13 @@ export const introPairWildcard: WildcardSource = {
   generate: (ctx, rng) => (ctx.settings['intros.enabled'] ? midScorePair(ctx.db, rng) : []),
 };
 
-export const generators: CandidateGenerator[] = [preEventBriefGenerator, eventFollowupGenerator, partyInviteGenerator, travelOverlapGenerator, introGenerator];
+export const generators: CandidateGenerator[] = [
+  preEventBriefGenerator,
+  eventFollowupGenerator,
+  partyInviteGenerator,
+  eventInviteGenerator,
+  travelOverlapGenerator,
+  introGenerator,
+];
 
 export const wildcardSources: WildcardSource[] = [introPairWildcard];

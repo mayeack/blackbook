@@ -5,14 +5,19 @@
  *
  *   GET  /google/status       {configured, connected, needsReconnect, account, lastSyncAt, treatments, health,
  *                             calendars[]}
- *   GET  /google/connect      302 → Google consent (calendar.readonly, offline, prompt=consent, PKCE S256, state)
- *   GET  /google/callback     verifies state, exchanges the code, stores the refresh token encrypted
- *                             → 302 /settings?google=connected|denied|expired|scope|error
+ *   GET  /google/connect      302 → Google consent (offline, prompt=consent, PKCE S256, state) for ?product=
+ *                             calendar (default, calendar.readonly) | gmail (gmail.readonly, the ticket source) |
+ *                             photos (the Google Photos Picker). Each product is its own grant and refresh token.
+ *   GET  /google/callback     verifies state, exchanges the code, stores that product's refresh token encrypted
+ *                             → 302 /settings?google=… (calendar), ?gmail=… or ?gphotos=…, each
+ *                             connected|denied|expired|scope|error (an unknown or expired state can't name its
+ *                             product, so it answers ?google=expired|invalid)
  *   POST /google/calendars    {calendars:[{id, treatment: attending|candidate|classify|excluded|default,
  *                             partifulLinked?}]} → journaled settings batch → {batchId, calendars}
  *                             An excluded calendar's synced events are deleted at once (purgeUnusedCalendars).
- *   POST /google/disconnect   {deleteData?} revokes the grant (best effort), deletes the secret and the sync tokens;
- *                             with deleteData also every synced calendar and event
+ *   POST /google/disconnect   {deleteData?} deletes the calendar secret and sync tokens; revokes the grant (best
+ *                             effort) only when Gmail and Photos hold no token either, and then disconnects all
+ *                             three (routes/googleProducts.ts); with deleteData also every synced calendar and event
  *
  * Every path answers 503 GOOGLE_NOT_CONFIGURED until GOOGLE_CLIENT_ID/SECRET are set. Tokens, codes and states are
  * never logged or returned.
@@ -21,7 +26,7 @@ import { Router, type Response } from 'express';
 import { z } from 'zod';
 import { normalizeEmail, type ApiError } from '@yb/shared';
 import { recordSourceHealth } from '../adapters/common/cursors';
-import { CALENDAR_SCOPE, connectedAt, isConnected, REFRESH_TOKEN_SECRET, type FetchLike } from '../adapters/calendar/google';
+import { connectedAt, GOOGLE_PRODUCTS, isConnected, isGoogleProduct, type FetchLike, type GoogleProduct } from '../adapters/calendar/google';
 import { GoogleOAuthFlow } from '../adapters/calendar/oauth';
 import { deleteCalendarData, GCAL_SOURCE, purgeUnusedCalendars } from '../adapters/calendar/sync';
 import { TREATMENTS, treatmentSettingKey, type CalendarKind, type Treatment, type TreatmentSetting } from '../adapters/calendar/treatment';
@@ -31,7 +36,8 @@ import { withBatch } from '../journal/batch';
 import { withRun } from '../journal/runs';
 import { errorFields } from '../ops/logger';
 import { redact } from '../ops/redact';
-import { deleteSecret, getSecret, setSecret } from '../security/secrets';
+import { setSecret } from '../security/secrets';
+import { disconnectGoogleProduct } from './googleProducts';
 import type { RouteDeps } from './index';
 
 export interface GoogleCalendarView {
@@ -72,6 +78,9 @@ export interface GoogleStatus {
 }
 
 const SETTINGS_PATH = '/settings';
+
+/** source_health / source_cursors name of each Google product's source (adapters/gmail, adapters/gphotos). */
+export const PRODUCT_SOURCE: Readonly<Record<GoogleProduct, string>> = { calendar: GCAL_SOURCE, gmail: 'gmail', photos: 'gphotos' };
 
 export function calendarViews(db: DB): GoogleCalendarView[] {
   const rows = db
@@ -222,17 +231,22 @@ export function createGoogleRouter({ db, log, config }: RouteDeps, o: GoogleRout
     res.json(googleStatus(db, secretsKey !== null) satisfies GoogleStatus);
   });
 
-  r.get('/google/connect', (_req, res) => {
+  r.get('/google/connect', (req, res) => {
     if (!secretsKey) throw new HttpError(503, 'SECRETS_UNAVAILABLE', 'SECRETS_KEY is not configured, so the Google token could not be stored.');
-    res.redirect(302, flow!.start().url);
+    const product = req.query.product ?? 'calendar';
+    if (!isGoogleProduct(product)) throw new HttpError(400, 'VALIDATION', 'Unknown Google product.');
+    res.redirect(302, flow!.start(product).url);
   });
 
   r.get('/google/callback', async (req, res) => {
-    const back = (outcome: string) => res.redirect(302, `${SETTINGS_PATH}?google=${outcome}`);
+    let product: GoogleProduct = 'calendar';
+    const back = (outcome: string) => res.redirect(302, `${SETTINGS_PATH}?${GOOGLE_PRODUCTS[product].settingsParam}=${outcome}`);
     const q = CallbackQuery.safeParse(req.query);
     if (!q.success || !q.data.state) return back('invalid');
-    const verifier = flow!.consume(q.data.state);
-    if (!verifier) return back('expired');
+    const pending = flow!.consume(q.data.state);
+    if (!pending) return back('expired');
+    product = pending.product;
+    const verifier = pending.verifier;
     if (q.data.error || !q.data.code) return back(q.data.error === 'access_denied' ? 'denied' : 'invalid');
     if (!secretsKey) return back('error');
     let result;
@@ -243,15 +257,16 @@ export function createGoogleRouter({ db, log, config }: RouteDeps, o: GoogleRout
       log.warn('gcal.oauth_exchange_failed', { error_class: f.error_class, error_code: (e as { reason?: string }).reason, status: (e as { status?: number }).status ?? undefined });
       return back('error');
     }
-    if (!result.scopes.includes(CALENDAR_SCOPE)) return back('scope');
+    const spec = GOOGLE_PRODUCTS[product];
+    if (!result.scopes.includes(spec.scope)) return back('scope');
     if (!result.refreshToken) {
-      log.warn('gcal.oauth_no_refresh_token');
+      log.warn('gcal.oauth_no_refresh_token', { route: product });
       return back('error');
     }
     const at = now();
-    setSecret(db, secretsKey, REFRESH_TOKEN_SECRET, result.refreshToken, at);
-    recordSourceHealth(db, GCAL_SOURCE, at, 'unknown', { error: null, newestDataAt: null, details: { connected: true } });
-    log.info('gcal.connected');
+    setSecret(db, secretsKey, spec.secret, result.refreshToken, at);
+    recordSourceHealth(db, PRODUCT_SOURCE[product], at, 'unknown', { error: null, newestDataAt: null, details: { connected: true } });
+    log.info('gcal.connected', { route: product });
     return back('connected');
   });
 
@@ -263,28 +278,15 @@ export function createGoogleRouter({ db, log, config }: RouteDeps, o: GoogleRout
 
   r.post('/google/disconnect', async (req, res) => {
     const body = DisconnectBody.parse(req.body ?? {});
-    let revoked = false;
-    let token: string | null = null;
-    try {
-      token = secretsKey ? getSecret(db, secretsKey, REFRESH_TOKEN_SECRET) : null;
-    } catch {
-      // Undecryptable (SECRETS_KEY changed): it can't be revoked from here, but it is still removed below.
-    }
-    if (token) {
-      try {
-        await flow!.revoke(token);
-        revoked = true;
-      } catch (e) {
-        log.warn('gcal.revoke_failed', { error_class: errorFields(e).error_class, status: (e as { status?: number }).status ?? undefined });
-      }
-    }
-    const had = deleteSecret(db, REFRESH_TOKEN_SECRET);
-    // Sync tokens belong to the old grant's view of the calendars; a reconnect starts with full listings.
-    db.prepare('DELETE FROM source_cursors WHERE source = ?').run(GCAL_SOURCE);
+    // Revokes the shared grant only when Gmail and Photos hold no token either (routes/googleProducts.ts); sync
+    // tokens belong to the old grant's view of the calendars, so a reconnect starts with full listings.
+    const out = await disconnectGoogleProduct(db, 'calendar', { flow, secretsKey, log, now: now() });
     const deleted = body.deleteData ? deleteCalendarData(db) : null;
-    recordSourceHealth(db, GCAL_SOURCE, now(), 'disabled', { error: 'Google Calendar is not connected.', newestDataAt: null, details: { connected: false } });
-    if (had || deleted) log.info('gcal.disconnected', { counts: { revoked: revoked ? 1 : 0, ...(deleted ? { deleted_events: deleted.events, deleted_calendars: deleted.calendars } : {}) } });
-    res.json({ connected: false, revoked, ...(deleted ? { deleted } : {}) });
+    if (out.had || deleted)
+      log.info('gcal.disconnected', {
+        counts: { revoked: out.revoked ? 1 : 0, all: out.all ? 1 : 0, ...(deleted ? { deleted_events: deleted.events, deleted_calendars: deleted.calendars } : {}) },
+      });
+    res.json({ connected: false, revoked: out.revoked, ...(deleted ? { deleted } : {}) });
   });
 
   return r;

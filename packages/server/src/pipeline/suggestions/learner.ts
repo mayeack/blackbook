@@ -111,6 +111,7 @@ export const KIND_LABEL: Readonly<Record<SuggestionKind, string>> = {
   commitment_due: 'Promises',
   event_followup: 'Event follow-ups',
   party_invite: 'Who to invite',
+  event_invite: 'Invite to a show',
   fading: 'Fading',
   travel_overlap: 'Travel',
   cooling: 'Cooling',

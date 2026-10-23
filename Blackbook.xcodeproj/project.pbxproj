@@ -14,12 +14,14 @@
 		07E34CFDC7C149FAED57F53B /* console.html in Resources */ = {isa = PBXBuildFile; fileRef = 4FC80EA436D4FD929A77680C /* console.html */; };
 		09159275BC5943BE485081DD /* GoogleCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2382E25FE6BDF339DA44560D /* GoogleCalendarService.swift */; };
 		0A8A779BFC33094AB6F3B121 /* Tag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F7E74C7FFD8B03E32C1F7B /* Tag.swift */; };
+		0BB05512F19CC4613A8261D6 /* VisionOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D6C7FE96D5E34FAE421A99A /* VisionOCR.swift */; };
 		0ECFE035226D85FBD0DD5D47 /* SelfHandles.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08CD5E0252D682DAC538F006 /* SelfHandles.generated.swift */; };
 		113034766F531D2FF71921B2 /* LocalSyncProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B8831D66944BBBD80A6E6E /* LocalSyncProtocol.swift */; };
 		138F6CF8015FD8C3F5728519 /* ContactMergeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67485481A0ED6072989C3A0D /* ContactMergeService.swift */; };
 		13B68B5D4ABD5BDC2C1AC8B7 /* Interaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8680F5E40C5778658ABF142D /* Interaction.swift */; };
 		149B1529CEC2A0636F3BA39C /* ContactsAndGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC555780C1246D69358D6177 /* ContactsAndGoldenTests.swift */; };
 		14C5711D868614A2CB8D0BC9 /* SendVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3138F1C65B993597991D4BA /* SendVerifier.swift */; };
+		1748161303004FA2BD5D8FBB /* ContactCreationDates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74E97C69930A2B68183AB8D8 /* ContactCreationDates.swift */; };
 		177A597DD7D90093EB12025F /* WhatsAppSnapshotter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 484C9AEDC078A9F40C72B7B4 /* WhatsAppSnapshotter.swift */; };
 		17FC135DAFA6AACBD52DFD7D /* NoteModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD6C2B5FA5933483BFCEC3B4 /* NoteModelTests.swift */; };
 		1838B918B2D0E5BA722A3EF0 /* ServerMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107F0516F43606F715A04CAC /* ServerMenuView.swift */; };
@@ -57,6 +59,7 @@
 		3FA4C66B68F90455AC2A7A6F /* TestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B2AB6ACBDFEB10466C9FA9 /* TestSupport.swift */; };
 		40C2890B8D20DC8BF540F2B1 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EDF5198B759D9C15B32C55 /* SubscriptionView.swift */; };
 		418089A77A3E793B504C88FB /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD02AD2B31E4BDFBABB04A9 /* LoginView.swift */; };
+		43BF1592FCB0B29980DE1B83 /* VisionOCRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717670CC612E50B2DCBB9C8D /* VisionOCRTests.swift */; };
 		44BB0C5353F55EF5D65C8435 /* SendVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3138F1C65B993597991D4BA /* SendVerifier.swift */; };
 		460F7B5C6218C225C8C7B812 /* GroupIconSuggestionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D43574664C82215699065AE /* GroupIconSuggestionView.swift */; };
 		480F4AB91090F3D31E17B0D2 /* Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A2B2419CA33490186B4DAB4 /* Location.swift */; };
@@ -148,6 +151,7 @@
 		B164427D17DE85E450AEA4C1 /* ActivityListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC2D7FC775E7A455AA78ABC /* ActivityListView.swift */; };
 		B383DE37B4755963A3BBD2FE /* SmartGroupsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6DFE9C279FB07636F49D37A /* SmartGroupsView.swift */; };
 		B3D765199ED7FF84739621F0 /* NetworkGraphEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8CBD51D0C167CD7EB595D1F /* NetworkGraphEngineTests.swift */; };
+		B3E89A3F0FFBD3DFF65877DB /* ContactCreationDatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D1856C2405660C28F505DF4 /* ContactCreationDatesTests.swift */; };
 		B7A06A425624014C337FFB6E /* BiometricServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA93BA20CE88C3BC9C9317A /* BiometricServiceTests.swift */; };
 		B8795D426E8414EDC3028C87 /* ContactFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98155954680EC712B26CB05D /* ContactFormView.swift */; };
 		B99B1B94442BAC565FEDAAA2 /* AIAssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36AE5C06322D7E805B52341 /* AIAssistantViewModel.swift */; };
@@ -175,6 +179,7 @@
 		CE92E09B95760E99321DA25E /* SQLite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C70D12AF7258886AD7709A6 /* SQLite.swift */; };
 		CF527F41F297B1DDE78591A5 /* SyncApplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367B9B783BB9B16DC5A78564 /* SyncApplyTests.swift */; };
 		CFDEF705ED6BC7629FB51319 /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C0BE4D5872D0BE63AD0569 /* AuthenticationService.swift */; };
+		D115AFE868448031E10F92F5 /* ContactCreationDates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74E97C69930A2B68183AB8D8 /* ContactCreationDates.swift */; };
 		D1D5EC721BB0E44AF9636690 /* LocationIconSuggestionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F767094E24F344D3643565AA /* LocationIconSuggestionView.swift */; };
 		D230F0B42992BD121949564C /* BackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C9CF11EF94294BB04E3C45E /* BackupServiceTests.swift */; };
 		D541A668E800D54AD717744B /* LoopbackHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CFE7929B2043E1BDE35D48 /* LoopbackHTTPServer.swift */; };
@@ -206,6 +211,7 @@
 		F0207B4239B9859DC6331039 /* LocationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1837970957580D296D714FDF /* LocationListView.swift */; };
 		F1AEE8275FE88D52F36CE525 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68895959FC8B53D749DE935E /* APIError.swift */; };
 		F363626541A0478C9B36D5FC /* NetworkGraphViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C76007980526C6D096CFBD6 /* NetworkGraphViewModel.swift */; };
+		F3C66FFDAA07D28A3287F777 /* VisionOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D6C7FE96D5E34FAE421A99A /* VisionOCR.swift */; };
 		F6B64AB63BFDA8158B904EE2 /* CollectorRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EA61E0CACCDCD21350ADD45 /* CollectorRuntime.swift */; };
 		F7DD6583F920E520F4EEBE9D /* ClaudeAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA38C3DA0A5DB92E7C98C0F0 /* ClaudeAPIServiceTests.swift */; };
 		F90B2184862AC79EBA241556 /* Contact.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8222BEE7020B6711480F644E /* Contact.swift */; };
@@ -237,6 +243,7 @@
 		08CD5E0252D682DAC538F006 /* SelfHandles.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfHandles.generated.swift; sourceTree = "<group>"; };
 		0C70D12AF7258886AD7709A6 /* SQLite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLite.swift; sourceTree = "<group>"; };
 		0C76007980526C6D096CFBD6 /* NetworkGraphViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphViewModel.swift; sourceTree = "<group>"; };
+		0D1856C2405660C28F505DF4 /* ContactCreationDatesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactCreationDatesTests.swift; sourceTree = "<group>"; };
 		0D88B14476C7E4A4574B1FB1 /* LogInteractionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogInteractionView.swift; sourceTree = "<group>"; };
 		0F30DE3186049895D31C581D /* ContactSuggestionEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSuggestionEngineTests.swift; sourceTree = "<group>"; };
 		101D3964C1DEC2520B694372 /* GroupModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupModelTests.swift; sourceTree = "<group>"; };
@@ -313,6 +320,8 @@
 		6B68EA01CC90E403184F8383 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		6BC3CA6D0B14BE7A363C3E72 /* MessageReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageReaderTests.swift; sourceTree = "<group>"; };
 		6DEB9EAD5765D5804DC385CA /* Note.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Note.swift; sourceTree = "<group>"; };
+		717670CC612E50B2DCBB9C8D /* VisionOCRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionOCRTests.swift; sourceTree = "<group>"; };
+		74E97C69930A2B68183AB8D8 /* ContactCreationDates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactCreationDates.swift; sourceTree = "<group>"; };
 		7503F22C84791441C01DEC94 /* Blackbook.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Blackbook.entitlements; sourceTree = "<group>"; };
 		75F47D5E806EFA1DA2D5935A /* ContactDetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDetailViewModelTests.swift; sourceTree = "<group>"; };
 		7A2B2419CA33490186B4DAB4 /* Location.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Location.swift; sourceTree = "<group>"; };
@@ -345,6 +354,7 @@
 		9AB0EEFC6BF1CA172898A5CC /* SFSymbolSearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFSymbolSearchServiceTests.swift; sourceTree = "<group>"; };
 		9B9D910910FBACB1A4CF56B3 /* ServerStatusModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatusModel.swift; sourceTree = "<group>"; };
 		9C6BD1DE0B2466EA3DCFB985 /* ClaudeAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeAPIService.swift; sourceTree = "<group>"; };
+		9D6C7FE96D5E34FAE421A99A /* VisionOCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionOCR.swift; sourceTree = "<group>"; };
 		A36AE5C06322D7E805B52341 /* AIAssistantViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantViewModel.swift; sourceTree = "<group>"; };
 		A6DFE9C279FB07636F49D37A /* SmartGroupsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartGroupsView.swift; sourceTree = "<group>"; };
 		A80CFB6F6BA1BDFBDE29CBD4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -454,12 +464,14 @@
 			children = (
 				CB72773FE5A1D95AE7E5E7FF /* AttachmentTests.swift */,
 				7D8ED2C7A067EFC65DAFD6D1 /* CallHistoryTests.swift */,
+				0D1856C2405660C28F505DF4 /* ContactCreationDatesTests.swift */,
 				DC555780C1246D69358D6177 /* ContactsAndGoldenTests.swift */,
 				D013C140BD61E02DB3CEF4C0 /* HTTPAPITests.swift */,
 				6BC3CA6D0B14BE7A363C3E72 /* MessageReaderTests.swift */,
 				9A945F23C62E842BB8224D0F /* SendTests.swift */,
 				89B2AB6ACBDFEB10466C9FA9 /* TestSupport.swift */,
 				AF8B909C1D92DCCCDF289136 /* TypedStreamDecoderTests.swift */,
+				717670CC612E50B2DCBB9C8D /* VisionOCRTests.swift */,
 				B9DC334909A1D9C81ED9B3FE /* WhatsAppSnapshotTests.swift */,
 			);
 			path = CollectorTests;
@@ -516,6 +528,7 @@
 		5600889DB8D897C017490D0C /* Contacts */ = {
 			isa = PBXGroup;
 			children = (
+				74E97C69930A2B68183AB8D8 /* ContactCreationDates.swift */,
 				133AA71B29FFC455C0911878 /* ContactsExporter.swift */,
 			);
 			path = Contacts;
@@ -650,6 +663,7 @@
 				6E1A19B401322725EA536971 /* IMessage */,
 				9CFA1B3EE5CBF50B63596192 /* Send */,
 				9B8F4CD695933089E772DA50 /* Tests */,
+				A19CE2134F1A7DFB786463AA /* Vision */,
 				A042FA1D85D2227E23F9672E /* WhatsApp */,
 			);
 			path = collector;
@@ -731,6 +745,14 @@
 				484C9AEDC078A9F40C72B7B4 /* WhatsAppSnapshotter.swift */,
 			);
 			path = WhatsApp;
+			sourceTree = "<group>";
+		};
+		A19CE2134F1A7DFB786463AA /* Vision */ = {
+			isa = PBXGroup;
+			children = (
+				9D6C7FE96D5E34FAE421A99A /* VisionOCR.swift */,
+			);
+			path = Vision;
 			sourceTree = "<group>";
 		};
 		A59DB3D7039CF697E472B0BC /* Resources */ = {
@@ -1198,6 +1220,8 @@
 				C53BCDE22565D22701723C59 /* CollectorAPI.swift in Sources */,
 				AED03FF411FC27D9BE402ED3 /* CollectorRuntime.swift in Sources */,
 				1B12874CC45B21F813F0B737 /* CollectorToken.swift in Sources */,
+				D115AFE868448031E10F92F5 /* ContactCreationDates.swift in Sources */,
+				B3E89A3F0FFBD3DFF65877DB /* ContactCreationDatesTests.swift in Sources */,
 				149B1529CEC2A0636F3BA39C /* ContactsAndGoldenTests.swift in Sources */,
 				9B709C197E00147C49B5D8BE /* ContactsExporter.swift in Sources */,
 				840DCDE841EA78DF85AD7FAD /* HTTPAPITests.swift in Sources */,
@@ -1221,6 +1245,8 @@
 				4E48981F866D0BA245C1A3E0 /* Time.swift in Sources */,
 				5901D66CFB2CA1B73C45B323 /* TypedStreamDecoder.swift in Sources */,
 				DCFEA189F937EB130732C877 /* TypedStreamDecoderTests.swift in Sources */,
+				0BB05512F19CC4613A8261D6 /* VisionOCR.swift in Sources */,
+				43BF1592FCB0B29980DE1B83 /* VisionOCRTests.swift in Sources */,
 				602660ACAADE6BA2A9A82676 /* WhatsAppSnapshotTests.swift in Sources */,
 				4F8917E63D79DD84840AFCE5 /* WhatsAppSnapshotter.swift in Sources */,
 			);
@@ -1283,6 +1309,7 @@
 				F6B64AB63BFDA8158B904EE2 /* CollectorRuntime.swift in Sources */,
 				C4B871D0A1CB3E0879A6FA18 /* CollectorToken.swift in Sources */,
 				349461D101C51D6D178972AD /* Contact.swift in Sources */,
+				1748161303004FA2BD5D8FBB /* ContactCreationDates.swift in Sources */,
 				59FEFF7D727B2CB6F2E62054 /* ContactRelationship.swift in Sources */,
 				5C59F290C171167D7664BE76 /* ContactSyncApply.swift in Sources */,
 				95F49C8A0D9BD7932190EDA2 /* ContactsExporter.swift in Sources */,
@@ -1318,6 +1345,7 @@
 				0A8A779BFC33094AB6F3B121 /* Tag.swift in Sources */,
 				EAD224763DE295F4EEF0799B /* Time.swift in Sources */,
 				EC2A565252AD05EF697CD02C /* TypedStreamDecoder.swift in Sources */,
+				F3C66FFDAA07D28A3287F777 /* VisionOCR.swift in Sources */,
 				177A597DD7D90093EB12025F /* WhatsAppSnapshotter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

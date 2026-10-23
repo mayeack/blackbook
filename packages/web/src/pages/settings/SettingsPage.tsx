@@ -1,10 +1,14 @@
 /**
  * Settings root: account, the agent-loop sub-screens (Digest, Push, Agent, Privacy, What I've learned), Calendars
- * (the Google card: the OAuth callback lands here with ?google=…), and Eval.
+ * (the Google card: the OAuth callback lands here with ?google=…), Email & photos (Gmail tickets and Google Photos
+ * screenshots, ?gmail=… / ?gphotos=…), and Eval.
  */
+import { useEffect } from 'react';
+import { useLocation } from 'react-router';
 import { useMe } from '../../api/hooks';
 import { EntityRow, IconTile } from '../../components/EntityRow';
 import { GoogleCalendarPanel } from '../../components/GoogleCalendar';
+import { GmailPanel, GooglePhotosPanel } from '../../components/GoogleProducts';
 import { Icons } from '../../components/icons';
 import { PageHeader } from '../../components/PageState';
 import { pct, usd, hhmmLabel } from './logic';
@@ -20,6 +24,21 @@ export function SettingsPage() {
   const v = s.data?.values;
   const env = s.data?.environment;
   const off = s.isError ? 'Not available yet' : undefined;
+  const { hash, search } = useLocation();
+
+  // #email-photos (Tickets, Sources) and the Gmail / Photos OAuth callbacks land on their panels, not the top.
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    let target: string | null = params.has('gmail') || params.has('gphotos') ? 'email-photos' : null;
+    if (hash) {
+      try {
+        target = decodeURIComponent(hash.slice(1));
+      } catch {
+        // A malformed #fragment: stay at the top.
+      }
+    }
+    if (target) document.getElementById(target)?.scrollIntoView({ block: 'start' });
+  }, [hash, search]);
 
   const digestSub = v
     ? v['digest.enabled']
@@ -82,6 +101,14 @@ export function SettingsPage() {
         Calendars
       </h2>
       <GoogleCalendarPanel />
+
+      <h2 className="section-title" id="email-photos">
+        Email &amp; photos
+      </h2>
+      <div className="product-panels">
+        <GmailPanel />
+        <GooglePhotosPanel />
+      </div>
 
       <h2 className="section-title">Quality</h2>
       <div className="card-list">

@@ -1,14 +1,17 @@
 /**
- * The Google consent flow (authorization code + PKCE S256, offline access, calendar.readonly only).
- *   start()    → the accounts.google.com URL, plus a pending {state → code_verifier} kept in memory for 10 min.
- *                Only a hash of the state is the map key; nothing of the flow is persisted or logged.
- *   consume()  → the verifier for a returned state, once (a replayed or expired state gets null).
+ * The Google consent flow (authorization code + PKCE S256, offline access, one product's scope per consent).
+ *   start(p)   → the accounts.google.com URL for product p (calendar.readonly, gmail.readonly or the Photos Picker),
+ *                plus a pending {state → code_verifier, product} kept in memory for 10 min. Only a hash of the state
+ *                is the map key; nothing of the flow is persisted or logged.
+ *   consume()  → the verifier and product for a returned state, once (a replayed or expired state gets null). The
+ *                product comes from the pending entry, never from the callback's query, so a callback can't store a
+ *                token under another product.
  *   exchange() → code + verifier → refresh token and granted scopes (POST oauth2.googleapis.com/token).
  *   revoke()   → POST oauth2.googleapis.com/revoke.
  * A server restart drops pending flows: the owner just starts again from Settings.
  */
 import crypto from 'node:crypto';
-import { CALENDAR_SCOPE, mapGoogleError, oauthClient, type FetchLike, type GoogleOAuthConfig, type OAuth2Client } from './google';
+import { GOOGLE_PRODUCTS, mapGoogleError, oauthClient, type FetchLike, type GoogleOAuthConfig, type GoogleProduct, type OAuth2Client } from './google';
 
 export const STATE_TTL_MS = 10 * 60_000;
 const MAX_PENDING = 20;
@@ -33,7 +36,7 @@ export interface OAuthFlowOptions {
 }
 
 export class GoogleOAuthFlow {
-  private readonly pending = new Map<string, { verifier: string; expiresAt: number }>();
+  private readonly pending = new Map<string, { verifier: string; product: GoogleProduct; expiresAt: number }>();
   private readonly now: () => number;
 
   constructor(private readonly o: OAuthFlowOptions) {
@@ -51,15 +54,15 @@ export class GoogleOAuthFlow {
     while (this.pending.size >= MAX_PENDING) this.pending.delete(this.pending.keys().next().value!);
   }
 
-  start(): { url: string; state: string } {
+  start(product: GoogleProduct = 'calendar'): { url: string; state: string } {
     this.prune();
     const state = b64url(crypto.randomBytes(32));
     const verifier = b64url(crypto.randomBytes(48));
-    this.pending.set(b64url(hash(state)), { verifier, expiresAt: this.now() + STATE_TTL_MS });
+    this.pending.set(b64url(hash(state)), { verifier, product, expiresAt: this.now() + STATE_TTL_MS });
     const url = this.client().generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
-      scope: [CALENDAR_SCOPE],
+      scope: [GOOGLE_PRODUCTS[product].scope],
       include_granted_scopes: false,
       response_type: 'code',
       state,
@@ -69,13 +72,13 @@ export class GoogleOAuthFlow {
     return { url, state };
   }
 
-  /** The code_verifier for `state`, at most once and only within the TTL. */
-  consume(state: string): string | null {
+  /** The code_verifier and product for `state`, at most once and only within the TTL. */
+  consume(state: string): { verifier: string; product: GoogleProduct } | null {
     const key = b64url(hash(state));
     const entry = this.pending.get(key);
     if (!entry) return null;
     this.pending.delete(key);
-    return entry.expiresAt > this.now() ? entry.verifier : null;
+    return entry.expiresAt > this.now() ? { verifier: entry.verifier, product: entry.product } : null;
   }
 
   get pendingCount(): number {

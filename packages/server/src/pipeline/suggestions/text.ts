@@ -102,6 +102,9 @@ export function templateHeadline(t: TextInput): string {
     case 'party_invite':
       h = `Who to invite · ${who}`;
       break;
+    case 'event_invite':
+      h = `Invite to a show · ${who}`;
+      break;
     case 'travel_overlap':
       h = `Trip coming up · ${who} nearby`;
       break;
@@ -168,6 +171,14 @@ export function whySummary(t: TextInput): string {
       s = `You're hosting ${d !== null ? `in ${d} day${d === 1 ? '' : 's'}` : 'soon'} and ${who} ${many ? "aren't" : "isn't"} on the guest list yet.${listed}`;
       break;
     }
+    case 'event_invite': {
+      const d = pnum(p, 'daysOut');
+      const many = t.names.length > 1;
+      const shots = Array.isArray(p.screenshot) ? p.screenshot.filter((x) => x === 1 || x === true).length : 0;
+      const saved = shots <= 0 ? '' : !many ? ' You saved their contact from a screenshot.' : shots >= t.names.length ? ' You saved all their contacts from screenshots.' : ` You saved ${shots === 1 ? 'one' : shots} of their contacts from screenshots.`;
+      s = `You have tickets to something ${d !== null ? `in ${d} day${d === 1 ? '' : 's'}` : 'soon'}, and you met ${who} at a similar event.${saved}`;
+      break;
+    }
     case 'travel_overlap':
       s = `You're traveling soon and ${who} ${t.names.length > 1 ? 'are' : 'is'} nearby.`;
       break;
@@ -204,6 +215,10 @@ export function whySignals(payload: Record<string, unknown>): WhySignal[] {
   add('Starts in', n('daysOut') !== null ? `${n('daysOut')} day${n('daysOut') === 1 ? '' : 's'}` : null);
   add('Going so far', n('guestCount') !== null ? String(n('guestCount')) : null);
   add('From Party invites', n('partyInvites') ? String(n('partyInvites')) : null);
+  // event_invite: how alike the show is to where they met (the screenshot flag stays in the summary: these rows also
+  // feed the draft-openers packet).
+  const sims = Array.isArray(payload.sims) ? payload.sims.filter((x): x is number => typeof x === 'number' && Number.isFinite(x)) : [];
+  add('Like where you met', sims.length ? `${Math.round(Math.max(...sims) * 100)}% similar` : null);
   add('Messages that day', n('messages') !== null ? String(n('messages')) : null);
   add('When', n('yearsAgo') !== null ? `${n('yearsAgo')} year${n('yearsAgo') === 1 ? '' : 's'} ago today` : null);
   add('Priority person', payload.priority === true ? 'yes' : null);
@@ -239,6 +254,9 @@ export function templateOpeners(t: TextInput): string[] {
       break;
     case 'party_invite':
       o = [`Hey ${f}! I'm hosting something soon and would love for you to come. Are you around?`, `${f}! Throwing a little something soon and you should come. Want the details?`];
+      break;
+    case 'event_invite':
+      o = [`Hey ${f}! I'm going to a show soon that I think you'd love. Want to come?`, `${f}! I have tickets to something coming up that you might like. Want to join?`];
       break;
     case 'travel_overlap':
       o = [`Hey ${f}, I'll be in town soon — free to meet up?`, `${f}! Heading your way soon, want to grab a coffee?`];

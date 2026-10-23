@@ -1,9 +1,10 @@
 /**
- * Events screen API: calendar occasions (merged calendar copies, maybe linked to a Partiful event) plus Partiful
- * events no occasion covers, with who was there. Every person comes through person_canon → person_visible, so
- * hidden and merged-away people never appear; in the list and the detail, evidence is signal types, weights and
- * message ids only (never message text). Sensitive occasions (medical) and non-social kinds (logistics,
- * appointments, work) are never listed, and a sensitive one is not served at all.
+ * Events screen API: occasions (merged calendar copies and the ticket the owner holds, maybe linked to a Partiful
+ * event) plus Partiful events no occasion covers, with who was there. Every person comes through person_canon →
+ * person_visible, so hidden and merged-away people never appear; in the list and the detail, evidence is signal
+ * types, weights and message ids only (never message text). Sensitive occasions (medical) and non-social kinds
+ * (logistics, appointments, work) are never listed, and a sensitive one is not served at all. Sources come from
+ * occasion_sources ('ticket' = the ticket ledger; its title is the vendor's).
  *
  *   GET /events?when=upcoming|past&kind=social|trips|all&cursor=&limit=
  *   GET /events/:id                 an occasion (a merged-away id answers with its survivor) or a Partiful event
@@ -41,7 +42,7 @@ export interface EventListItem {
   endsAt: number | null;
   allDay: boolean;
   venue: string | null;
-  /** 'calendar' and/or 'partiful'. */
+  /** The occasion's sources (occasion_sources): 'calendar', 'partiful' and/or 'ticket', in that order. */
   sources: string[];
   attendeeCount: number;
   possibleCount: number;
@@ -105,7 +106,8 @@ export interface AttendeeClues {
 }
 
 export interface EventSourceView {
-  source: 'calendar' | 'partiful';
+  /** 'ticket' = a ticket_events row from the owner's ticket emails (title as the vendor wrote it). */
+  source: 'calendar' | 'partiful' | 'ticket';
   role: string;
   title: string | null;
   calendarTreatment: string | null;
@@ -140,6 +142,7 @@ const COUNTED_STATUSES = new Set(['going', 'attended', 'approved', 'checked_in',
 const HIDDEN_STATUSES = new Set(['rejected', 'withdrawn', 'declined', 'invited', 'waitlist']);
 const PARTIFUL_ATTENDING = `(lower(coalesce(e.my_rsvp, '')) IN ('going','approved','maybe','checked_in','attended') OR lower(coalesce(e.my_role, '')) IN ('host','co_host','cohost'))`;
 const KINDS: Record<string, string[]> = { social: ['social'], trips: ['lodging', 'travel'], all: ['social', 'lodging', 'travel'] };
+const SOURCE_ORDER = ['calendar', 'partiful', 'ticket'];
 
 interface AttRow {
   person_id: string;
@@ -268,6 +271,12 @@ export function listEvents(db: DB, o: { when: 'upcoming' | 'past'; kind: keyof t
     }) as ListRow[];
   const page = rows.slice(0, o.limit);
   const redact = hiddenNameRedactor(db);
+  const sourcesOf = db.prepare(`SELECT DISTINCT source FROM occasion_sources WHERE occasion_id = ?`).pluck();
+  const occasionSources = (r: ListRow): string[] => {
+    const have = new Set(sourcesOf.all(r.id) as string[]);
+    if (r.linked) have.add('partiful');
+    return SOURCE_ORDER.filter((x) => have.has(x));
+  };
   const items = page.map((r): EventListItem => {
     const att = r.type === 'occasion' ? attendeeRows(db, { occasionIds: occasionChain(db, r.id) }) : attendeeRows(db, { eventId: r.id });
     const counted = sortAttendees(att.filter(isCounted));
@@ -280,7 +289,7 @@ export function listEvents(db: DB, o: { when: 'upcoming' | 'past'; kind: keyof t
       endsAt: r.ends_at,
       allDay: r.all_day === 1,
       venue: r.venue && maskText(r.venue),
-      sources: r.type === 'event' ? ['partiful'] : r.linked ? ['calendar', 'partiful'] : ['calendar'],
+      sources: r.type === 'event' ? ['partiful'] : occasionSources(r),
       attendeeCount: counted.length,
       possibleCount: att.length - counted.length,
       attendees: counted.slice(0, 5).map(chip),
@@ -352,13 +361,14 @@ export function eventDetail(db: DB, rawId: string): EventDetail {
     const redact = hiddenNameRedactor(db);
     const sources = db
       .prepare(
-        `SELECT s.source, s.role, coalesce(ce.summary, ev.title) AS title, CASE WHEN s.source = 'calendar' THEN o.calendar_treatment END AS treatment
+        `SELECT s.source, s.role, coalesce(ce.summary, ev.title, te.title) AS title, CASE WHEN s.source = 'calendar' THEN o.calendar_treatment END AS treatment
          FROM occasion_sources s JOIN occasions o ON o.id = s.occasion_id
          LEFT JOIN calendar_events ce ON s.source = 'calendar' AND ce.id = s.source_ref
          LEFT JOIN events ev ON s.source = 'partiful' AND ev.id = s.source_ref
+         LEFT JOIN ticket_events te ON s.source = 'ticket' AND te.id = s.source_ref
          WHERE s.occasion_id = ? ORDER BY CASE s.role WHEN 'primary' THEN 0 ELSE 1 END, s.source, s.source_ref`,
       )
-      .all(occ.id) as { source: 'calendar' | 'partiful'; role: string; title: string | null; treatment: string | null }[];
+      .all(occ.id) as { source: EventSourceView['source']; role: string; title: string | null; treatment: string | null }[];
     const ev = occ.event_id
       ? (db.prepare('SELECT id, title, url, my_rsvp FROM events WHERE id = ?').get(occ.event_id) as
           | { id: string; title: string | null; url: string | null; my_rsvp: string | null }

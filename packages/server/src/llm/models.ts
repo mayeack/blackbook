@@ -212,6 +212,7 @@ export const LLM_ROUTES = [
   'ask_web',
   'ask_imessage',
   'eval_shadow',
+  'ticket_parse',
 ] as const;
 export type LlmRoute = (typeof LLM_ROUTES)[number];
 export const isLlmRoute = (r: unknown): r is LlmRoute => typeof r === 'string' && (LLM_ROUTES as readonly string[]).includes(r);
@@ -300,6 +301,8 @@ export const ROUTES: Readonly<Record<LlmRoute, RouteDefaults>> = {
   ask_imessage: r(HAIKU_5_5, 'low', 'adaptive', 2500, '5m', 'sync', 500),
   /** Shadow replays of extraction windows (yb eval shadow), sequential-ish sync calls. */
   eval_shadow: r(HAIKU_5_5, 'low', 'disabled', 8000, '5m', 'sync', 700),
+  /** Ticket emails (adapters/gmail): one Message Batch per Gmail pass with new candidates; the backfill pool while backfilling. */
+  ticket_parse: r(HAIKU_5_5, 'low', 'disabled', 1200, '1h', 'batch', 220),
 };
 
 // ---------------------------------------------------------------------------------------------- overrides

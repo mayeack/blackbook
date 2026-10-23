@@ -2,8 +2,8 @@
  * THE API route registration point. Each module returns a Router with paths relative to /api/v1; add new modules
  * to ROUTES. Everything here sits behind Cloudflare Access, CSRF and Cache-Control: no-store.
  *
- * Agent-loop modules (today … personExtras, intel) serve the paths listed in AGENT_ROUTES (@yb/shared); a contract
- * test checks every entry is mounted and built.
+ * Agent-loop modules (today … personExtras, intel, tickets) serve the paths listed in AGENT_ROUTES (@yb/shared); a
+ * contract test checks every entry is mounted and built.
  */
 import { Router } from 'express';
 import type { AppConfig } from '../config';
@@ -18,7 +18,9 @@ import { circlesRoutes } from './circles';
 import { digestRoutes } from './digest';
 import { evalRoutes } from './eval';
 import { eventsRouter } from './events';
+import { gmailRoutes } from './gmail';
 import { googleRouter } from './google';
+import { gphotosRoutes } from './gphotos';
 import { intelRoutes } from './intel';
 import { learnerRoutes } from './learner';
 import { meRoutes } from './me';
@@ -29,6 +31,7 @@ import { pushRoutes } from './push';
 import { settingsRoutes } from './settings';
 import { sourcesRoutes } from './sources';
 import { suggestionsRoutes } from './suggestions';
+import { ticketsRoutes } from './tickets';
 import { todayRoutes } from './today';
 
 export interface RouteDeps {
@@ -48,6 +51,10 @@ export const ROUTES: RouteModule[] = [
   sourcesRoutes,
   settingsRoutes,
   settingsApiRoutes,
+  // tickets, Gmail and Google Photos (before the events router, docs/design/tickets-met-at.md)
+  ticketsRoutes,
+  gmailRoutes,
+  gphotosRoutes,
   eventsRouter,
   googleRouter,
   // agent loop

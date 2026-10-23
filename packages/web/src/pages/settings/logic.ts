@@ -167,3 +167,17 @@ export function normalizeSpend(environment: unknown): SpendView | null {
     cacheHitRate: hit != null && hit >= 0 && hit <= 1 ? hit : null,
   };
 }
+
+// ---------------------------------------------------------------------------------------------- gmail
+
+const SENDER_DOMAIN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+
+/** Comma- or space-separated sender domains → the valid, lowercased, de-duplicated list (≤ 50). */
+export function parseSenderDomains(text: string): string[] {
+  const out = new Set<string>();
+  for (const raw of text.split(/[\s,;]+/)) {
+    const d = raw.trim().toLowerCase().replace(/^@/, '');
+    if (d.length >= 3 && d.length <= 100 && SENDER_DOMAIN.test(d)) out.add(d);
+  }
+  return [...out].slice(0, 50);
+}

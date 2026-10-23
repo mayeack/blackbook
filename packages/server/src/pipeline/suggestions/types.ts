@@ -104,6 +104,7 @@ export const KIND_POLICY: Readonly<Record<SuggestionKind, KindPolicy>> = {
   commitment_due: { weight: 0.95, cooldownDays: 3, maxShowings: null, actWindowMs: 72 * H },
   event_followup: { weight: 0.85, cooldownDays: null, maxShowings: 1, actWindowMs: 7 * D },
   party_invite: { weight: 0.8, cooldownDays: null, maxShowings: 1, actWindowMs: 7 * D },
+  event_invite: { weight: 0.75, cooldownDays: null, maxShowings: 1, actWindowMs: 7 * D },
   fading: { weight: 0.8, cooldownDays: 14, maxShowings: null, actWindowMs: 7 * D },
   travel_overlap: { weight: 0.8, cooldownDays: null, maxShowings: 1, actWindowMs: 7 * D },
   cooling: { weight: 0.5, cooldownDays: 21, maxShowings: null, actWindowMs: 7 * D },

@@ -53,6 +53,9 @@ final class CollectorRuntime {
     private var server: LoopbackHTTPServer?
     private var api: CollectorAPI?
     private var restartDelay: TimeInterval = 1
+    /// One OCR service for the process (its lock serializes recognitions), warmed up once; set on `queue`.
+    private let ocr = VisionOCRService()
+    private var visionWarmed = false
     private let statusLock = NSLock()
     private var _status = "Starting"
 
@@ -93,9 +96,10 @@ final class CollectorRuntime {
                                sender: MessagesSender(runner: NSAppleScriptRunner()), rows: reader, clock: clock)
         let attachments = AttachmentService(reader: reader, allowlist: allowlist)
         let health = HealthReporter(reader: reader, whatsapp: whatsapp, probe: LiveSystemProbe(), startedAt: Date())
+        let ocr = self.ocr
         let api = CollectorAPI(port: Self.port, dependencies: .init(
             token: { tokens.current() }, reader: reader, contacts: SystemContactsSource(),
-            whatsapp: whatsapp, calls: CallHistoryReader(), send: send, attachments: attachments, health: health, now: Date.init))
+            whatsapp: whatsapp, calls: CallHistoryReader(), send: send, attachments: attachments, ocr: ocr, health: health, now: Date.init))
         let server = LoopbackHTTPServer(port: Self.port, handler: { api.handle($0) })
         server.onStateChange = { [weak self] state in
             guard let self else { return }
@@ -120,6 +124,11 @@ final class CollectorRuntime {
             self.server = server
             self.api = api
             log.info("collector compiled self handles: \(GeneratedSelfHandles.handles.count, privacy: .public)")
+            // Vision's first recognition loads the model (~28 s); do it now, off the request path, once per launch.
+            if !visionWarmed {
+                visionWarmed = true
+                DispatchQueue.global(qos: .utility).async { ocr.warmUp() }
+            }
         } catch {
             setStatus("Listener failed; retrying")
             scheduleRestart()

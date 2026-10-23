@@ -1,15 +1,19 @@
 /**
  * GET /sources: one card per source from source_health + source_cursors, with counts from the episode, identity,
- * event and calendar tables, and the one fix the owner can act on. The core sources (iMessage, WhatsApp,
- * Instagram via Beeper, the Instagram export, Partiful, Google Calendar, Contacts) always get a card, so a source
- * that has never reported still shows how to set it up. Adapters that report under an alias (e.g. 'calendar' for
- * 'gcal') fold into their card.
+ * event, calendar, ticket and screenshot tables, and the one fix the owner can act on. The core sources (iMessage,
+ * WhatsApp, Instagram via Beeper, the Instagram export, Partiful, Google Calendar, Contacts, Gmail, Google Photos)
+ * always get a card, so a source that has never reported still shows how to set it up. Adapters that report under an
+ * alias (e.g. 'calendar' for 'gcal', 'screenshot' identities for 'gphotos') fold into their card. Gmail and Google
+ * Photos read their connection straight from the secrets table (each is its own Google grant); without SECRETS_KEY
+ * their fix is the set-the-key guidance, since /google/connect refuses to start (the web remaps the Calendar card the
+ * same way from /google/status).
  *
  * Error text, cursor scopes and detail strings pass through redact(): a per-chat scope can embed a phone. Counts
  * only: no names, handles or titles leave this module.
  */
 import os from 'node:os';
 import { Router } from 'express';
+import { isConnected, type GoogleProduct } from '../adapters/calendar/google';
 import type { DB } from '../db/connection';
 import { redact } from '../ops/redact';
 import type { RouteDeps } from './index';
@@ -46,6 +50,13 @@ export interface SourceCounts {
   calendarEvents?: number;
   occasions?: number;
   contactCards?: number;
+  /** Gmail: messages the ticket source looked at, those that were ticket mail, and the ticketed events. */
+  emailsScanned?: number;
+  ticketEmails?: number;
+  tickets?: number;
+  /** Google Photos: contact screenshots read, and how many linked to a person. */
+  screenshots?: number;
+  screenshotsLinked?: number;
   /** Calls in the Mac's call log. */
   calls?: number;
 }
@@ -54,6 +65,8 @@ export interface SourceCounts {
 export type SourceFixKind =
   | 'connect_google'
   | 'google_not_configured'
+  /** Gmail / Google Photos: an OAuth client but no SECRETS_KEY, so a connect would be refused. */
+  | 'google_secrets_missing'
   | 'sign_in_partiful'
   | 'link_whatsapp'
   | 'beeper_disconnected'
@@ -61,7 +74,9 @@ export type SourceFixKind =
   | 'drop_instagram_export'
   | 'allow_contacts'
   | 'collector_setup'
-  | 'contract_broken';
+  | 'contract_broken'
+  | 'connect_gmail'
+  | 'connect_gphotos';
 
 export interface SourceFix {
   kind: SourceFixKind;
@@ -95,6 +110,8 @@ export interface SourcesView {
 /** What the server knows about its own source configuration (RouteDeps.config). */
 export interface SourcesOptions {
   googleConfigured?: boolean;
+  /** SECRETS_KEY is set, so a Google connect can store its token. */
+  secretsAvailable?: boolean;
   beeperConfigured?: boolean;
   importsDir?: string;
 }
@@ -117,8 +134,13 @@ const CARDS: readonly CardDef[] = [
   { source: 'partiful', aliases: [], core: true },
   { source: 'gcal', aliases: ['calendar', 'google_calendar'], core: true },
   { source: 'addressbook', aliases: ['contacts'], core: true },
+  { source: 'gmail', aliases: [], core: true },
+  { source: 'gphotos', aliases: ['screenshot', 'google_photos'], core: true },
   { source: 'calls', aliases: [], core: true },
 ];
+
+/** The Google product behind a card whose connection is its own grant (the secrets table knows). */
+const PRODUCT_CARDS: Readonly<Record<string, GoogleProduct>> = { gmail: 'gmail', gphotos: 'photos' };
 
 /** The card a source name reports into (itself when it isn't a known alias). */
 export function cardFor(source: string): string {
@@ -195,10 +217,20 @@ function fixFor(
   reason: string,
   details: unknown,
   o: Required<SourcesOptions>,
+  connected: ReadonlySet<GoogleProduct>,
 ): SourceFix | null {
   const needsYou = status === 'auth_required';
   const neverRan = status === 'unknown' && !hasData;
   switch (source) {
+    case 'gmail':
+    case 'gphotos': {
+      if (!o.googleConfigured) return { kind: 'google_not_configured' };
+      if (needsYou || !connected.has(PRODUCT_CARDS[source]!) || /revoked|invalid_grant|reconnect|insufficient/.test(reason)) {
+        if (!o.secretsAvailable) return { kind: 'google_secrets_missing' };
+        return { kind: source === 'gmail' ? 'connect_gmail' : 'connect_gphotos' };
+      }
+      break;
+    }
     case 'gcal': {
       if (!o.googleConfigured) return { kind: 'google_not_configured' };
       const connected = connectedFlag(details);
@@ -295,12 +327,30 @@ function countsByCard(db: DB, now: number): Map<string, SourceCounts> {
   }
   const occ = db.prepare(`SELECT count(*) FROM occasions WHERE status = 'active'`).pluck().get() as number;
   if (occ > 0) add('gcal', 'occasions', occ);
+
+  const mail = db.prepare(`SELECT count(*) AS n, coalesce(sum(triage = 'candidate'), 0) AS tickets FROM gmail_messages`).get() as { n: number; tickets: number };
+  if (mail.n > 0) add('gmail', 'emailsScanned', mail.n);
+  if (mail.tickets > 0) add('gmail', 'ticketEmails', mail.tickets);
+  const tickets = db.prepare('SELECT count(*) FROM ticket_events WHERE merged_into_id IS NULL').pluck().get() as number;
+  if (tickets > 0) add('gmail', 'tickets', tickets);
+  // Linked to a visible person, as Settings → Email & photos counts them (adapters/gphotos/sessions.ts).
+  const shots = db
+    .prepare(
+      `SELECT count(*) AS n,
+              coalesce(sum(cs.status = 'linked' AND EXISTS (SELECT 1 FROM person_canon pc JOIN person_visible pv ON pv.id = pc.canonical_id
+                                                           WHERE pc.person_id = cs.person_id)), 0) AS linked
+       FROM contact_screenshots cs`,
+    )
+    .get() as { n: number; linked: number };
+  if (shots.n > 0) add('gphotos', 'screenshots', shots.n);
+  if (shots.linked > 0) add('gphotos', 'screenshotsLinked', shots.linked);
   return out;
 }
 
 export function sourcesView(db: DB, now = Date.now(), opts: SourcesOptions = {}): SourcesView {
   const o: Required<SourcesOptions> = {
     googleConfigured: opts.googleConfigured ?? false,
+    secretsAvailable: opts.secretsAvailable ?? false,
     beeperConfigured: opts.beeperConfigured ?? false,
     importsDir: opts.importsDir ?? '',
   };
@@ -321,6 +371,7 @@ export function sourcesView(db: DB, now = Date.now(), opts: SourcesOptions = {})
     )
     .all({ d1: now - DAY, d7: now - 7 * DAY }) as { source: string; total: number; d1: number; d7: number; oldest: number | null; newest: number | null }[];
   const counts = countsByCard(db, now);
+  const connected = new Set(Object.values(PRODUCT_CARDS).filter((p) => isConnected(db, p)));
 
   const names = new Set<string>([
     ...CARDS.filter((c) => c.core).map((c) => c.source),
@@ -346,7 +397,8 @@ export function sourcesView(db: DB, now = Date.now(), opts: SourcesOptions = {})
       const status = h?.status ?? 'unknown';
       const details = parseDetails(h?.details ?? null);
       const hasData = messages != null || cs.length > 0 || Object.values(c).some((n) => n > 0);
-      const configured = source === 'gcal' ? o.googleConfigured : source === 'beeper' ? o.beeperConfigured || hs.length > 0 : true;
+      const configured =
+        source === 'gcal' || Object.hasOwn(PRODUCT_CARDS, source) ? o.googleConfigured : source === 'beeper' ? o.beeperConfigured || hs.length > 0 : true;
       return {
         source,
         status,
@@ -365,7 +417,7 @@ export function sourcesView(db: DB, now = Date.now(), opts: SourcesOptions = {})
         messages,
         counts: c,
         configured,
-        fix: fixFor(source, status, hasData, reasonText(h, details), details, o),
+        fix: fixFor(source, status, hasData, reasonText(h, details), details, o, connected),
       };
     });
   return { sources, generatedAt: now };
@@ -375,6 +427,7 @@ export function sourcesRoutes({ db, config }: RouteDeps): Router {
   const r = Router();
   const opts: SourcesOptions = {
     googleConfigured: config?.google != null,
+    secretsAvailable: config?.secretsKey != null,
     beeperConfigured: Boolean(config?.beeper.token || config?.secretsKey),
     importsDir: config?.importsDir,
   };

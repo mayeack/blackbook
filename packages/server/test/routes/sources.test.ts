@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import crypto from 'node:crypto';
 import request from 'supertest';
 import { uuidv7 } from '@yb/shared';
+import { loadConfig } from '../../src/config';
 import { createApp } from '../../src/http/app';
 import type { SourcesView, SourceView } from '../../src/routes/sources';
 import { cardFor, displayFolder, sourcesView } from '../../src/routes/sources';
@@ -9,7 +11,7 @@ import { DAY } from './world';
 
 const devApp = (db = memDb()) => createApp({ db, auth: { mode: 'dev-bypass', email: 'owner@example.com' } });
 
-const CORE = ['imessage', 'whatsapp', 'beeper', 'instagram_dyi', 'partiful', 'gcal', 'addressbook', 'calls'];
+const CORE = ['imessage', 'whatsapp', 'beeper', 'instagram_dyi', 'partiful', 'gcal', 'addressbook', 'gmail', 'gphotos', 'calls'];
 
 function seedMessages(db: ReturnType<typeof memDb>, source: string, times: number[]) {
   const conv = uuidv7();
@@ -50,6 +52,9 @@ describe('GET /api/v1/sources', () => {
     expect(card(view, 'gcal')).toMatchObject({ configured: false, fix: { kind: 'google_not_configured' } });
     expect(card(view, 'imessage').fix).toEqual({ kind: 'collector_setup' });
     expect(card(view, 'addressbook').fix).toBeNull();
+    // Gmail and Google Photos ride on the same OAuth client.
+    expect(card(view, 'gmail')).toMatchObject({ configured: false, fix: { kind: 'google_not_configured' } });
+    expect(card(view, 'gphotos')).toMatchObject({ configured: false, fix: { kind: 'google_not_configured' } });
     expect(card(view, 'calls').fix).toEqual({ kind: 'collector_setup' });
   });
 
@@ -180,6 +185,88 @@ describe('GET /api/v1/sources', () => {
     expect(card(sourcesView(db, T0, { googleConfigured: true }), 'gcal').fix).toBeNull();
     // The client still learns the details from /google/status; without the OAuth client nothing else matters.
     expect(card(sourcesView(db, T0), 'gcal').fix).toEqual({ kind: 'google_not_configured' });
+  });
+
+  it('Gmail and Google Photos: connected straight from their own secret; counts from the ledger and the screenshots', () => {
+    const db = memDb();
+    const opts = { googleConfigured: true, secretsAvailable: true };
+    // Not connected: connect each one (its own consent), even with no health row yet.
+    expect(card(sourcesView(db, T0, opts), 'gmail')).toMatchObject({ configured: true, status: 'unknown', fix: { kind: 'connect_gmail' } });
+    expect(card(sourcesView(db, T0, opts), 'gphotos')).toMatchObject({ configured: true, status: 'unknown', fix: { kind: 'connect_gphotos' } });
+
+    // A stored token (any bytes: only its presence is read) is "connected": nothing to do.
+    const secret = db.prepare(`INSERT INTO secrets (name, ciphertext, iv, tag, updated_at) VALUES (?, x'00', x'00', x'00', ?)`);
+    secret.run('gmail.refresh_token', T0);
+    secret.run('gphotos.refresh_token', T0);
+    expect(card(sourcesView(db, T0, opts), 'gmail').fix).toBeNull();
+    expect(card(sourcesView(db, T0, opts), 'gphotos').fix).toBeNull();
+
+    // Google refused the grant: connect again.
+    health(db, 'gmail', 'auth_required', { error: 'invalid_grant' });
+    health(db, 'gphotos', 'error', { error: 'token revoked' });
+    expect(card(sourcesView(db, T0, opts), 'gmail').fix).toEqual({ kind: 'connect_gmail' });
+    expect(card(sourcesView(db, T0, opts), 'gphotos').fix).toEqual({ kind: 'connect_gphotos' });
+
+    // Counts: messages looked at, ticket mail, live ticket events; screenshots and those linked; screenshot people.
+    const msg = db.prepare(
+      `INSERT INTO gmail_messages (gmail_id, thread_id, internal_at, triage, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    msg.run('m1', 't1', T0, 'candidate', T0, T0);
+    msg.run('m2', 't2', T0, 'marketing', T0, T0);
+    msg.run('m3', 't3', T0, 'ignored', T0, T0);
+    const tk = db.prepare(
+      `INSERT INTO ticket_events (id, title, title_key, starts_at, local_date, status, first_email_at, last_email_at, merged_into_id, created_at, updated_at)
+       VALUES (?, 'Show', 'show', ?, '2026-10-20', 'holding', ?, ?, ?, ?, ?)`,
+    );
+    tk.run('tk-1', T0, T0, T0, null, T0, T0);
+    tk.run('tk-2', T0, T0, T0, 'tk-1', T0, T0);
+    const shot = db.prepare(
+      `INSERT INTO contact_screenshots (id, source, source_ref, status, person_id, created_at, updated_at) VALUES (?, 'gphotos', ?, ?, ?, ?, ?)`,
+    );
+    const pat = seedPerson(db, { first_name: 'Pat', last_name: 'Quill', display_name: 'Pat Quill' });
+    seedIdentity(db, pat, 'phone', '+12125550142', { source: 'screenshot' });
+    shot.run(uuidv7(), 'item-1', 'linked', pat, T0, T0);
+    shot.run(uuidv7(), 'item-2', 'no_contact', null, T0, T0);
+    // Linked to someone hidden: read, but not counted as linked (Settings counts visible people only too).
+    const hid = seedPerson(db, { first_name: 'Hal', last_name: 'Hidden', display_name: 'Hal Hidden', is_hidden: 1 });
+    shot.run(uuidv7(), 'item-3', 'linked', hid, T0, T0);
+    const view = sourcesView(db, T0, opts);
+    expect(card(view, 'gmail').counts).toEqual({ emailsScanned: 3, ticketEmails: 1, tickets: 1 });
+    expect(card(view, 'gphotos').counts).toEqual({ screenshots: 3, screenshotsLinked: 1, identities: 1, people: 1 });
+    expect(cardFor('screenshot')).toBe('gphotos');
+    expect(view.sources.map((s) => s.source)).toEqual(CORE);
+  });
+
+  it('Gmail and Google Photos without SECRETS_KEY: the set-the-key guidance, never a Connect button into a 503', async () => {
+    const db = memDb();
+    const opts = { googleConfigured: true, secretsAvailable: false };
+    expect(card(sourcesView(db, T0, opts), 'gmail')).toMatchObject({ configured: true, fix: { kind: 'google_secrets_missing' } });
+    expect(card(sourcesView(db, T0, opts), 'gphotos')).toMatchObject({ configured: true, fix: { kind: 'google_secrets_missing' } });
+    // A refused grant can't be reconnected without the key either.
+    db.prepare(`INSERT INTO secrets (name, ciphertext, iv, tag, updated_at) VALUES ('gmail.refresh_token', x'00', x'00', x'00', ?)`).run(T0);
+    health(db, 'gmail', 'auth_required', { error: 'invalid_grant' });
+    expect(card(sourcesView(db, T0, opts), 'gmail').fix).toEqual({ kind: 'google_secrets_missing' });
+    // No OAuth client still comes first.
+    expect(card(sourcesView(db, T0, { secretsAvailable: false }), 'gmail').fix).toEqual({ kind: 'google_not_configured' });
+
+    // Through the real app: an OAuth client but no SECRETS_KEY, where /google/connect answers 503.
+    const env = { VITEST: '1', YB_DATA_DIR: '/tmp/yb-sources-route-test', DEV_AUTH_BYPASS: '1' };
+    const google = {
+      GOOGLE_CLIENT_ID: 'test-client-id.apps.example',
+      GOOGLE_CLIENT_SECRET: 'test-client-secret',
+      GOOGLE_REDIRECT_URI: 'https://yeackbot.example/api/v1/google/callback',
+    };
+    const appWith = (config: ReturnType<typeof loadConfig>) => createApp({ db: memDb(), auth: { mode: 'dev-bypass', email: 'owner@example.com' }, config });
+    const app = appWith(loadConfig({ ...env, ...google }));
+    const view = (await request(app).get('/api/v1/sources')).body as SourcesView;
+    expect(card(view, 'gmail').fix).toEqual({ kind: 'google_secrets_missing' });
+    expect(card(view, 'gphotos').fix).toEqual({ kind: 'google_secrets_missing' });
+    expect((await request(app).get('/api/v1/google/connect?product=gmail')).status).toBe(503);
+    // With the key set, the Connect buttons come back.
+    const keyed = loadConfig({ ...env, ...google, SECRETS_KEY: crypto.randomBytes(32).toString('base64') });
+    const ok = (await request(appWith(keyed)).get('/api/v1/sources')).body as SourcesView;
+    expect(card(ok, 'gmail').fix).toEqual({ kind: 'connect_gmail' });
+    expect(card(ok, 'gphotos').fix).toEqual({ kind: 'connect_gphotos' });
   });
 
   it('shortens the imports folder to ~', () => {

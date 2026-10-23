@@ -5,7 +5,7 @@
  *
  *   pipeline/ties/generators.ts         fading, cooling, dormant          + wildcard dormant_close
  *   pipeline/obligations/generators.ts  reply_debt, commitment_due
- *   intel/generators.ts                 pre_event_brief, event_followup, party_invite, travel_overlap, intro
+ *   intel/generators.ts                 pre_event_brief, event_followup, party_invite, event_invite, travel_overlap, intro
  *                                       + wildcard intro_pair
  *   pipeline/circles/generators.ts      circle_neglect                    + wildcard circle_checkin
  *   pipeline/suggestions/generators.ts  memory + wildcards unseen_kind, memory; DEFAULT generators for fading,

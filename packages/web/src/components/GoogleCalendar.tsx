@@ -9,18 +9,18 @@ import type { GoogleStatusView, SourceFix } from '../api/types';
 import { googleOutcome } from '../lib/events';
 import { plural, relativeDay } from '../lib/format';
 import { treatmentHint, treatmentLabel } from '../lib/labels';
-import { calendarSummary, fixCopy, googleFix } from '../lib/sources';
+import { calendarSummary, fixCopy, googleFix, reconnectCopy } from '../lib/sources';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useToast } from './Toast';
 
 /** "How to fix": what to do, in words, plus the one button when there is something to click. */
 export function FixBox({ fix, reconnect }: { fix: SourceFix; reconnect?: boolean }) {
   const c = fixCopy(fix);
-  const again = reconnect && fix.kind === 'connect_google';
+  const again = reconnect ? reconnectCopy(fix.kind) : null;
   return (
     <div className={fix.kind === 'contract_broken' ? 'fix-box bad' : 'fix-box'} role="note">
-      <strong>{again ? 'Reconnect Google Calendar' : c.title}</strong>
-      <p>{again ? 'Google stopped accepting yeackbot’s access (it was revoked or expired). Sign in again to resume.' : c.body}</p>
+      <strong>{again ? again.title : c.title}</strong>
+      <p>{again ? again.body : c.body}</p>
       {c.folder && <p className="mono fix-folder">{c.folder}</p>}
       {c.action && (
         // A full navigation: the server redirects to Google's consent screen.
@@ -91,7 +91,7 @@ export function CalendarSection({ g }: { g: GoogleStatusView }) {
       )}
       <div>
         <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirm(true)}>
-          Disconnect Google
+          Disconnect Google Calendar
         </button>
       </div>
       <ConfirmDialog
@@ -118,7 +118,7 @@ export function CalendarSection({ g }: { g: GoogleStatusView }) {
           )
         }
       >
-        <p>yeackbot stops reading your calendars. You can connect again any time.</p>
+        <p>yeackbot stops reading your calendars. Your other Google connections (Gmail, Photos) are kept. You can connect again any time.</p>
         <label className="check-line">
           <input type="checkbox" checked={deleteData} disabled={disconnect.isPending} onChange={(e) => setDeleteData(e.target.checked)} />
           <span>Also delete the calendar events yeackbot synced (get-togethers built from them are retired overnight)</span>

@@ -9,7 +9,7 @@
  *                          observations, never keys. Messages Beeper already has are skipped; the rest are
  *                          episodes with source 'instagram_dyi' (idempotent natural keys).
  *   followers / following  instagram_username identities (hidden roster_only people until they qualify) plus
- *                          instagram_follows rows with the follow dates.
+ *                          instagram_follows rows with the follow dates (the earliest one ever exported is kept).
  * Re-imports are no-ops (import_files by content hash); the owner's files are never moved or deleted.
  * Stats and health are counts only.
  */
@@ -457,11 +457,15 @@ export class DyiImporter {
   private async importFollows(entry: DyiEntry): Promise<void> {
     const direction = entry.type === 'followers' ? 'follower' : 'following';
     const rows = relationshipEntries(parseDyiJson(await entry.read()));
+    // followed_at keeps the EARLIEST follow time ever exported (intel/metAt reads it as when the owner connected): a
+    // later export after an unfollow + re-follow, or the same username twice in one file, never moves it later.
     const upsert = this.q(
       `INSERT INTO instagram_follows (identity_id, direction, followed_at, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (identity_id, direction) DO UPDATE SET followed_at = coalesce(excluded.followed_at, instagram_follows.followed_at),
+       ON CONFLICT (identity_id, direction) DO UPDATE SET
+         followed_at = min(coalesce(excluded.followed_at, instagram_follows.followed_at), coalesce(instagram_follows.followed_at, excluded.followed_at)),
          last_seen_at = max(instagram_follows.last_seen_at, excluded.last_seen_at)
-       WHERE excluded.followed_at IS NOT instagram_follows.followed_at OR excluded.last_seen_at > instagram_follows.last_seen_at`,
+       WHERE (excluded.followed_at IS NOT NULL AND (instagram_follows.followed_at IS NULL OR excluded.followed_at < instagram_follows.followed_at))
+          OR excluded.last_seen_at > instagram_follows.last_seen_at`,
     );
     tx(this.db, () => {
       for (const r of rows) {

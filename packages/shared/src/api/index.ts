@@ -14,4 +14,5 @@ export * from './push';
 export * from './routes';
 export * from './settings';
 export * from './suggestions';
+export * from './tickets';
 export * from './today';

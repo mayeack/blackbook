@@ -10,6 +10,7 @@ import { undoRun } from '../../../src/journal/undo';
 import { createLogger, memorySink } from '../../../src/ops/logger';
 import { Scheduler } from '../../../src/scheduler/scheduler';
 import { memDb, seedIdentity, seedMessage, seedPerson } from '../../helpers';
+import { ticketEvent, ticketOccasion } from '../../intel/eventInviteWorld';
 import {
   CASEY,
   DAY,
@@ -485,6 +486,48 @@ describe('partiful-hosted-guests (every 30 min)', () => {
     await refreshHostedGuests(s.db, s.client(), { now: T0 + 2 * HOUR });
     expect(smsNames(s.db, hosted)).toEqual([]);
     expect(smsNames(s.db, eventRow(s.db, 'evtPast0001'))).toEqual([]);
+  });
+
+  it('also re-reads the lists behind a show he holds tickets to in the next 3 weeks (event_invite needs them fresh)', async () => {
+    const s = setup();
+    // An event he's a guest at, the night of the show (not hosted: the hosted refresh alone never re-reads it).
+    s.f.events.push({
+      id: 'evtGuest0001',
+      title: 'Synthetic Pregame',
+      startDate: iso(T0 + 6 * DAY),
+      list: 'upcoming',
+      ownerIds: [HOST],
+      guest: { id: 'p-me', status: 'GOING' },
+      guests: [{ id: 'p-robin', userId: ROBIN, name: 'Robin Example', status: 'GOING' }],
+    });
+    await s.sync(T0);
+    const pregame = eventRow(s.db, 'evtGuest0001');
+    const listRow = () => one<{ guests_status: string; guests_fetched_at: number }>(s.db, `SELECT guests_status, guests_fetched_at FROM partiful_event_sync WHERE event_id = 'evtGuest0001'`);
+    const refreshed = async (now: number) => {
+      const before = s.f.fnCalls('getGuests').length;
+      await refreshHostedGuests(s.db, s.client(), { now });
+      return s.f.fnCalls('getGuests').slice(before).map((c) => c.params.eventId as string).sort();
+    };
+    expect(await refreshed(T0 + HOUR)).toEqual(['evtHosted001']);
+    // A show 6 days out with a holding ticket, its occasion linked to the pregame.
+    const ticket = ticketEvent(s.db, { title: 'Velvet Static', start: T0 + 6 * DAY + 2 * HOUR });
+    const occ = ticketOccasion(s.db, ticket, { title: 'Velvet Static', start: T0 + 6 * DAY + 2 * HOUR, eventId: pregame });
+    expect(await refreshed(T0 + 2 * HOUR)).toEqual(['evtGuest0001', 'evtHosted001']);
+    expect(listRow()).toEqual({ guests_status: 'ok', guests_fetched_at: T0 + 2 * HOUR });
+    // Named only in the ticket mail (partiful_ids) counts the same.
+    s.db.prepare('UPDATE occasions SET event_id = NULL WHERE id = ?').run(occ);
+    expect(await refreshed(T0 + 3 * HOUR)).toEqual(['evtHosted001']);
+    s.db.prepare('UPDATE ticket_events SET partiful_ids = ? WHERE id = ?').run(JSON.stringify(['evtGuest0001']), ticket);
+    expect(await refreshed(T0 + 4 * HOUR)).toEqual(['evtGuest0001', 'evtHosted001']);
+    // Tickets no longer held: no call for it. Past the hosted dinner too: no calls at all.
+    s.db.prepare(`UPDATE ticket_events SET status = 'sold' WHERE id = ?`).run(ticket);
+    expect(await refreshed(T0 + 5 * HOUR)).toEqual(['evtHosted001']);
+    s.db.prepare(`UPDATE ticket_events SET status = 'holding' WHERE id = ?`).run(ticket);
+    expect(await refreshed(T0 + 4 * DAY)).toEqual(['evtGuest0001']);
+    s.db.prepare(`UPDATE ticket_events SET status = 'sold' WHERE id = ?`).run(ticket);
+    const calls = s.f.calls.length;
+    expect(await refreshHostedGuests(s.db, s.client(), { now: T0 + 4 * DAY + HOUR })).toEqual({ stats: {}, partial: false, health: 'ok' });
+    expect(s.f.calls.length).toBe(calls);
   });
 
   it('a list that fails to read is marked error (no invite suggestion trusts it); nothing hosted ahead → no calls', async () => {

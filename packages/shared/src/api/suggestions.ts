@@ -17,6 +17,7 @@ export const SUGGESTION_KINDS = [
   'commitment_due',
   'event_followup',
   'party_invite',
+  'event_invite',
   'fading',
   'travel_overlap',
   'cooling',
