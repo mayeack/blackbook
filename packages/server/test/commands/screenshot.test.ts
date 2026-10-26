@@ -31,6 +31,8 @@ function partyAnswer(call: FakeCall, handle = '@yb.eval.rowan', name: string | n
   const seen = call.images > 0;
   return {
     json: {
+      gist: 'g',
+      sure: true,
       intent: 'set_preference',
       image: seen ? { handle, name } : null,
       command: null,
@@ -41,7 +43,8 @@ function partyAnswer(call: FakeCall, handle = '@yb.eval.rowan', name: string | n
         facts: seen ? [{ ref: IMAGE_REF, cat: 'activity_pref', value: 'great DJ' }] : [],
         note: null,
       },
-      preferences: [{ surface: 'this person', ref: seen ? IMAGE_REF : null, kind: 'party_invites' }],
+      preferences: [{ surface: 'this person', ref: seen ? IMAGE_REF : null, action: 'invite_first' }],
+      reminder: null,
       question: null,
     },
   };
@@ -123,11 +126,14 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
         const tokens = [...call.userText.matchAll(/^(P\w+) = Sam [A-Z]\.$/gm)].map((m) => m[1]!);
         return {
           json: {
+            gist: 'g',
+            sure: true,
             intent: 'set_preference',
             image: null,
             command: null,
             log: null,
-            preferences: [{ surface: 'Sam', ref: tokens.length === 1 ? tokens[0] : null, kind: 'party_invites' }],
+            preferences: [{ surface: 'Sam', ref: tokens.length === 1 ? tokens[0] : null, action: 'invite_first' }],
+            reminder: null,
             question: null,
           },
         };
@@ -138,7 +144,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     w.say('yb always invite Sam to my parties', at(0));
     await w.run({ now: at(1) });
     expect(party(w.db)).toEqual([sam]);
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Sam R.\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Prioritized Sam R. for party invites.\n\n(Text "undo" to take that back.)`);
 
     const samK = w.person('Sam', 'Kowalski');
     w.say('yb always invite Sam to my parties', at(10));
@@ -147,18 +153,21 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
     w.say('2', at(12));
     await w.run({ now: at(13) });
     expect(party(w.db).sort()).toEqual([sam, samK].sort());
-    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Noted for Sam K.\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`);
+    expect(w.lastReply()).toBe(`${BOT_MARKER} ✓ Prioritized Sam K. for party invites.\n\n(Text "undo" to take that back.)`);
   });
 
   it('a preference about the screenshot person with no log at all: the person and the preference, no note of facts', async () => {
     const llm = new FakeLlmClient({
       responder: () => ({
         json: {
+          gist: 'g',
+          sure: true,
           intent: 'set_preference',
           image: { handle: 'yb.eval.rowan', name: 'Rowan Testperson' },
           command: null,
           log: null,
-          preferences: [{ surface: 'them', ref: IMAGE_REF, kind: 'party_invites' }],
+          preferences: [{ surface: 'them', ref: IMAGE_REF, action: 'invite_first' }],
+          reminder: null,
           question: null,
         },
       }),
@@ -183,7 +192,7 @@ describe('yb + profile screenshot: who, what they are, how to treat them', () =>
       `${BOT_MARKER} ✓ Noted for Rowan Testperson (new, from your screenshot).\nNoted: “great DJ”\nPrioritized for party invites.\n\n(Text "undo" to take that back.)`,
     );
     const titles = w.db.prepare('SELECT title FROM change_batches ORDER BY rowid').pluck().all();
-    expect(titles).toEqual(expect.arrayContaining(['Noted about Rowan Testperson (text)', 'Rowan Testperson: prioritized for party invites (text)']));
+    expect(titles).toEqual(expect.arrayContaining(['Noted about Rowan Testperson (text)', 'Prioritized Rowan Testperson for party invites (text)']));
   });
 
   it('screenshots off in Settings → nothing is fetched or sent, and the reply says why', async () => {

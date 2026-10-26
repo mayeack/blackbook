@@ -21,6 +21,7 @@ import { SettingsValues, SETTING_KEYS, type SettingGroup, type SettingKey, type 
 import type { DB } from '../db/connection';
 import { withBatch, type Actor } from '../journal/batch';
 import { withRun } from '../journal/runs';
+import { DEFAULT_LOCAL_MODEL } from '../llm/local';
 import { routeOverrideIssues } from '../llm/models';
 
 // ---------------------------------------------------------------------------------------------- keys & types
@@ -177,6 +178,18 @@ const DEFS: { [K in AnySettingKey]: Def<K> } = {
   },
   'llm.excluded_person_ids': { group: 'llm', label: 'Excluded people', description: 'Never sent to the model.', default: () => [] },
   'llm.excluded_conversation_ids': { group: 'llm', label: 'Excluded conversations', description: 'Never sent to the model.', default: () => [] },
+  'llm.local_enabled': {
+    group: 'llm',
+    label: 'Read commands on this Mac first',
+    description: 'A local model (Ollama) works out what your "yb …" texts mean before Claude sees them; Claude only steps in when it is unsure or unavailable. Nothing leaves the Mac for those.',
+    default: v(true),
+  },
+  'llm.local_model': {
+    group: 'llm',
+    label: 'Local model',
+    description: 'The Ollama model that reads your texts. Pull it first: ollama pull llama3.1:8b.',
+    default: v(DEFAULT_LOCAL_MODEL),
+  },
   'llm.route_overrides': {
     group: 'llm',
     label: 'Model per route',

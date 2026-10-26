@@ -18,11 +18,15 @@ import type { DataPaths } from '../config';
 import { closeDatabase, openDatabase, type DB } from '../db/connection';
 import { acquireLock, lockOwner, releaseLock } from '../db/lock';
 import { currentVersion, LATEST_VERSION, migrate } from '../db/migrate';
+import { DEFAULT_OLLAMA_URL } from '../config';
+import { unavailableLlmClient } from '../llm/client';
+import { createOllamaClient, DEFAULT_LOCAL_MODEL } from '../llm/local';
 import { formatUsd as fmtUsd } from '../llm/models';
+import type { LocalLlm } from '../llm/local';
 import type { LlmClient, LlmEffort } from '../llm/types';
 import { servicesFor } from '../services';
 import { formatAttendanceReport, runAttendanceEval } from './attendance';
-import { runIntentEval } from './intent';
+import { INTENT_EVAL_CASES, runIntentEval, type IntentEvalCase } from './intent';
 import { buildReport, shadowSummary, type ShadowSummary } from './metrics';
 import { sampleSet } from './sample';
 import { planShadow, runShadow, type ShadowPlan } from './shadow';
@@ -42,8 +46,11 @@ export const EVAL_USAGE = `usage: yb eval <command> [options]        (also: npm 
                                          --system-file replaces the knowledge prompt (the obligations prompt stays)
   shadow-report [<runId>] [--json]       the diff and promotion gate of a shadow run (latest by default)
   reset --set <set> --yes                delete a golden set and its labels
-  intent [--json]                        the intent parser's eval cases (synthetic notes + a synthetic profile
-                                         screenshot) through Claude on a scratch database (~$0.002; needs the key)
+  intent [--engine claude|local|auto] [--model <ollama model>] [--json]
+                                         the intent parser's eval cases (synthetic notes + a synthetic profile
+                                         screenshot) on a scratch database. claude (default): Claude only (~$0.002;
+                                         needs the key). local: the Ollama model only (free; OLLAMA_URL, default
+                                         loopback; a case it is unsure of fails). auto: as the server does it
   attendance [--json] [--without-plans]  who-was-there clues graded against Partiful guest lists of past events you
                                          went to, each re-run with its list held out (read-only, no LLM).
                                          --without-plans: the clues not weighed against your other plans
@@ -57,6 +64,8 @@ export interface CliIO {
 export interface EvalCliDeps {
   /** Tests inject a fake; default: servicesFor(db, {anthropicApiKey from the environment}).llm */
   llm?: (db: DB) => LlmClient;
+  /** Tests inject a fake; default: Ollama at OLLAMA_URL (loopback). */
+  local?: LocalLlm;
   now?: () => number;
 }
 
@@ -154,23 +163,45 @@ async function withReadDb<T>(paths: DataPaths, fn: (db: DB) => Promise<T> | T): 
   }
 }
 
-/** `yb eval intent`: the cases on a scratch in-memory database (its own ledger; the data DB is never opened). */
-async function intentEval(io: CliIO, json: boolean, llmFor: (db: DB) => LlmClient, now: number): Promise<number> {
+/**
+ * `yb eval intent`: the cases on a scratch in-memory database (its own ledger; the data DB is never opened).
+ * engine local grades the Ollama model alone (no Claude fallback: an answer it is unsure of counts as a miss).
+ */
+async function intentEval(
+  io: CliIO,
+  o: { json: boolean; engine: 'claude' | 'local' | 'auto'; model: string; llmFor: (db: DB) => LlmClient; local: LocalLlm; now: number },
+): Promise<number> {
   const db = openDatabase(':memory:');
   try {
     migrate(db);
-    const llm = llmFor(db);
-    if (!llm.canSpend('steady').ok) {
+    const llm = o.engine === 'local' ? unavailableLlmClient('disabled', db) : o.llmFor(db);
+    if (o.engine === 'claude' && !llm.canSpend('steady').ok) {
       io.err('no ANTHROPIC_API_KEY (or the AI is off): nothing was sent.');
       return 1;
     }
-    const results = await runIntentEval({ llm, egress: servicesFor(db).egress, timeZone: 'UTC' }, { now });
+    let cases: readonly IntentEvalCase[] = INTENT_EVAL_CASES;
+    const skipped: string[] = [];
+    if (o.engine !== 'claude') {
+      const info = await o.local.info(o.model);
+      if (!info?.available) {
+        io.err(info ? `the Ollama model ${o.model} isn't pulled (ollama pull ${o.model}).` : `Ollama isn't reachable at ${o.local.url}.`);
+        return 1;
+      }
+      // A model that can't read images never gets a screenshot command (Claude reads those): not its miss.
+      if (o.engine === 'local' && !info.vision) {
+        skipped.push(...cases.filter((c) => c.image).map((c) => c.id));
+        cases = cases.filter((c) => !c.image);
+      }
+    }
+    const local = o.engine === 'claude' ? null : { client: o.local, model: o.model };
+    const results = await runIntentEval({ llm, egress: servicesFor(db).egress, timeZone: 'UTC', local }, { now: o.now, cases, requireSure: o.engine === 'local' });
     const cost = llm.spend().todayUsd;
     const passed = results.filter((r) => r.pass).length;
-    if (json) io.out(JSON.stringify({ results, passed, total: results.length, costUsd: cost }));
+    if (o.json) io.out(JSON.stringify({ results, passed, total: results.length, skipped, costUsd: cost, engine: o.engine, ...(local ? { model: o.model } : {}) }));
     else {
-      for (const r of results) io.out(`${r.pass ? '✓' : '✗'} ${r.id}${r.failures.length ? `: ${r.failures.join('; ')}` : ''}`);
-      io.out(`${passed}/${results.length} passed · ${fmtUsd(cost)}`);
+      for (const r of results) io.out(`${r.pass ? '✓' : '✗'} ${r.id}${r.engine ? ` [${r.engine}]` : ''}${r.failures.length ? `: ${r.failures.join('; ')}` : ''}`);
+      for (const id of skipped) io.out(`– ${id}: skipped (${o.model} doesn't read images; Claude reads screenshots)`);
+      io.out(`${passed}/${results.length} passed · ${fmtUsd(cost)}${local ? ` · local ${o.model}` : ''}`);
     }
     return passed === results.length ? 0 : 1;
   } finally {
@@ -212,6 +243,8 @@ export async function evalCommand(argv: string[], paths: DataPaths, io: CliIO, d
         'without-plans': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
+        engine: { type: 'string' },
+        model: { type: 'string' },
       },
       strict: true,
       allowPositionals: cmd === 'shadow-report',
@@ -239,7 +272,15 @@ export async function evalCommand(argv: string[], paths: DataPaths, io: CliIO, d
   }
   const now = deps.now ?? (() => Date.now());
   const llmFor = deps.llm ?? ((db: DB) => servicesFor(db, { anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || null }).llm);
-  if (cmd === 'intent') return intentEval(io, json, llmFor, now());
+  if (cmd === 'intent') {
+    const engine = (values.engine as string | undefined) ?? 'claude';
+    if (engine !== 'claude' && engine !== 'local' && engine !== 'auto') {
+      io.err('--engine must be claude, local or auto');
+      return 2;
+    }
+    const local = deps.local ?? createOllamaClient({ url: process.env.OLLAMA_URL?.trim() || DEFAULT_OLLAMA_URL });
+    return intentEval(io, { json, engine, model: (values.model as string | undefined) ?? DEFAULT_LOCAL_MODEL, llmFor, local, now: now() });
+  }
   if (!fs.existsSync(paths.dbPath)) {
     io.err(`no database at ${paths.dbPath} yet (start the server once).`);
     return 2;

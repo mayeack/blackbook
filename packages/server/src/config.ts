@@ -29,6 +29,7 @@ const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'] as const;
 
 export const DEFAULT_BEEPER_URL = 'http://127.0.0.1:23373';
 export const DEFAULT_BROWSER_CDP_URL = 'http://127.0.0.1:4331';
+export const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
 export const DEFAULT_GOOGLE_REDIRECT_URI = 'https://yeackbot.com/api/v1/google/callback';
 export const DEFAULT_IMPORTS_DIR = path.join(os.homedir(), 'Yeackbot Imports');
 
@@ -69,6 +70,7 @@ const Env = z.object({
     .refine((u) => ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(u).hostname), 'collector must be on loopback'),
   COLLECTOR_TOKEN_FILE: optionalText,
   ANTHROPIC_API_KEY: optionalText,
+  OLLAMA_URL: loopbackUrl(DEFAULT_OLLAMA_URL, 'Ollama'),
   VAPID_PUBLIC_KEY: optionalText,
   VAPID_PRIVATE_KEY: optionalText,
   VAPID_SUBJECT: optionalText,
@@ -102,6 +104,8 @@ export interface AppConfig {
   collectorUrl: string;
   collectorTokenFile: string;
   anthropicApiKey: string | null;
+  /** Ollama on loopback: the local model reads free-text commands before Claude (settings llm.local_*). */
+  ollamaUrl: string;
   vapid: { publicKey: string; privateKey: string; subject: string } | null;
   /**
    * Beeper Desktop API on loopback (Instagram network only, GET-only). The env token is a bootstrap: the adapter
@@ -190,6 +194,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     collectorUrl: e.COLLECTOR_URL,
     collectorTokenFile: path.resolve(e.COLLECTOR_TOKEN_FILE ?? path.join(dataDir, 'collector.token')),
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? null,
+    ollamaUrl: e.OLLAMA_URL,
     vapid:
       e.VAPID_PUBLIC_KEY && e.VAPID_PRIVATE_KEY && e.VAPID_SUBJECT
         ? { publicKey: e.VAPID_PUBLIC_KEY, privateKey: e.VAPID_PRIVATE_KEY, subject: e.VAPID_SUBJECT }

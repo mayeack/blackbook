@@ -1546,6 +1546,48 @@ Four connected pieces (design: `docs/design/tickets-met-at.md`):
 - Not deployed. Not checked in a browser or on the live Gmail / Google Photos APIs.
 - Haiku parse quality was checked on 2 real emails only.
 
+---
+
+## 2026-10-21 — Texts read for meaning: local model first (Ollama), social intents
+
+**Why:** "Yb I don't know who Jake M is, deprioritize him" and then "No - DEPRIORITIZE Jake M" both came back
+"✓ Noted for Jake M. Prioritized for party invites." The intent schema had one preference (party invites), so the
+model forced "deprioritize" into it. Now a local model (Ollama, Meta's `llama3.1:8b` by default) reads free-text commands first,
+Claude only when it is unsure or unavailable, and the schema has social intents: invite first, stop inviting,
+prioritize, deprioritize, stop suggesting, suggest again, hide, and reminders. Each is journaled; `undo` reverts it.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1467 tests pass.
+2. `test/commands/social.test.ts` (deprioritize read locally and never sent to Claude, the "No - DEPRIORITIZE" correction,
+   unsure → Claude, model missing → Claude, setting off → Claude only, no key → the unsure local answer stands,
+   reminder → commitment + undo, every action's circles/flags), `test/llm/local.test.ts` (Ollama requests and every
+   failure as an outcome), `test/intel/invites.test.ts` + `test/pipeline/suggestions/stage.test.ts` (who is left out
+   or lowered).
+3. Live, synthetic notes only: `eval intent` → 13/13 on Haiku 5.5 ($0.006); `eval intent --engine local` → 11/11 on
+   llama3.1:8b (2 screenshot cases skipped: it doesn't read images), twice; `--engine auto` → 13/13 (11 local, 2 on
+   Claude, $0.0012); `llm-smoke --live --only IntentSchema` → 42 nodes, accepted.
+
+### Scenario B — Local model (owner, after deploy)
+1. `ollama list` shows `llama3.1:8b` (pulled 2026-10-21). `npm run yb -- eval intent --engine local`. **Expected**:
+   11/11 `[local]`, the 2 screenshot cases skipped.
+2. Settings → Privacy → **On this Mac**: "Read commands on this Mac first" is on, model `llama3.1:8b`.
+
+### Scenario C — iPhone (owner)
+1. Text `yb I don't know who Jake M is, deprioritize him` (use a real low-priority contact). **Expected**:
+   `✓ Deprioritized Jake M.` (plus "and took them off Party invites" if they were on it). On yeackbot.com → Circles,
+   they're in **Deprioritized** and not in **Party invites**.
+2. Text `undo`. **Expected**: `✓ Undone: note for Jake M. + deprioritized…`; the circles are as before.
+3. Text `yb stop suggesting <name>`. **Expected**: `✓ I'll stop suggesting <name>.`; they're in **Don’t suggest** and
+   no brief item names them. `yb you can suggest <name> again` reverses it.
+4. Text `yb remind me to call <name> Friday`. **Expected**: `✓ I'll remind you about <name> on Fri …: call.`; Friday's
+   brief has "Reminder for <name>: call".
+5. Quit Ollama and text `yb prioritize <name>`. **Expected**: still handled (Claude reads it); Today shows the change.
+
+**Edge cases**: a screenshot command goes to Claude (the default model doesn't read images); people excluded from the
+AI are never sent to either model; an open "Which Sam?" clarification from before the deploy still applies its party
+invite.
+**Platforms**: server + web (Settings). Not deployed; evals ran against the real llama3.1:8b, not the iPhone flow.
+
 ## 2026-10-22 — Weekly event picks (public events on your free nights, with ticket links)
 
 Once a week yeackbot searches the web (Claude Haiku 5.5 with Anthropic's web search) for public events in your
