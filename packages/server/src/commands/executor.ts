@@ -309,7 +309,7 @@ class CommandRun {
   private images: LlmImage[] | null = null;
   /** Screenshots the command had that didn't reach the parser (setting off, collector down, file not synced yet). */
   private imagesMissed: 'off' | 'unavailable' | null = null;
-  /** The digest item this command is an inline reply to (its own text), if any. */
+  /** The digest item this command is an inline reply to (a one-item brief's text, a "more" text), if any. */
   private inlineOrdinal: number | null = null;
   /** An inline reply to a bot text that carries no item (an answer, an ack, the "Heads up" text). */
   private inlineNoItem = false;
@@ -553,7 +553,7 @@ class CommandRun {
     const digest = ctx.inline.digest ?? ctx.latestDigest;
     this.inlineOrdinal = ctx.inline.digest ? ctx.inline.ordinal : null;
     this.inlineNoItem = ctx.inline.toBot && this.inlineOrdinal === null;
-    // An item verb without a number only names a suggestion when it replies to that suggestion's text; otherwise
+    // An item verb without a number only names a suggestion when it replies to a text that carries just that one; otherwise
     // ("wrong, she moved to Denver" to an Ask answer, "why?" to an ack) it is free text: intent parser / Ask.
     if (parsed.kind === 'commands' && !(this.inlineOrdinal === null && parsed.clauses.some(isImplicitItemClause))) {
       return this.runClauses(parsed.clauses, digest, msg, parsed);
@@ -662,7 +662,7 @@ class CommandRun {
     const askWhich = () =>
       ex.lines.push(
         open.length
-          ? `Which one? Reply "${c.verb} ${open[0]!.ordinal}", or reply to that suggestion's text with just "${c.verb}".`
+          ? `Which one? Reply "${c.verb} ${open[0]!.ordinal}".`
           : 'Everything in your latest brief is already taken care of.',
       );
     let nums: number[];
