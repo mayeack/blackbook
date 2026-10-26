@@ -177,6 +177,7 @@ function adjustmentsOf(r: SuggestionRow): WhySignal[] {
   if (d.priority === true) out.push({ label: 'Priority person', value: '×1.3' });
   if (d.party === true) out.push({ label: 'In Party invites', value: `×${1 + SELECTION.partyBoost}` });
   if (d.fatigue === true) out.push({ label: 'In a brief in the last 3 days', value: '×0.5' });
+  if (d.deprioritized === true) out.push({ label: 'Deprioritized (you asked)', value: `×${SELECTION.deprioritizedFactor}` });
   if (d.penalized === true) out.push({ label: 'Second item of this kind', value: '×0.6' });
   if (d.forced === true) out.push({ label: 'Time-critical', value: 'forced in' });
   if (d.relaxedFloor === true) out.push({ label: 'Quiet day', value: 'lower bar (0.15)' });

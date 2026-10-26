@@ -51,6 +51,12 @@ function listRead(eventId: string, at = NOW, status = 'ok'): void {
   ).run(at, status, at, eventId);
 }
 
+/** A reserved preference circle (pref:<kind>) with these members, as a text command leaves it. */
+function prefCircle(kind: string, ...members: string[]): void {
+  w.db.prepare(`INSERT INTO circles (id, name, kind, signature, status, created_at, updated_at) VALUES (?, ?, 'user', ?, 'active', ?, ?)`).run(`c-${kind}`, kind, `pref:${kind}`, NOW, NOW);
+  for (const m of members) w.db.prepare(`INSERT INTO circle_members (circle_id, person_id, origin, excluded, created_at, updated_at) VALUES (?, ?, 'user', 0, ?, ?)`).run(`c-${kind}`, m, NOW, NOW);
+}
+
 function partyInvites(...members: string[]): void {
   w.db.prepare(`INSERT OR IGNORE INTO circles (id, name, kind, signature, status, created_at, updated_at) VALUES ('pi', 'Party invites', 'user', 'pref:party_invites', 'active', ?, ?)`).run(NOW, NOW);
   for (const m of members) w.db.prepare(`INSERT INTO circle_members (circle_id, person_id, origin, excluded, created_at, updated_at) VALUES ('pi', ?, 'user', 0, ?, ?)`).run(m, NOW, NOW);
@@ -193,6 +199,13 @@ describe('who to invite', () => {
     expect(partyInviteCandidates(w.db, NOW, TZ)[0]!.personIds).toEqual([pia, ana, fay, dee]);
     for (const p of [pia, ana, fay, dee]) w.guest(halloween, p, 'going');
     expect(partyInviteCandidates(w.db, NOW, TZ).map((c) => c.subjectKey)).toEqual([`occ:${gameNight}`]);
+  });
+
+  it('asked by text: never suggested or not for party invites → off the list; deprioritized → no longer a regular', () => {
+    prefCircle('deprioritized', ana);
+    prefCircle('no_party_invites', fay);
+    prefCircle('no_suggestions', pia);
+    expect(partyInviteCandidates(w.db, NOW, TZ)[0]!.personIds).toEqual([quinn, dee]);
   });
 
   it('is registered as the party_invite generator', async () => {

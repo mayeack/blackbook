@@ -118,6 +118,8 @@ export const HELP_TEXT = [
   'Anytime:',
   '• log: coffee with Sam, moving to Denver',
   '• ? who do I know in Austin',
+  '• prioritize Sam, deprioritize Jake, stop suggesting Jake',
+  '• remind me to call Sam Friday',
   '• undo, pause 1w, resume, status',
   '',
   'If it’s been a while since my last text, start with "yb".',

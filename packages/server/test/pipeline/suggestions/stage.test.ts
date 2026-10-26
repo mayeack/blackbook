@@ -140,6 +140,34 @@ describe('suggestions stage', () => {
     expect(buildWhy(db, row(fading.id).id, T0).adjustments).toContainEqual({ label: 'In Party invites', value: '×1.3' });
   });
 
+  it('asked by text: "stop suggesting X" keeps every item about X out; "deprioritize X" scores them ×0.35 without the priority lift', async () => {
+    const pref = (db: ReturnType<typeof world>['db'], kind: string, personId: string) => {
+      db.prepare(`INSERT INTO circles (id, name, kind, signature, status, created_at, updated_at) VALUES (?, ?, 'user', ?, 'active', ?, ?)`).run(`c-${kind}`, kind, `pref:${kind}`, T0, T0);
+      db.prepare(`INSERT INTO circle_members (circle_id, person_id, origin, excluded, created_at, updated_at) VALUES (?, ?, 'user', 0, ?, ?)`).run(`c-${kind}`, personId, T0, T0);
+    };
+    const followupsOf = (people: { id: string; base: number }[]) =>
+      fixedGenerator('event_followup', () =>
+        people.map((p) => ({ kind: 'event_followup' as const, personIds: [p.id], subjectKey: `occ:x-${p.id}`, base: p.base, evidenceIds: [], expiresAt: null, payload: {} })),
+      );
+    const { db, fading, cooling } = world();
+    db.prepare('UPDATE people SET is_priority = 1 WHERE id = ?').run(fading.id);
+    pref(db, 'deprioritized', fading.id);
+    // A high base keeps the lowered item above the floor, so it is picked and its rank details are stored.
+    const r = await run(db, T0, { generators: [followupsOf([{ id: fading.id, base: 1 }, { id: cooling.id, base: 0.5 }])] });
+    const row = (pid: string) => db.prepare(`SELECT id, score, rank_details FROM suggestions WHERE kind = 'event_followup' AND person_id = ?`).get(pid) as { id: string; score: number; rank_details: string };
+    expect(row(fading.id).score / row(cooling.id).score).toBeCloseTo(2 * 0.35);
+    expect(JSON.parse(row(fading.id).rank_details)).toMatchObject({ deprioritized: true, priority: false });
+    expect(buildWhy(db, row(fading.id).id, T0).adjustments).toContainEqual({ label: 'Deprioritized (you asked)', value: '×0.35' });
+    expect(r.stats.eligible).toBe(2);
+
+    const muted = world();
+    pref(muted.db, 'no_suggestions', muted.fading.id);
+    const r2 = await run(muted.db, T0, { generators: [followupsOf([{ id: muted.fading.id, base: 0.5 }, { id: muted.cooling.id, base: 0.5 }])] });
+    expect(r2.stats.eligible).toBe(1);
+    expect(r2.stats).toMatchObject({ skip_muted: 1 });
+    expect(muted.db.prepare(`SELECT count(*) FROM suggestions WHERE person_id = ? AND status = 'selected'`).pluck().get(muted.fading.id)).toBe(0);
+  });
+
   it('🎲 wildcard: stored only when picked, flagged, never two days in a row; the seed reproduces the digest', async () => {
     const make = () => {
       const w = world();

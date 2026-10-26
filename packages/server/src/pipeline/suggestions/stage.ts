@@ -92,7 +92,7 @@ interface Scored extends ScoredCandidate {
   factorDetails: ScoredFactors;
   /** What an outcome of this item trains. */
   arms: ArmRef[];
-  adjustments: { fatigue: boolean; priority: boolean; party: boolean; weight: number };
+  adjustments: { fatigue: boolean; priority: boolean; party: boolean; deprioritized: boolean; weight: number };
   stored: boolean;
 }
 
@@ -258,9 +258,12 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
     // 3. eligibility
     const mutedKinds = new Set(settings['learner.muted_kinds']);
     const intros = introCounts(db, now);
+    // "Stop suggesting Jake" by text (pipeline/circles/preferences.ts): nothing about them at all.
+    const unsuggested = preferredPeople(db, 'no_suggestions');
     const eligible = (c: Candidate): string | null => {
       if (mutedKinds.has(c.kind)) return 'muted';
       for (const p of c.personIds) {
+        if (unsuggested.has(p)) return 'muted';
         const ps = personState(db, p);
         if (ps.muted || ps.mutedKinds.includes(c.kind)) return 'muted';
         if (!c.timeCritical && ps.cooldownUntil !== null && ps.cooldownUntil > now) return 'ignore_cooldown';
@@ -276,6 +279,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
     // 4. scoring
     const people = new PeopleCache(db);
     const partyPeople = preferredPeople(db, 'party_invites');
+    const deprioritized = preferredPeople(db, 'deprioritized');
     const circleName = db.prepare('SELECT name FROM circles WHERE id = ?').pluck();
     const sampler = new ArmSampler(db, now, stream(seed, 0), settings['learner.enabled']);
     const fatigued = recentDigestPeople(db, today, SELECTION.fatigueDays);
@@ -291,7 +295,8 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
         c.links?.circleId ?? null,
       );
       const fatigue = c.personIds.some((p) => fatigued.has(p));
-      const priority = !!primary?.isPriority;
+      const lowered = !!primary && deprioritized.has(primary.id);
+      const priority = !!primary?.isPriority && !lowered;
       const party = PARTY_BOOST_KINDS.has(c.kind) && c.personIds.some((p) => partyPeople.has(p));
       const weight = KIND_POLICY[c.kind].weight;
       const s =
@@ -303,7 +308,8 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
         f.wildcard *
         (priority ? 1 + SELECTION.priorityBoost : 1) *
         (party ? 1 + SELECTION.partyBoost : 1) *
-        (fatigue ? SELECTION.fatigueFactor : 1);
+        (fatigue ? SELECTION.fatigueFactor : 1) *
+        (lowered ? SELECTION.deprioritizedFactor : 1);
       return {
         ...c,
         suggestionId: id,
@@ -313,7 +319,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
         wildcardGenerator: g,
         factorDetails: f,
         arms: armsFor(c.kind, primary, g, c.links?.circleId ?? null),
-        adjustments: { fatigue, priority, party, weight },
+        adjustments: { fatigue, priority, party, deprioritized: lowered, weight },
         stored,
       };
     };
@@ -380,6 +386,7 @@ export async function runSuggestionsStage(db: DB, o: StageOptions = {}): Promise
           fatigue: s.adjustments.fatigue,
           priority: s.adjustments.priority,
           party: s.adjustments.party,
+          deprioritized: s.adjustments.deprioritized,
           weight: s.adjustments.weight,
           cap,
           seed,

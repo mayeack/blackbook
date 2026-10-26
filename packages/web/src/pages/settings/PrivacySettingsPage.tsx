@@ -3,7 +3,7 @@
  * exclusions (people / conversations never sent to the model), Hidden people (THE one place they're listed, with
  * Unhide), do-not-merge pairs (with "allow merging again"), My identities, and Data → JSON export.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useHidden, useUnhide } from '../../api/hooks';
 import { EntityRow, IconTile } from '../../components/EntityRow';
@@ -71,6 +71,37 @@ function ClaudeSection({ form }: { form: SettingsForm }) {
       <SettingRow form={form} k="llm.backfill_budget_usd" formatDefault={(x) => usd(Number(x))}>
         <NumberField form={form} k="llm.backfill_budget_usd" step={10} suffix="USD" />
       </SettingRow>
+    </div>
+  );
+}
+
+/** The Ollama model on this Mac that reads "yb …" texts before Claude does. */
+function LocalModelSection({ form }: { form: SettingsForm }) {
+  const v = form.values;
+  const model = v['llm.local_model'];
+  const [text, setText] = useState(model);
+  useEffect(() => setText((t) => (t.trim() === model ? t : model)), [model]);
+  return (
+    <div className="card st-card">
+      <SettingRow form={form} k="llm.local_enabled">
+        <Toggle id={fieldId('llm.local_enabled')} checked={v['llm.local_enabled']} onChange={(x) => form.set('llm.local_enabled', x)} />
+      </SettingRow>
+      <SettingRow form={form} k="llm.local_model">
+        <input
+          id={fieldId('llm.local_model')}
+          className="input input-sm st-text-input"
+          value={text}
+          maxLength={100}
+          placeholder="llama3.1:8b"
+          disabled={!v['llm.local_enabled']}
+          onChange={(e) => {
+            setText(e.target.value);
+            const t = e.target.value.trim();
+            if (t) form.set('llm.local_model', t);
+          }}
+        />
+      </SettingRow>
+      <p className="caption st-lead">Runs in Ollama on this Mac, free. When it isn’t running or the model isn’t pulled, Claude reads your texts as before.</p>
     </div>
   );
 }
@@ -283,6 +314,9 @@ function PrivacyForm({ form }: { form: SettingsForm }) {
           </div>
         </div>
       </div>
+
+      <SectionTitle>On this Mac</SectionTitle>
+      <LocalModelSection form={form} />
 
       <SectionTitle>Claude</SectionTitle>
       <ClaudeSection form={form} />

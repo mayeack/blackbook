@@ -47,6 +47,7 @@ type SourceConfigKeys =
   | 'importsDir'
   | 'secretsKey'
   | 'anthropicApiKey'
+  | 'ollamaUrl'
   | 'vapid';
 
 export interface JobDeps {
@@ -98,6 +99,7 @@ export function agentJobDeps(deps: JobDeps): AgentJobDepsSet {
     log: deps.log,
     config: {
       anthropicApiKey: c.anthropicApiKey ?? null,
+      ...(c.ollamaUrl ? { ollamaUrl: c.ollamaUrl } : {}),
       vapid: c.vapid ?? null,
       collectorUrl: c.collectorUrl ?? COLLECTOR_DEFAULT_URL,
       collectorTokenFile: tokenFile,

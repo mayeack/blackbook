@@ -21,9 +21,11 @@ function idealAnswer(c: IntentEvalCase, call: FakeCall): IntentOutput {
     return new RegExp(`^(P\\w+) = ${p.first} ${p.last![0]}\\.$`, 'm').exec(call.userText)![1]!;
   };
   const e = c.expect;
-  const people = [...new Set([...(e.people ?? []), ...(e.facts ?? []).map((f) => f.who), ...(e.preferences ?? []).map((p) => p.who)])];
-  const logged = e.intent === 'log_interaction' || e.intent === 'add_fact' || e.intent === 'set_preference';
+  const people = [...new Set([...(e.people ?? []), ...(e.facts ?? []).map((f) => f.who), ...(e.preferences ?? []).map((p) => p.who), ...(e.reminder?.who ?? [])])];
+  const logged = e.intent === 'log_interaction' || e.intent === 'add_fact' || e.intent === 'set_preference' || e.intent === 'reminder';
   return {
+    gist: 'g',
+    sure: true,
     intent: e.intent,
     image: e.handle ? { handle: e.handle, name: 'Rowan Testperson' } : null,
     command: null,
@@ -36,7 +38,8 @@ function idealAnswer(c: IntentEvalCase, call: FakeCall): IntentOutput {
           note: null,
         }
       : null,
-    preferences: (e.preferences ?? []).map((p) => ({ surface: 'them', ref: token(p.who), kind: p.kind })),
+    preferences: (e.preferences ?? []).map((p) => ({ surface: 'them', ref: token(p.who), action: p.action })),
+    reminder: e.reminder ? { what: `${e.reminder.contains} them`, kind: e.reminder.kinds[0]!, date: null } : null,
     question: null,
   };
 }
@@ -71,10 +74,23 @@ describe('intent eval cases', () => {
 
   it('grades the misses: wrong intent, the handle, a missing preference, a stray image', () => {
     const c = INTENT_EVAL_CASES[0]!;
-    const base = { intent: 'set_preference' as const, command: null, question: null, requestId: 'r', log: null, image: { handle: 'yb.eval.rowan', name: null }, preferences: [] };
+    const base = {
+      intent: 'set_preference' as const,
+      gist: 'g',
+      sure: true,
+      command: null,
+      question: null,
+      requestId: 'r',
+      engine: 'claude' as const,
+      model: 'm',
+      reminder: null,
+      log: null,
+      image: { handle: 'yb.eval.rowan', name: null },
+      preferences: [],
+    };
     expect(gradeIntent(c, null)).toEqual(['no answer']);
     const miss = gradeIntent(c, { ...base, intent: 'add_fact', image: { handle: 'someone.else', name: null } });
-    expect(miss).toEqual(expect.arrayContaining(['intent add_fact ≠ set_preference', 'handle someone.else ≠ yb.eval.rowan', 'preferences [] ≠ [IMG:party_invites]']));
+    expect(miss).toEqual(expect.arrayContaining(['intent add_fact ≠ set_preference', 'handle someone.else ≠ yb.eval.rowan', 'preferences [] ≠ [IMG:invite_first]']));
     expect(gradeIntent(INTENT_EVAL_CASES.find((x) => x.id === 'note-to-self')!, { ...base, intent: 'note', preferences: [] })).toContain('image without a screenshot');
   });
 

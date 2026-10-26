@@ -84,9 +84,12 @@ describe('reply text', () => {
 
 describe('intent output bounds (the API enforces none)', () => {
   const ok: IntentOutput = {
+    gist: 'g',
+    sure: true,
     intent: 'log_interaction',
     image: null,
     command: null,
+    reminder: null,
     question: null,
     log: { people: [{ surface: 'Sam', ref: 'P1' }], kind: 'coffee', date: '2026-10-14', facts: [{ ref: 'P1', cat: 'interest', value: 'bouldering' }], note: null },
     preferences: [],
@@ -110,14 +113,14 @@ describe('intent output bounds (the API enforces none)', () => {
       intent: 'set_preference',
       image: { handle: 'yb.eval.rowan', name: 'Rowan Testperson' },
       log: { people: [{ surface: 'this person', ref: IMAGE_REF }], kind: 'other', date: null, facts: [{ ref: IMAGE_REF, cat: 'activity_pref', value: 'great DJ' }], note: null },
-      preferences: [{ surface: 'this person', ref: IMAGE_REF, kind: 'party_invites' }],
+      preferences: [{ surface: 'this person', ref: IMAGE_REF, action: 'invite_first' }],
     };
     expect(validateIntent(pref, tokens, true)).toEqual([]);
     expect(validateIntent(pref, tokens, false)).toEqual(expect.arrayContaining(['image without an attachment', 'unknown ref', 'unknown preference ref']));
     expect(validateIntent({ ...pref, image: { handle: null, name: null } }, tokens, true)).toContain('unknown ref');
     expect(validateIntent({ ...pref, image: { handle: 'not a handle!', name: null } }, tokens, true)).toContain('bad image handle');
     expect(validateIntent({ ...pref, preferences: [] }, tokens, true)).toContain('preferences missing');
-    expect(validateIntent({ ...pref, preferences: [{ surface: 'Sam', ref: 'P9', kind: 'party_invites' }] }, tokens, true)).toContain('unknown preference ref');
+    expect(validateIntent({ ...pref, preferences: [{ surface: 'Sam', ref: 'P9', action: 'invite_first' }] }, tokens, true)).toContain('unknown preference ref');
     expect(imageHandle('@Yb.Eval.Rowan')).toBe('yb.eval.rowan');
     expect(imageHandle('instagram.com/someone')).toBeNull();
     expect(imageHandle(null)).toBeNull();
