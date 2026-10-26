@@ -470,22 +470,31 @@ Each item's "Why this?" includes the learned factors.
 - Any item that fails validation falls back to a template.
 - Openers are drafts only; there is no code path that sends them.
 
-**Format** (revised 2026-10-17, owner feedback: "format texts like a human… one clear suggestion per text"):
-- **One text per suggestion**, written like a person texts: line breaks, plain sentences, no "·" separators.
-  The first text opens with a greeting ("Good morning! 4 things for today."), the last closes with how to reply and
-  the one `yeackbot.com/today` link; a health issue gets its own final text ("Heads up: WhatsApp hasn't synced in
-  4 days. Open WhatsApp on your phone to wake it up."). "Last night: …" counts stay on the web.
-- Every text starts with the marker **🅨** (U+1F168), checked on raw text.
+**Format** (revised 2026-10-17, owner feedback: "format texts like a human… one clear suggestion per text"; revised
+again 2026-10-25: "This wasn't four things, it was one thing. Always include everything you want me to see each day
+in the text, not just the app"):
+- **One text for the whole brief**, written like a person texts: line breaks, plain sentences, no "·" separators.
+  It opens with a greeting ("Good morning! 4 things for today."), then every item with a blank line between them,
+  then a health issue if any ("Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it
+  up."), then how to reply and the one `yeackbot.com/today` link. "Last night: …" counts stay on the web.
+- The text starts with the marker **🅨** (U+1F168), checked on raw text.
 - Each item: `N. <short action>` (first name + last initial, ≤70 characters), then one or two sentences of context,
-  then (LLM copy only) `Maybe: "<opener draft>"`.
+  then its details, then (LLM copy only) `Maybe: "<opener draft>"`. Nothing points to the app for what the text could
+  say: an event today lists its first few people, each with when you last talked, the first thing open between you
+  and one recent fact ("Sam R.: You talked 2 days ago. You said you'd send the trail map."). Only sensitive
+  items stay "Something personal / The details are in the app." A name with emoji in it ("Zed ⚡️") reads as the
+  name ("Zed"), never "someone".
 - No phone numbers, emails or sensitive facts.
-- Texts go out in order, each with its own stable client_ref. Once any text is handed to the sender the brief's
-  texts are frozen (never recomposed); it counts as sent from its first delivered text (replies bind to it at once)
-  and resumes on the next tick if cut off; a pause, turning the brief off, catch-up passing or the day ending closes
-  it with what already went out. A text about someone hidden since is dropped.
-  Each outbound row records the item it carries (`digest_ordinal`), so a reply to a suggestion's own text with just
-  "done", "skip", "snooze 2w", "why" or "draft" acts on that item. Without a number and not replying to a suggestion,
-  those words are free text (a note-to-self like "wrong number lol" is never a command). `more` texts one suggestion.
+- The text goes out with a stable client_ref; once it is handed to the sender it is frozen (never recomposed). A
+  stored brief from the one-text-per-suggestion days (2026-10-17 – 2026-10-25) that never went out is recomposed into
+  one text; one that was part-way out finishes as stored (texts in order, each with its own client_ref; it counts as
+  sent from its first delivered text and resumes on the next tick; a pause, turning the brief off, catch-up passing
+  or the day ending closes it with what already went out; a text about someone hidden since is dropped).
+  Each outbound row records the item it carries (`digest_ordinal`: a one-item brief's text, a `more` text), so a
+  reply to such a text with just "done", "skip", "snooze 2w", "why" or "draft" acts on that item. A bare "done" to a
+  brief with several items asks which one ("Which one? Reply "done 2"."). Without a number and not replying to an
+  item's text, skip / snooze / wrong / why / draft are free text (a note-to-self like "wrong number lol" is never a
+  command). `more` texts one suggestion.
 
 **When to send**:
 - Nothing worth sending → skip, and Today shows "All clear". After 3 empty days, send one heartbeat line.

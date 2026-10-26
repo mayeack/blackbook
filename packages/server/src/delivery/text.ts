@@ -150,11 +150,13 @@ export interface NameParts {
 }
 
 const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u;
+/** Emoji and other symbols people put in names ("Zed ⚡️", "Sam 🎸"), with their joiners and variation selectors. */
+const NAME_SYMBOLS = /[\p{Extended_Pictographic}\p{S}‍︎️]/gu;
 
 /** The first name (one word) and last name a short name is made from; null when unusable. */
 function nameWords(p: NameParts): { first: string; last: string | null } | null {
   const clean = (s: string | null | undefined) => {
-    const t = s?.normalize('NFKC').replace(/\s+/g, ' ').trim() ?? '';
+    const t = s?.normalize('NFKC').replace(NAME_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
     return t && NAME_OK.test(t) ? t : null;
   };
   let first = clean(p.firstName) ?? clean(p.nickname);

@@ -140,7 +140,7 @@ describe('commands: item verbs bind to the latest brief', () => {
     await w.run({ now: at(6) });
     expect(w.replies()).toEqual([
       `${BOT_MARKER} There's no #7 in that brief (it had 1–3).`,
-      `${BOT_MARKER} Which one? Reply "done 1", or reply to that suggestion's text with just "done".`,
+      `${BOT_MARKER} Which one? Reply "done 1".`,
       `${BOT_MARKER} ✓ Nice, marked Sam R. done.\n\n(Text "undo" to take that back.)`,
       `${BOT_MARKER} #1 was already done.`,
       `${BOT_MARKER} I didn't understand "banana". Try "snooze 2 2w" or "snooze 2 friday".`,
@@ -242,7 +242,7 @@ describe('commands: one text per suggestion — replies bind to the right thing'
     await w.run({ now: at(5) });
     expect(fb.apply).not.toHaveBeenCalled();
     expect(w.suggestionStatus(suggestionIds[0]!)).toBe('delivered');
-    expect(w.replies()[0]).toBe(`${BOT_MARKER} Which one? Reply "done 1", or reply to that suggestion's text with just "done".`);
+    expect(w.replies()[0]).toBe(`${BOT_MARKER} Which one? Reply "done 1".`);
     // Without the AI key the correction can't be understood, so it says so instead of marking anything wrong.
     expect(w.command(wrong.commandId).status).toBe('handled');
     expect(w.replies()[1]).toContain("Sorry, I didn't get that.");
