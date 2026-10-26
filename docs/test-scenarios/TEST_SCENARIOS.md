@@ -1587,3 +1587,36 @@ prioritize, deprioritize, stop suggesting, suggest again, hide, and reminders. E
 AI are never sent to either model; an open "Which Sam?" clarification from before the deploy still applies its party
 invite.
 **Platforms**: server + web (Settings). Not deployed; evals ran against the real llama3.1:8b, not the iPhone flow.
+
+## 2026-10-25 — Promises ranked by stakes ("Bringing tomatoes isn't important")
+
+**Why:** the morning brief's item 3 was "You told <a friend> you'd bring tomatoes". Every promise the owner made scored the
+same top base (1.0), whether it was rent, a landlord reference or tomatoes. Now each promise carries stakes: the
+extraction labels new ones high / normal / low, and older rows are guessed from their description. Low-stakes
+promises never take a brief slot, Today's preview or a "did this happen?" ask. High ones (money, housing, bookings,
+intros) outrank normal ones.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 1999 tests pass.
+2. `test/pipeline/obligations/stakes.test.ts` (guess rules), `loops.test.ts` (no low candidate or lapsed ask, high 1 /
+   normal 0.8, Today's preview without low ones, lists keep them last), `commitments.test.ts` (stored, raised never
+   lowered), `test/extraction/validate.test.ts` (label passes through; an answer without `stakes` reads normal; an
+   out-of-set value drops the item), `test/llm/outputSchemas.test.ts` (obligations schema 30 grammar nodes).
+3. Dry run on a copy of the live database (migration 027 applied): 10 of 116 live promises read low (tomatoes, a broom,
+   a costume, an arrival time…), none of them a candidate; money/notice/booking promises lead at 1.0.
+
+### Scenario B — Live schema (Claude verified)
+1. `npm run yb -- llm-smoke --live --only ExtractionObligations`. **Expected**: 30 nodes, accepted (2026-10-25: 200,
+   end_turn).
+
+### Scenario C — Morning brief (owner, after deploy)
+1. Read the next morning brief. **Expected**: no "bring tomatoes" / "get a broom" style item; promises shown are
+   things like rent, deposits, notices, bookings or plans with people.
+2. On yeackbot.com → a person with a low-stakes promise. **Expected**: the promise is still listed on
+   their page; on Today it sits after the other promises and is not in the top preview.
+3. After a night of new texts with a small promise ("I'll bring chips"), check that person's page. **Expected**: it
+   is recorded but never appears in the brief.
+
+**Edge cases**: a repeat of a promise in more serious words raises it, never the reverse; a money word wins over a
+small-task verb ("bring the deposit check" is high); meet-ups and calls are never guessed low.
+**Platforms**: server only (no web change). Not deployed; the new prompt has not read real texts yet.

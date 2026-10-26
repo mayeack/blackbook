@@ -52,6 +52,8 @@ export const COMMITMENT = {
   waitingWeight: 0.5,
   /** chrono wins over the LLM's due date when they disagree by more than this. */
   chronoToleranceMs: 2 * DAY,
+  /** Rank weight by stakes (stakes.ts): low-stakes promises never reach the digest or Today's preview. */
+  stakesWeight: { high: 1, normal: 0.8, low: 0 } as const,
 } as const;
 
 /** Statuses an open loop can still change from. */

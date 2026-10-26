@@ -99,6 +99,7 @@ export interface VCommitment {
   dueEnd: number | null;
   duePrecision: 'date' | 'range' | 'vague' | 'none';
   status: 'open' | 'done' | 'cancelled';
+  stakes: 'low' | 'normal' | 'high';
   closesCommitmentId: string | null;
   conf: number;
   evidence: EvidenceRef[];
@@ -472,6 +473,7 @@ export function validateExtraction(x: ParsedExtraction, packet: Packet, _o: { no
       dueEnd,
       duePrecision: precision,
       status: c.status,
+      stakes: c.stakes,
       closesCommitmentId,
       conf: c.conf,
       evidence: ev,

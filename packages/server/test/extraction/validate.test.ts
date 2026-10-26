@@ -283,6 +283,20 @@ describe('enums (parseExtraction): an out-of-set value costs its item, not the w
     expect(v.dropped).toEqual({ fact_bad_enum: 1, commitment_bad_enum: 2, relation_bad_enum: 1, needs_reply_bad_enum: 1 });
   });
 
+  it('stakes: the label reaches the validated commitment; an answer from before stakes reads normal; "huge" costs the item', () => {
+    const parsed = parseExtraction(
+      extraction({ commitments: [commitment({ stakes: 'low', what: 'bring tomatoes' }), commitment({ stakes: 'high' }), commitment(), commitment({ stakes: 'huge' })] }),
+    );
+    if (!parsed.success) throw parsed.error;
+    expect(parsed.data.dropped).toEqual({ commitment_bad_enum: 1 });
+    const v = validateExtraction(parsed.data, packet(), { now: AT });
+    expect(v.commitments.map((c) => [c.what, c.stakes])).toEqual([
+      ['bring tomatoes', 'low'],
+      ['dinner Thursday', 'high'],
+      ['dinner Thursday', 'normal'],
+    ]);
+  });
+
   it('a clean answer passes as is (nothing dropped)', () => {
     const parsed = parseExtraction(extraction({ commitments: [commitment()] }));
     if (!parsed.success) throw parsed.error;

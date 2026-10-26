@@ -216,6 +216,7 @@ A commitment is a concrete plan or promise between ME and specific people: to me
 - \`kind\`: meet, call, send, intro, reply_later, favor, plan or other.
 - \`what\`: a short neutral description, 3 to 12 words (\"coffee at the usual place\", \"send the trail map\").
 - \`due\`: \`{kind: "date", start, end: null}\` for one day; \`{kind: "range", start, end}\` for a span; \`vague\` or \`none\` as above.
+- \`stakes\`: how much it matters if this is forgotten or falls through. \`high\`: money owed or to be paid, housing, work, legal matters, travel or ticket bookings, an introduction, or something a person is really counting on ME for (a reference, a ride to the airport, help moving). \`low\`: small logistics around a plan that nobody would mind much if forgotten: bringing food, drinks or small items to a gathering (\"bring tomatoes\"), what to wear, when to arrive, what to order, a quick errand. \`normal\`: everything else, including most plans to meet up.
 - \`status\`: \`open\` for a new plan. If NEW shows an open commitment from a card was done or called off, return it with \`status\` \`done\` or \`cancelled\` and \`closes\` set to its id (\`K2\`). Do not create a new open commitment that duplicates one on a card.`;
 const NEEDS_REPLY = `# needs_reply
 
@@ -250,7 +251,7 @@ NEW:
 [m:4|2026-03-08 18:10|P1→ME] can you send me that list of Denver restaurants you had?
 
 Output:
-{\"commitments\":[{\"owner\":\"BOTH\",\"with\":[\"P1\"],\"kind\":\"meet\",\"what\":\"send-off dinner\",\"due\":{\"kind\":\"date\",\"start\":\"2026-03-12\",\"end\":null},\"status\":\"open\",\"closes\":null,\"ev\":[{\"msg\":\"m:3\",\"quote\":\"dinner thursday?\"},{\"msg\":\"m:2\",\"quote\":\"we need to celebrate before you go\"}],\"conf\":0.78},{\"owner\":\"ME\",\"with\":[\"P1\"],\"kind\":\"send\",\"what\":\"send the Denver restaurant list\",\"due\":{\"kind\":\"none\",\"start\":null,\"end\":null},\"status\":\"open\",\"closes\":null,\"ev\":[{\"msg\":\"m:4\",\"quote\":\"can you send me that list of Denver restaurants\"}],\"conf\":0.85}],\"needs_reply\":{\"state\":\"needs_reply\",\"msg\":\"m:4\",\"reason\":\"request\",\"urgency\":\"normal\",\"conf\":0.86}}
+{\"commitments\":[{\"owner\":\"BOTH\",\"with\":[\"P1\"],\"kind\":\"meet\",\"what\":\"send-off dinner\",\"due\":{\"kind\":\"date\",\"start\":\"2026-03-12\",\"end\":null},\"status\":\"open\",\"stakes\":\"normal\",\"closes\":null,\"ev\":[{\"msg\":\"m:3\",\"quote\":\"dinner thursday?\"},{\"msg\":\"m:2\",\"quote\":\"we need to celebrate before you go\"}],\"conf\":0.78},{\"owner\":\"ME\",\"with\":[\"P1\"],\"kind\":\"send\",\"what\":\"send the Denver restaurant list\",\"due\":{\"kind\":\"none\",\"start\":null,\"end\":null},\"status\":\"open\",\"stakes\":\"normal\",\"closes\":null,\"ev\":[{\"msg\":\"m:4\",\"quote\":\"can you send me that list of Denver restaurants\"}],\"conf\":0.85}],\"needs_reply\":{\"state\":\"needs_reply\",\"msg\":\"m:4\",\"reason\":\"request\",\"urgency\":\"normal\",\"conf\":0.86}}
 
 ## Example 2 (group, steady, mostly chatter)
 

@@ -52,6 +52,8 @@ export type RelationLabel = (typeof RELATION_LABELS)[number];
 
 export const COMMITMENT_KINDS = ['meet', 'call', 'send', 'intro', 'reply_later', 'favor', 'plan', 'other'] as const;
 export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
+/** How much a promise matters (pipeline/obligations/stakes.ts). */
+export const COMMITMENT_STAKES = ['low', 'normal', 'high'] as const;
 
 const Ref = z.string();
 const Ev = z.object({ msg: z.string(), quote: z.string() });
@@ -84,6 +86,7 @@ export const ExtractedCommitment = z.object({
     end: z.string().nullable(),
   }),
   status: z.enum(['open', 'done', 'cancelled']),
+  stakes: z.enum(COMMITMENT_STAKES),
   /** "K<n>" of an open commitment this one closes (status done/cancelled). */
   closes: z.string().nullable(),
   ev: z.array(Ev),
@@ -232,6 +235,14 @@ const ITEM_DROP_PREFIX: Record<string, string> = { facts: 'fact', commitments: '
 const valueAt = (v: unknown, path: readonly PropertyKey[]): unknown =>
   path.reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<PropertyKey, unknown>)[k] : undefined), v);
 
+/** Answers from before commitments carried `stakes` (a batch in flight across the deploy, a recorded fixture) read as normal. */
+function withDefaultStakes(json: unknown): unknown {
+  const items = json && typeof json === 'object' ? (json as Record<string, unknown>).commitments : undefined;
+  if (!Array.isArray(items) || !items.some((c) => c && typeof c === 'object' && !('stakes' in c))) return json;
+  const commitments = items.map((c: unknown) => (c && typeof c === 'object' && !('stakes' in c) ? { ...c, stakes: 'normal' } : c));
+  return { ...(json as Record<string, unknown>), commitments };
+}
+
 /**
  * A window's merged answer → ParsedExtraction. Strict about structure: a missing key or a wrong type anywhere fails
  * the window (schema_invalid: one retry, then a dead letter). Item-level about enums: an item whose enum field holds
@@ -239,6 +250,7 @@ const valueAt = (v: unknown, path: readonly PropertyKey[]): unknown =>
  * so is the needs_reply verdict (needs_reply_bad_enum, verdict null). The rest of the window still applies.
  */
 export function parseExtraction(json: unknown): { success: true; data: ParsedExtraction } | { success: false; error: z.ZodError } {
+  json = withDefaultStakes(json);
   const strict = Extraction.safeParse(json);
   if (strict.success) return { success: true, data: strict.data };
   const bad = new Map<string, Set<number>>();

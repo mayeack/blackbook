@@ -184,12 +184,13 @@ describe('generators', () => {
     expect(c[0]!.evidenceIds[0]).toMatch(/^m:\d+$/);
   });
 
-  it('commitment_due: due ones at 1.0, gated waiting-on at 0.3, and "did this happen?" once after a lapse', () => {
+  it('commitment_due: due ones at 0.8 (normal stakes), gated waiting-on at 0.3, and "did this happen?" once after a lapse', () => {
     const { w, mine, kitOwes, kit } = scene();
     const c = commitmentCandidates(w.db, NOW);
+    // "Send the photos" is normal stakes (× 0.8); Kit's "Book the court" is a booking, high (× 1).
     expect(c.map((x) => [x.subjectKey, x.base])).toEqual(
       expect.arrayContaining([
-        [mine, 1],
+        [mine, 0.8],
         [kitOwes, 0.3],
       ]),
     );
@@ -206,6 +207,46 @@ describe('generators', () => {
     ).run(uuidv7(), mine, `commitment_due:lapsed:${mine}`, later, later, later);
     expect(commitmentCandidates(w.db, later).some((x) => x.subjectKey === `lapsed:${mine}`)).toBe(false);
     expect(commitmentCandidates(w.db, later + 8 * DAY).some((x) => x.payload.lapsed)).toBe(false);
+  });
+});
+
+describe('stakes (owner: "Focus on important things. Bringing tomatoes isn\'t important")', () => {
+  it('a low-stakes promise is never a digest candidate, not even "did this happen?"; high ones rank above normal ones', () => {
+    const w = world();
+    const ava = w.person('Ava', { tie: 70 });
+    const adm = w.dm(ava.identity);
+    const tomatoes = promise(w, ava.id, adm, { kind: 'other', what: 'bring tomatoes', stakes: 'low', text: "I'll bring tomatoes" });
+    const rent = promise(w, ava.id, adm, { kind: 'other', what: 'pay my share of the rent', stakes: 'high', text: "I'll pay my share of the rent" });
+    const photos = promise(w, ava.id, adm, { stakes: 'normal' });
+    // Rows from before the extraction labeled stakes are guessed from the description.
+    const broom = promise(w, ava.id, adm, { kind: 'other', what: 'get a broom for Ava', text: "I'll get you a broom" });
+    w.db.prepare('UPDATE commitments SET stakes = NULL WHERE id = ?').run(broom);
+    runCommitments(w.db, { now: NOW });
+    const c = commitmentCandidates(w.db, NOW);
+    expect(Object.fromEntries(c.map((x) => [x.subjectKey, [x.base, x.payload.stakes]]))).toEqual({ [rent]: [1, 'high'], [photos]: [0.8, 'normal'] });
+    expect(c.some((x) => x.subjectKey === tomatoes || x.subjectKey === broom)).toBe(false);
+    const later = Date.UTC(2026, 9, 14) + 30 * DAY;
+    runCommitments(w.db, { now: later });
+    expect(
+      commitmentCandidates(w.db, later)
+        .filter((x) => x.payload.lapsed)
+        .map((x) => [x.subjectKey, Math.round(x.base * 100) / 100]),
+    ).toEqual(expect.arrayContaining([[`lapsed:${rent}`, 0.4], [`lapsed:${photos}`, 0.32]]));
+    expect(commitmentCandidates(w.db, later).some((x) => x.subjectKey === `lapsed:${tomatoes}` || x.subjectKey === `lapsed:${broom}`)).toBe(false);
+  });
+
+  it("Today's preview leaves low-stakes promises out; the lists keep them, after the rest", () => {
+    const w = world();
+    const ava = w.person('Ava', { tie: 70 });
+    const adm = w.dm(ava.identity);
+    // Due first, so by date alone it would lead.
+    const tomatoes = promise(w, ava.id, adm, { kind: 'other', what: 'bring tomatoes', stakes: 'low', due: { kind: 'date', start: '2026-10-11', end: null }, text: "I'll bring tomatoes" });
+    const photos = promise(w, ava.id, adm, { stakes: 'normal' });
+    runCommitments(w.db, { now: NOW });
+    expect(todayOpenLoops(w.db, { now: NOW }).preview.map((l) => l.id)).toEqual([photos]);
+    expect(openLoops(w.db, { now: NOW }).commitments.map((l) => l.id)).toEqual([photos, tomatoes]);
+    expect(personOpenLoops(w.db, ava.id, { now: NOW }).commitments.map((l) => l.id)).toEqual([photos, tomatoes]);
+    expect(openLoopsByPerson(w.db, [ava.id], { now: NOW }).get(ava.id)!.map((l) => l.id)).toEqual([photos, tomatoes]);
   });
 });
 
