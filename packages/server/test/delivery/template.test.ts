@@ -94,6 +94,16 @@ describe('template copy', () => {
     }
   });
 
+  it('a name with emoji in it reads as that name, not "someone"', () => {
+    const zed = seedPerson(w.db, { display_name: 'Zed ⚡️', first_name: null, last_name: null });
+    const sam = seedPerson(w.db, { display_name: 'Sam 🎸 Rivera', first_name: null, last_name: null });
+    expect(copyOf(seedSuggestion(w.db, { kind: 'reply_debt', personId: zed, signals: { ageD: 3 } }))).toMatchObject({
+      headline: 'Reply to Zed',
+      body: 'Zed has been waiting 3 days for an answer.',
+    });
+    expect(copyOf(seedSuggestion(w.db, { kind: 'reply_debt', personId: sam, signals: { ageD: 3 } })).headline).toBe('Reply to Sam R.');
+  });
+
   it('party invites: whom to invite to the event you host, naming who is on the Party invites list', () => {
     const invite = (people: string[], signals: Record<string, unknown>, occasionId?: string) => {
       const id = seedSuggestion(w.db, { kind: 'party_invite', personId: people[0], occasionId, signals });

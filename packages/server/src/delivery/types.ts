@@ -63,7 +63,7 @@ export type OutboundBlockReason =
 
 export interface OutboundOptions {
   digestId?: string | null;
-  /** The digest item this text carries (one text per suggestion), so an inline reply can act on that item. */
+  /** The digest item this text carries (a one-item brief, a "more" text), so an inline reply can act on that item. */
   digestOrdinal?: number | null;
   /** Direct replies to the owner's own command go out during quiet hours. */
   bypassQuietHours?: boolean;

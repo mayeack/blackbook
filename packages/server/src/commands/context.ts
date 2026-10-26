@@ -46,8 +46,8 @@ export interface DigestRef {
 export interface CommandContext {
   msg: MessageInfo;
   /**
-   * Inline reply (thread originator) to a bot row, the digest that row belongs to, and the item it carries (the
-   * brief is one text per suggestion, so "done" as a reply to text 2 means done 2).
+   * Inline reply (thread originator) to a bot row, the digest that row belongs to, and the item it carries (a
+   * one-item brief's text, a "more" text, a brief from the one-text-per-suggestion days), so a bare "done" acts on it.
    */
   inline: { toBot: boolean; digest: DigestRef | null; ordinal: number | null };
   /** The most recent digest sent in the 36 h before the row. */
@@ -78,7 +78,7 @@ const digestById = (db: DB, id: string | null | undefined): DigestRef | null => 
 
 export interface BotTarget {
   digest: DigestRef | null;
-  /** The digest item the text carried (one text per suggestion), when known. */
+  /** The digest item the text carried (null for a text that carries the whole brief), when known. */
   ordinal: number | null;
 }
 

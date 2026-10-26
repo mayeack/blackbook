@@ -150,15 +150,15 @@ export interface NameParts {
 }
 
 const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u;
-/** Emoji and symbols people decorate names with ("Viv ⚡️", "★ Sam"). */
-const EMOJI_SYMBOLS = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{S}‍️⃣]/gu;
+/** Emoji and other symbols people put in names ("Zed ⚡️", "Sam 🎸"), with their joiners, skin tones, variation selectors and keycaps. */
+const NAME_SYMBOLS = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{S}\u200d\ufe0e\ufe0f\u20e3]/gu;
 /** A note in brackets after a name ("Sam (climbing)"). */
 const BRACKET_NOTE = /[([{][^)\]}]*[)\]}]/g;
 
 /** The first name (one word) and last name a short name is made from; null when unusable. */
 function nameWords(p: NameParts): { first: string; last: string | null } | null {
   const clean = (s: string | null | undefined) => {
-    const t = s?.normalize('NFKC').replace(BRACKET_NOTE, ' ').replace(EMOJI_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
+    const t = s?.normalize('NFKC').replace(BRACKET_NOTE, ' ').replace(NAME_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
     return t && NAME_OK.test(t) ? t : null;
   };
   let first = clean(p.firstName) ?? clean(p.nickname);
@@ -194,7 +194,7 @@ const IDENTIFIER = new RegExp(`${PHONE_LIKE.source}|${EMAIL_LIKE.source}|${URL_L
  * show a whole phone number, email or link.
  */
 export function nameLabel(p: NameParts): string | null {
-  const t = p.displayName?.normalize('NFKC').replace(EMOJI_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
+  const t = p.displayName?.normalize('NFKC').replace(NAME_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
   if (!/[\p{L}\p{N}]/u.test(t) || IDENTIFIER.test(t)) return null;
   return truncate(t, 24);
 }
