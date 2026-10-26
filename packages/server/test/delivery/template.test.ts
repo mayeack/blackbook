@@ -70,6 +70,8 @@ describe('template copy', () => {
     const later = zoned('2026-10-17', '12:00');
     expect(copyOf(commitment(w.ben, 'them', 'send', 'forward the lease', later)).headline).toBe('Ben O. owes you: forward the lease');
     expect(copyOf(commitment(w.cleo, 'me', 'send', 'the Denver restaurant list', later)).headline).toBe('Your promise to Cleo M.: the Denver restaurant list');
+    // Rows stored before secondPerson read "you's" for the owner's token.
+    expect(copyOf(commitment(w.ava, 'both', 'plan', "Game night at you's place", later)).headline).toBe('Your plan with Ava Q.: Game night at your place');
   });
 
   it('titles that end in punctuation, one-letter first names and unknown names never break a sentence', () => {

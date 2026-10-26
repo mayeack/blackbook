@@ -184,8 +184,11 @@ export class PeopleCache {
   }
 }
 
-const firstOf = (p: Pick<PersonInfo, 'firstName' | 'displayName'>): string =>
-  (p.firstName ?? '').trim() || (p.displayName ?? '').trim().split(/\s+/)[0] || 'Someone';
+/** The first name; the display name's first word with letters ("Viv ⚡️" → "Viv"), else the whole label ("(310) •••-••12"). */
+const firstOf = (p: Pick<PersonInfo, 'firstName' | 'displayName'>): string => {
+  const display = (p.displayName ?? '').trim();
+  return (p.firstName ?? '').trim() || display.split(/\s+/).find((w) => /\p{L}/u.test(w)) || display || 'Someone';
+};
 
 /** "Sam R." — first name + last initial (the digest's name rule); falls back to the display name's first word. */
 export function shortName(p: Pick<PersonInfo, 'firstName' | 'lastName' | 'displayName'>): string {

@@ -165,3 +165,64 @@ describe('brief names in LLM copy', () => {
     expect(groundingIssues(out('Check in with Ava', null), { text: packet.text, refIds: packet.refIds })).toEqual([]);
   });
 });
+
+describe('people without a plain name', () => {
+  /** Juno, known only by an emoji-decorated display name; Pia, with a note in brackets; a number never saved. */
+  function unnamedDay(): { juno: string; pia: string; unsaved: string; ids: string[] } {
+    const juno = seedPerson(w.db, { display_name: 'JUNO ⚡️', first_name: null, last_name: null });
+    const pia = seedPerson(w.db, { display_name: 'Pia Rook (climbing)', first_name: null, last_name: null });
+    const unsaved = seedPerson(w.db, { display_name: '(555) •••-••01', first_name: null, last_name: null });
+    const ids = [juno, pia, unsaved].map((personId) => seedSuggestion(w.db, { kind: 'reply_debt', personId, signals: { ageD: 3 } }));
+    seedDigest(w.db, DAY_DATE, ids);
+    return { juno, pia, unsaved, ids };
+  }
+
+  it('template copy: emoji and bracketed notes come off a name; a number never saved goes by its masked label', async () => {
+    unnamedDay();
+    const c = await template();
+    expect(c.items.map((i) => i.headline)).toEqual(['Reply to JUNO', 'Reply to Pia R.', 'Reply to (555) •••-••01']);
+    expect(c.texts.join('\n')).not.toMatch(/someone/i);
+    expect(c.texts[2]!.split('\n').slice(0, 2)).toEqual([`${BOT_MARKER} 3. Reply to (555) •••-••01`, '(555) •••-••01 has been waiting 3 days for an answer.']);
+  });
+
+  it('LLM copy: an unsaved number goes by token (its label locally); copy that names nobody keeps the template', async () => {
+    const { juno, pia, unsaved } = unnamedDay();
+    fact(unsaved, 'location_current', 'Lisbon');
+    const egress = new FakeEgress();
+    const [tj, tp, tu] = [juno, pia, unsaved].map((id) => egress.tokenFor(id));
+    const llm = new FakeLlmClient().on(`digest:${DAY_DATE}`, {
+      json: {
+        items: [
+          { n: 1, headline: 'Reply to someone', body: 'They sent you a message and are still waiting.', openers: [], cites: [] },
+          { n: 2, headline: `Reply to ${tp}`, body: null, openers: [], cites: [] },
+          { n: 3, headline: `Reply to ${tu}`, body: `${tu} is still waiting on an answer.`, openers: [`Hey ${tu}, how is Lisbon?`, 'Sorry for the slow reply! How is Lisbon?'], cites: ['c1'] },
+        ],
+      },
+    });
+    const c = (await composeDigest(w.db, { llm, egress }, { localDate: DAY_DATE, now: NOW }))!;
+    const packet = llm.calls[0]!.userText;
+    expect(packet).toContain(`person: ${tj} · first name JUNO`);
+    expect(packet).toContain(`person: ${tu}\n`);
+    expect(packet).toContain(`plain version: Reply to ${tu}\n`);
+    expect(packet).not.toMatch(/someone|•/);
+
+    expect(c.items.map((i) => i.copy)).toEqual(['template', 'llm', 'llm']);
+    expect(c.items[0]!.headline).toBe('Reply to JUNO');
+    expect(c.items[2]).toMatchObject({
+      headline: 'Reply to (555) •••-••01',
+      body: '(555) •••-••01 is still waiting on an answer.',
+      // An opener greeting the number by name would read "Hey (555) •••-••01": dropped.
+      openers: ['Sorry for the slow reply! How is Lisbon?'],
+    });
+  });
+
+  it('the grounding validator rejects copy that names none of the item’s people', () => {
+    const packet = { text: 'person: P1 · first name Juno', refIds: new Set<string>(), personNames: new Set(['P1', 'Juno']) };
+    const out = (headline: string, body: string | null) => ({ n: 1, headline, body, openers: [], cites: [] });
+    expect(groundingIssues(out('Reply to someone', 'They are waiting.'), packet)).toEqual(['copy: names nobody']);
+    expect(groundingIssues(out('Reply to P1', null), packet)).toEqual([]);
+    expect(groundingIssues(out('Time to reply', "Juno's still waiting."), packet)).toEqual([]);
+    // Items about no one (a group) aren't checked.
+    expect(groundingIssues(out('Make plans with the crew', null), { text: packet.text, refIds: packet.refIds })).toEqual([]);
+  });
+});

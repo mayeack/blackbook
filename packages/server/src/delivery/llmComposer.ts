@@ -21,12 +21,13 @@ import { ownerNames } from '../identity/ownerNames';
 import { happeningOf, metRefOf } from '../intel/eventInvites';
 import { estimatePromptTokens, estimateRouteUsd } from '../llm/models';
 import { routePromptVersion, type Egress, type LlmClient, type LlmUsage } from '../llm/types';
+import { secondPerson } from '../llm/secondPerson';
 import type { Logger } from '../ops/logger';
 import type { SettingsSnapshot } from '../settings/registry';
 import { groundingIssues, SENSITIVE_RE, type ComposerItemOut } from './grounding';
 import type { SelectedItem } from './selection';
 import type { ItemCopy } from './template';
-import { briefNames, headerDate, safeFragment, shortDay, shortTime, truncate, type BriefNames } from './text';
+import { briefNames, firstNameOnly, headerDate, safeFragment, shortDay, shortTime, truncate, type BriefNames } from './text';
 
 /** Structured output (every field required; bounds are checked in code by the grounding validator). */
 export const ComposerOutput = z.object({
@@ -56,6 +57,7 @@ export const COMPOSER_SYSTEM = [
   '- cites: the ref ids (like "c3") of the packet lines your copy relies on. An item with openers must cite at least one.',
   'Rules:',
   '- Refer to people only by their token exactly as given (P1, P2, …) or by the first name the packet gives. Never invent a name.',
+  '- Name the item’s person (or one of its people) in the headline or body. Never write "someone" or "they" in place of a name.',
   '- Use only the facts, places, dates and numbers that appear in that item’s packet lines. Do not guess or embellish.',
   '- No phone numbers, emails, links, @handles, money amounts, or quotes longer than six words.',
   '- Never bring up health, money, sex, religion, politics, pregnancy, deaths or breakups.',
@@ -126,8 +128,10 @@ interface PacketItem {
   item: SelectedItem;
   /** ref id → evidence description (local only). */
   refs: Set<string>;
-  /** token → display (the brief's name) / first name, for de-tokenizing locally. */
-  tokens: Map<string, { short: string; first: string }>;
+  /** token → display (the brief's name) / first name (null: no name of their own), for de-tokenizing locally. */
+  tokens: Map<string, { short: string; first: string | null }>;
+  /** Tokens and first names the item's people go by in the packet (the copy must use one). */
+  names: Set<string>;
 }
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -270,15 +274,19 @@ export function buildPacket(
   for (const item of items) {
     const lines: string[] = [];
     const refs = new Set<string>();
-    const tokens = new Map<string, { short: string; first: string }>();
+    const tokens = new Map<string, { short: string; first: string | null }>();
+    const itemNames = new Set<string>();
     lines.push(`kind: ${item.kind.replace(/_/g, ' ')} (${KIND_HINT[item.kind] ?? 'a suggestion'})${item.isWildcard ? ' · wildcard' : ''}`);
     const tokenOnly = new Map<string, string>();
     for (const p of item.people) {
       const token = egress.tokenFor(p.id);
       const short = names.of(p) ?? 'someone';
-      const first = short.split(' ')[0]!;
+      // Someone with no name of their own ("(310) •••-••12") goes by token, like an ambiguous first name.
+      const first = firstNameOnly(p) ? short.split(' ')[0]! : null;
       tokens.set(token, { short, first });
-      if (names.ambiguousFirstNames.has(first)) tokenOnly.set(token, short);
+      if (first === null || names.ambiguousFirstNames.has(first)) tokenOnly.set(token, short);
+      itemNames.add(token);
+      if (!tokenOnly.has(token)) itemNames.add(first!);
       lines.push(tokenOnly.has(token) ? `person: ${token}` : `person: ${token} · first name ${first}`);
     }
     const sig = signalLine(db, item);
@@ -299,20 +307,26 @@ export function buildPacket(
     loopLines(db, item, o.timeZone, o.now, nextRef, lines, refs);
     const n = packetItems.length + 1;
     sections.push({ name: `item ${n}`, text: lines.join('\n') });
-    packetItems.push({ n, item, refs, tokens });
+    packetItems.push({ n, item, refs, tokens, names: itemNames });
   }
   return { sections, packetItems };
 }
 
 /** Model tokens → names, locally: short names in headline/body, first names in openers; ME → you. */
-function detokenize(s: string, tokens: Map<string, { short: string; first: string }>, form: 'short' | 'first'): string {
-  return s
-    .replace(/\b(P[0-9a-z]+)\b/g, (t) => {
-      const v = tokens.get(t);
-      return v ? v[form] : t;
-    })
-    .replace(/\bME\b/g, 'you');
+function detokenize(s: string, tokens: Map<string, { short: string; first: string | null }>, form: 'short' | 'first'): string {
+  return secondPerson(
+    s
+      .replace(/\b(P[0-9a-z]+)\b/g, (t) => {
+        const v = tokens.get(t);
+        return v ? (v[form] ?? v.short) : t;
+      })
+      .replace(/\bME\b/g, 'you'),
+  );
 }
+
+/** An opener addressed by token to someone with no name of their own would greet them as a phone number. */
+const greetsUnnamed = (s: string, tokens: Map<string, { short: string; first: string | null }>): boolean =>
+  (s.match(/\bP[0-9a-z]+\b/g) ?? []).some((t) => tokens.get(t)?.first === null);
 
 const empty = (status: LlmComposeStatus, reason: string | null, extra: Partial<LlmComposeResult> = {}): LlmComposeResult => ({
   status,
@@ -395,7 +409,7 @@ export async function composeWithLlm(input: LlmComposeInput): Promise<LlmCompose
       continue;
     }
     seen.add(out.n);
-    const issues = groundingIssues(out, { text: packetText, refIds: pi.refs, ambiguousNames: names.ambiguousFirstNames });
+    const issues = groundingIssues(out, { text: packetText, refIds: pi.refs, ambiguousNames: names.ambiguousFirstNames, personNames: pi.names });
     if (issues.length) {
       rejected++;
       continue;
@@ -404,7 +418,10 @@ export async function composeWithLlm(input: LlmComposeInput): Promise<LlmCompose
     copies.set(pi.item.suggestionId, {
       headline: pi.item.isWildcard && !headline.startsWith('🎲') ? `🎲 ${headline}` : headline,
       body: out.body?.trim() ? truncate(detokenize(out.body.trim(), pi.tokens, 'short'), 240) : null,
-      openers: out.openers.slice(0, 2).map((x) => truncate(detokenize(x.trim(), pi.tokens, 'first'), 160)),
+      openers: out.openers
+        .slice(0, 2)
+        .filter((x) => !greetsUnnamed(x, pi.tokens))
+        .map((x) => truncate(detokenize(x.trim(), pi.tokens, 'first'), 160)),
     });
   }
   input.log?.info('digest.llm_composed', { counts: { items: packetItems.length, grounded: copies.size, rejected } });

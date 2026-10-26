@@ -163,6 +163,13 @@ describe('detokenize', () => {
     expect(detokenizeKeepingCitations(egress, `${a} [${a}] likes climbing [m:8812]`)).toBe(`Avery Q. [${a}] likes climbing [m:8812]`);
   });
 
+  it('the owner’s possessive reads "your" / "yours", never "you\'s"', () => {
+    const { egress, avery } = world();
+    const a = egress.tokenFor(avery);
+    expect(egress.detokenize(`Halloween party at ME's place with ${a}`, {})).toBe('Halloween party at your place with Avery Q.');
+    expect(egress.detokenize(`Dinner at ME’s on Friday; ME is hosting`, {})).toBe('Dinner at yours on Friday; you are hosting');
+  });
+
   it('a person whose only name is a raw identifier never comes back as one', () => {
     const { db, egress } = world();
     const p = seedPerson(db, { first_name: null, last_name: null, display_name: '@raw_handle' });
