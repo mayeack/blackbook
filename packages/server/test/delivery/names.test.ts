@@ -77,11 +77,11 @@ describe('brief names', () => {
     collidingDay();
     const c = await template();
     expect(c.items.map((i) => i.headline)).toEqual(['Check in with Ava Quillfeather', 'Reply to Ben Ostrander', 'Reply to Ben Osgood', 'Catch up with Cleo M.']);
-    expect(c.texts[0]).toBe(
-      `${BOT_MARKER} Good morning! 4 things for today.\n\n1. Check in with Ava Quillfeather\nIt's been 6 weeks. You usually talk about once a week.`,
+    expect(c.texts[0]).toContain(
+      `${BOT_MARKER} Good morning! 4 things for today.\n\n1. Check in with Ava Quillfeather\nIt's been 6 weeks. You usually talk about once a week.\n\n`,
     );
     // The body keeps the first name: the headline right above it already says who.
-    expect(c.texts[1]).toBe(`${BOT_MARKER} 2. Reply to Ben Ostrander\nBen has been waiting 2 days for an answer.`);
+    expect(c.texts[0]).toContain(`\n\n2. Reply to Ben Ostrander\nBen has been waiting 2 days for an answer.\n\n`);
     expect(w.db.prepare('SELECT title FROM suggestions WHERE id = ?').pluck().get(c.items[0]!.suggestionId)).toBe('Check in with Ava Quillfeather');
     // The reply acks name the items the same way.
     const digestId = w.db.prepare('SELECT id FROM digests WHERE local_date = ?').pluck().get(DAY_DATE) as string;

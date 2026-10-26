@@ -1588,6 +1588,43 @@ AI are never sent to either model; an open "Which Sam?" clarification from befor
 invite.
 **Platforms**: server + web (Settings). Not deployed; evals ran against the real llama3.1:8b, not the iPhone flow.
 
+## The whole brief in one text, nothing left to the app (2026-10-25)
+
+Owner: "This wasn't four things, it was one thing. Always include everything you want me to see each day in the
+text, not just the app." The 2026-10-25 brief went out as four texts, so the first one read "4 things for today"
+above a single item. The brief is now one text: greeting, every item (blank line between them), the health line,
+then the closing and the one link. An event today no longer says "There's a quick brief in the app": up to three of
+its people get a line each (when you last talked, the first thing open between you, one recent fact). A name with
+emoji in it ("Zed ⚡️") reads as "Zed", not "someone". Sensitive items still say "The details are in the app."
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+2. `test/delivery/compose.test.ts` (the exact one-text brief, health line before the closing, `parts` = [null]; a
+   one-item brief's text carries its item), `test/delivery/send.test.ts` (one text, every item delivered; a stored
+   one-text-per-suggestion brief that never went out is recomposed into one; one that was part-way out finishes as
+   stored), `test/intel/events.test.ts` (the event's people lines), `test/delivery/template.test.ts` (emoji names).
+3. Dry run on a copy of the live database for 2026-10-25 (template copy, nothing sent): one text, no outbound-rule
+   problems, the event item lists three of its people with when you last talked; the reply item names the person
+   instead of "someone".
+
+### Scenario B — Preview (web)
+1. yeackbot.com → Settings → Digest → **Preview today's text**.
+2. **Expected**: one bubble; the caption says "1 text · N items"; every item is numbered inside it; an event item
+   has a line per person and no "in the app" line.
+
+### Scenario C — Real brief (owner's phone)
+1. Next morning at 08:00 (or Settings → Digest → **Send today's brief to me**), watch the self thread.
+2. **Expected**: a single 🅨 text whose count matches the numbered items in it, ending with
+   "That's it! Reply "done 2", "skip 2" or "snooze 2" anytime." and yeackbot.com/today.
+3. Text "done 2". **Expected**: "✓ Nice, marked <name> done." Reply to the brief text with just "done" while several
+   items are open. **Expected**: "Which one? Reply "done 1"."
+4. On a day with only one item, long-press the text → Reply → "done". **Expected**: that item is marked done.
+
+**Edge cases**: a stored brief from the one-text-per-suggestion days that is part-way out at deploy time finishes as
+stored; a person's line is dropped (not the item) if it would break an outbound rule; an attendee with nothing known
+gets no line.
+**Platforms**: server + web. Not deployed; the real 08:00 text needs the owner's phone to confirm.
+
 ## 2026-10-22 — Weekly event picks (public events on your free nights, with ticket links)
 
 Once a week yeackbot searches the web (Claude Haiku 5.5 with Anthropic's web search) for public events in your

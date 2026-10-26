@@ -5,9 +5,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { uuidv7 } from '@yb/shared';
 import { outboundTextHash } from '../../src/adapters/imessage/mapping';
-import { composeDigest } from '../../src/delivery/compose';
+import { composeDigest, greeting, itemLines, joinTexts, webBodyOf } from '../../src/delivery/compose';
 import { upsertSubscription } from '../../src/delivery/push';
-import { deliveryTick, emptyStreak, type DeliveryDeps } from '../../src/delivery/send';
+import { deliveryTick, emptyStreak, partRef, type DeliveryDeps } from '../../src/delivery/send';
 import { BOT_MARKER, checkOutboundText, type OutboundSender } from '../../src/delivery/types';
 import { FakeOutboundSender, FakePushSender } from '../fakes/delivery';
 import { FakeEgress, FakeLlmClient } from '../fakes/llm';
@@ -51,29 +51,68 @@ describe('digest delivery', () => {
     expect(outbound.sent).toHaveLength(0);
   });
 
-  it('enabled: waits for digest.time, sends one text per suggestion to self, in order, once; records each and marks items delivered', async () => {
+  it('enabled: waits for digest.time, sends the whole brief as one text to self, once; marks every item delivered', async () => {
     const { ids } = typicalDay(w);
     setSettings(w.db, { 'digest.enabled': true });
     expect((await tickAt('07:59')).action).toBe('before_time');
     const r = await tickAt('08:00');
     expect(r).toMatchObject({ action: 'delivered', imessage: 'sent' });
-    expect(outbound.sent).toHaveLength(ids.length);
-    outbound.sent.forEach((sent, k) => {
-      expect(sent).toMatchObject({ purpose: 'digest', options: { digestId: digestRow().id, digestOrdinal: k + 1 } });
-      expect(sent.text.startsWith(`${BOT_MARKER} ${k === 0 ? 'Good morning! 4 things for today.\n\n1.' : `${k + 1}.`}`)).toBe(true);
-      expect(checkOutboundText(sent.text)).toEqual([]);
-      expect(w.db.prepare('SELECT text_hash, digest_ordinal FROM outbound_messages WHERE id = ?').get(sent.outboundId)).toEqual({ text_hash: outboundTextHash(sent.text), digest_ordinal: k + 1 });
-    });
-    expect(new Set(outbound.sent.map((x) => x.clientRef)).size).toBe(ids.length);
-    expect(outbound.sent.at(-1)!.text).toContain("That's it!");
-    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: now, outbound_id: outbound.sent[0]!.outboundId, imessage_status: 'sent', skip_reason: null });
+    expect(outbound.sent).toHaveLength(1);
+    const sent = outbound.sent[0]!;
+    // The text carries every item, so it names none of them on its own.
+    expect(sent).toMatchObject({ purpose: 'digest', options: { digestId: digestRow().id, digestOrdinal: null } });
+    expect(sent.text.startsWith(`${BOT_MARKER} Good morning! 4 things for today.\n\n1. `)).toBe(true);
+    for (const k of [2, 3, 4]) expect(sent.text).toContain(`\n\n${k}. `);
+    expect(sent.text).toContain("That's it!");
+    expect(checkOutboundText(sent.text)).toEqual([]);
+    expect(w.db.prepare('SELECT text_hash, digest_ordinal FROM outbound_messages WHERE id = ?').get(sent.outboundId)).toEqual({ text_hash: outboundTextHash(sent.text), digest_ordinal: null });
+    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: now, outbound_id: sent.outboundId, imessage_status: 'sent', skip_reason: null });
     expect(w.db.prepare(`SELECT count(*) FROM suggestions WHERE status = 'delivered' AND delivered_at = ?`).pluck().get(now)).toBe(ids.length);
     for (const t of ['08:01', '09:00', '10:59']) expect((await tickAt(t)).action).toBe('final');
-    expect(outbound.sent).toHaveLength(ids.length);
+    expect(outbound.sent).toHaveLength(1);
   });
 
-  /** Sends the 08:00 brief with the collector failing on the third text: two texts out, the rest pending. */
+  it('a one-item brief’s text carries that item, so an inline "done" acts on it', async () => {
+    const id = seedSuggestion(w.db, { kind: 'reply_debt', personId: w.ben, signals: { ageD: 2 } });
+    seedDigest(w.db, DAY_DATE, [id]);
+    setSettings(w.db, { 'digest.enabled': true });
+    await tickAt('08:00');
+    expect(outbound.sent).toHaveLength(1);
+    expect(outbound.sent[0]!.options).toMatchObject({ digestOrdinal: 1 });
+    expect(outbound.sent[0]!.text).toMatch(/^\u{1F168} Good morning! Just one thing today\.\n\n1\. Reply to Ben O\./u);
+  });
+
+  it('a brief stored one text per suggestion that never went out is sent as one text instead', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    await storeLegacyBrief();
+    await tickAt('08:00');
+    expect(outbound.sent).toHaveLength(1);
+    expect(outbound.sent[0]!.text).toMatch(/^\u{1F168} Good morning! 4 things for today\.\n\n1\. [^]*\n\n4\. /u);
+  });
+
+  /** The brief stored one text per suggestion, the way it was composed before 2026-10-25. */
+  async function storeLegacyBrief(): Promise<{ digestId: string; texts: string[] }> {
+    now = zoned(DAY_DATE, '07:30');
+    const c = (await composeDigest(w.db, { llm: new FakeLlmClient({ configured: false }), egress: new FakeEgress() }, { localDate: DAY_DATE, now }))!;
+    const texts = c.items.map((i, k) => `${BOT_MARKER} ${[...(k === 0 ? [greeting(c.items.length), ''] : []), ...itemLines(i)].join('\n')}`);
+    const parts = c.items.map((i) => ({ suggestionId: i.suggestionId, ordinal: i.ordinal }));
+    w.db.prepare('UPDATE digests SET web_body = ?, imessage_text = ? WHERE id = ?').run(JSON.stringify({ ...webBodyOf(c), texts, parts }), joinTexts(texts), c.digestId);
+    return { digestId: c.digestId!, texts };
+  }
+
+  /**
+   * A brief stored one text per suggestion whose first text went out before the upgrade (so it is frozen and finishes
+   * as stored), then the 08:00 tick with the collector failing on its third call: two texts out, the rest pending.
+   */
   async function cutAfterTwo() {
+    const { digestId, texts } = await storeLegacyBrief();
+    now = zoned(DAY_DATE, '07:59');
+    const first = await outbound.sendToSelf(texts[0]!, 'digest', partRef(digestId, 0), { digestId, digestOrdinal: 1 });
+    // What the sender recorded when that first text went out.
+    w.db
+      .prepare(`UPDATE digests SET status = 'sent', sent_at = ?, outbound_id = ?, imessage_status = 'pending', skip_reason = 'partial' WHERE id = ?`)
+      .run(now, first.outboundId, digestId);
     let calls = 0;
     const flaky: OutboundSender = {
       configured: true,
@@ -83,19 +122,18 @@ describe('digest delivery', () => {
     return tickAt('08:00', DAY_DATE, { services: { llm: new FakeLlmClient({ configured: false }), egress: new FakeEgress(), outbound: flaky } });
   }
 
-  it('a brief cut off midway counts as sent from its first text, then resumes where it stopped without repeats', async () => {
+  it('a stored multi-text brief cut off midway counts as sent from its first text, then resumes where it stopped without repeats', async () => {
     const { ids } = typicalDay(w);
     setSettings(w.db, { 'digest.enabled': true });
     const cut = await cutAfterTwo();
     expect(cut).toMatchObject({ action: 'waiting', imessage: 'pending', reason: 'partial' });
     expect(outbound.sent).toHaveLength(2);
     // Replies bind to it right away: it is sent (from the first text), part-way out.
-    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: now, outbound_id: outbound.sent[0]!.outboundId, imessage_status: 'pending', skip_reason: 'partial' });
+    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: zoned(DAY_DATE, '07:59'), outbound_id: outbound.sent[0]!.outboundId, imessage_status: 'pending', skip_reason: 'partial' });
     expect(w.db.prepare(`SELECT count(*) FROM suggestions WHERE delivered_at IS NOT NULL`).pluck().get()).toBe(2);
-    const sentAt = now;
     expect(await tickAt('08:01')).toMatchObject({ action: 'delivered', imessage: 'sent' });
     expect(outbound.sent.map((x) => x.options.digestOrdinal)).toEqual(ids.map((_, k) => k + 1));
-    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: sentAt, imessage_status: 'sent', skip_reason: null });
+    expect(digestRow()).toMatchObject({ status: 'sent', sent_at: zoned(DAY_DATE, '07:59'), imessage_status: 'sent', skip_reason: null });
     expect((await tickAt('08:02')).action).toBe('final');
     expect(outbound.sent).toHaveLength(ids.length);
   });
@@ -181,16 +219,16 @@ describe('digest delivery', () => {
     const extra = seedSuggestion(w.db, { kind: 'dormant', personId: w.dora });
     w.db.prepare('INSERT INTO digest_items (digest_id, ordinal, suggestion_id) VALUES (?, 5, ?)').run(digestId, extra);
     await tickAt('08:00');
-    expect(outbound.sent).toHaveLength(5);
+    expect(outbound.sent).toHaveLength(1);
     expect(outbound.sent[0]!.text).toContain('Good morning! 5 things for today.');
-    expect(outbound.sent[4]!.text).toMatch(/^\u{1F168} 5\. Reconnect with Dora V\.\?\n/u);
+    expect(outbound.sent[0]!.text).toContain('\n\n5. Reconnect with Dora V.?\n');
   });
 
   it('catch-up: a Mac that was down sends late until digest.catch_up_until, then Today only', async () => {
     typicalDay(w);
     setSettings(w.db, { 'digest.enabled': true });
     await tickAt('10:45');
-    expect(outbound.sent).toHaveLength(4);
+    expect(outbound.sent).toHaveLength(1);
 
     const w2 = buildWorld({ enabled: true });
     w = w2;
@@ -208,7 +246,7 @@ describe('digest delivery', () => {
     expect(await tickAt('10:15')).toMatchObject({ action: 'waiting', imessage: 'pending', reason: 'quiet_hours' });
     setSettings(w.db, { quiet_hours: { start: '22:00', end: '07:00' } });
     expect(await tickAt('10:20')).toMatchObject({ action: 'delivered' });
-    expect(outbound.sent).toHaveLength(4);
+    expect(outbound.sent).toHaveLength(1);
   });
 
   it('no collector / self handle: retried each tick, then skipped with that reason', async () => {
@@ -226,10 +264,10 @@ describe('digest delivery', () => {
     outbound = new FakeOutboundSender({ db: w.db, now: () => now, status: 'ghost' });
     expect(await tickAt('08:00')).toMatchObject({ action: 'failed', imessage: 'failed' });
     expect(digestRow()).toMatchObject({ status: 'failed', skip_reason: 'ghost' });
-    // each text was tried once; none is ever retried
-    expect(outbound.sent).toHaveLength(4);
+    // the text was tried once and is never retried
+    expect(outbound.sent).toHaveLength(1);
     await tickAt('08:01');
-    expect(outbound.sent).toHaveLength(4);
+    expect(outbound.sent).toHaveLength(1);
   });
 });
 
@@ -294,11 +332,11 @@ describe('empty days, heartbeat and failure notices', () => {
     typicalDay(w, '2026-10-15');
     w.db.prepare(`UPDATE job_runs SET started_at = ? WHERE job = 'ties'`).run(zoned('2026-10-15', '06:55'));
     await tickAt('08:00', '2026-10-15');
-    // four suggestion texts, then the health text on its own
-    expect(outbound.sent).toHaveLength(6);
-    expect(outbound.sent[5]).toMatchObject({ purpose: 'digest', text: `${BOT_MARKER} Heads up: last night's run failed at ties. Details at yeackbot.com/sources` });
-    expect(outbound.sent[5]!.options.digestOrdinal).toBeNull();
-    expect(outbound.sent.slice(1, 5).map((x) => x.text).join('\n').match(/yeackbot\.com/g)).toHaveLength(1);
+    // one text: the four suggestions, then the health line before the closing
+    expect(outbound.sent).toHaveLength(2);
+    expect(outbound.sent[1]).toMatchObject({ purpose: 'digest' });
+    expect(outbound.sent[1]!.text).toContain(`\n\nHeads up: last night's run failed at ties. Details at yeackbot.com/sources\n\nThat's it!`);
+    expect(outbound.sent[1]!.text.match(/yeackbot\.com\/today/g)).toHaveLength(1);
   });
 });
 

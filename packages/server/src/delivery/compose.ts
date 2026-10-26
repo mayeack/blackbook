@@ -4,27 +4,27 @@
  * item, then the LLM composer over the eligible ones (grounded items replace their template copy), then the
  * iMessage text and the push body. The composer never ranks and never sends.
  *
- * iMessage format: ONE TEXT PER SUGGESTION, written like a person would text (line breaks, no "·" separators):
+ * iMessage format: ONE TEXT FOR THE WHOLE BRIEF (owner, 2026-10-25: "always include everything you want me to see
+ * each day in the text, not just the app"), written like a person would text (line breaks, no "·" separators):
  *
- *   🅨 Good morning! 3 things for today.     ← U+1F168 is the very first character of every text
+ *   🅨 Good morning! 3 things for today.     ← U+1F168 is the very first character of the text
  *
- *   1. Reply to Sam R.                       ← ordinal + headline (first name + last initial; "Sam Rivera" when
- *                                               "Sam R." is also the owner or someone else in the brief)
- *   Sam has been waiting 2 days for an answer.
+ *   1. Priya's birthday is today at 4pm      ← ordinal + headline (first name + last initial; "Sam Rivera" when
+ *   Sam R., Priya S. and 3 others are going.  "Sam R." is also the owner or someone else in the brief)
+ *   Sam R.: You talked 2 days ago. You said you'd send the trail map.   ← an event's people (template.ts)
  *
- *   🅨 2. Check in with Priya S.
+ *   2. Check in with Priya S.
  *   It's been 6 weeks. You usually talk about once a week.
- *
  *   Maybe: “Hey! How's the new place?”      ← first opener draft (LLM copy only), to copy into a text yourself
  *
- *   🅨 3. Something personal                 ← sensitive items never show details outside the web
+ *   3. Something personal                    ← sensitive items never show details outside the web
  *   The details are in the app.
  *
- *   That's it! Reply "done 2", "skip 2" or "snooze 2" anytime.   ← or an inline reply to one text: just "done"
- *   yeackbot.com/today                       ← the only link, once, in the last text
+ *   Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up.   ← ≤1 health line
  *
- *   🅨 Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up.   ← ≤1 health text
- * Each text is checked with checkOutboundText; an item whose LLM copy fails falls back to its template copy, then
+ *   That's it! Reply "done 2", "skip 2" or "snooze 2" anytime.
+ *   yeackbot.com/today                       ← the only link, once
+ * The text is checked with checkOutboundText; an item whose LLM copy fails falls back to its template copy, then
  * to a bare "open the app" line, so a bad fragment can never block the brief. "Last night: …" counts stay on the web.
  */
 import type { DigestItem } from '@yb/shared';
@@ -46,7 +46,7 @@ import {
   type SelectedItem,
 } from './selection';
 import { failureLine, healthLine, lastNightCounts, lastNightLine, pipelineFailure, topHealthIssue } from './status';
-import { SENSITIVE_BODY, SENSITIVE_LINE, templateCopy, type ItemCopy } from './template';
+import { itemDetails, SENSITIVE_BODY, SENSITIVE_LINE, templateCopy, type ItemCopy } from './template';
 import { BOT_MARKER, briefNames, firstNameOnly, MAX_MAIN_LINE, MAX_SUB_LINE, nameList, plural, TODAY_LINK, truncate } from './text';
 import { checkOutboundText } from './types';
 
@@ -57,8 +57,10 @@ export interface ComposedItem extends SelectedItem {
   headline: string;
   body: string | null;
   openers: string[];
-  /** The numbered main line as it appears in the item's text. */
+  /** The numbered main line as it appears in the brief's text. */
   line: string;
+  /** Lines under the body that aren't copy (an event's people: template.ts eventPeopleLines). */
+  details: string[];
 }
 
 export interface TextPart {
@@ -70,9 +72,12 @@ export interface ComposedDigest {
   localDate: string;
   digestId: string | null;
   items: ComposedItem[];
-  /** The iMessage texts in send order: one per item, then at most one health text (each starts with U+1F168). */
+  /**
+   * The iMessage texts in send order (each starts with U+1F168): the whole brief as one text (just the health text
+   * on a day with no items). Briefs composed between 2026-10-17 and 2026-10-25 stored one text per item.
+   */
   texts: string[];
-  /** Per text (same order): the suggestion and ordinal it carries, or null (the health text, the minimal fallback). */
+  /** Per text (same order): the suggestion and ordinal it carries (a one-item brief), or null (the whole brief). */
   parts: (TextPart | null)[];
   /** The texts joined with blank lines (digests.imessage_text; display only). */
   text: string;
@@ -92,9 +97,9 @@ export interface WebBody {
   pushBody: string;
   lastNight: string | null;
   health: string | null;
-  /** The iMessage texts in send order (absent in compositions written before one-text-per-item: recomposed). */
+  /** The iMessage texts in send order (absent in compositions written before 2026-10-17: recomposed). */
   texts?: string[];
-  /** Per text: the item it carries (null for the health text). Sending freezes these once a text was attempted. */
+  /** Per text: the item it carries, or null (the whole brief). Sending freezes these once a text was attempted. */
   parts?: (TextPart | null)[];
   items: {
     suggestionId: string;
@@ -104,6 +109,8 @@ export interface WebBody {
     body: string | null;
     openers: string[];
     line: string;
+    /** Lines under the body (absent in compositions written before 2026-10-25). */
+    details?: string[];
     /** The people the copy names (absent in compositions written before it was recorded). */
     personIds?: string[];
   }[];
@@ -141,8 +148,10 @@ export function pushBodyFor(items: Pick<ComposedItem, 'people' | 'sensitive'>[],
   return `Your brief is ready · ${plural(n, 'thing')}`;
 }
 
+type ItemText = Pick<ComposedItem, 'line' | 'copy' | 'body' | 'openers' | 'sensitive'> & { details?: string[] };
+
 export interface TextParts {
-  items: Pick<ComposedItem, 'ordinal' | 'line' | 'copy' | 'body' | 'openers' | 'sensitive'>[];
+  items: (ItemText & Pick<ComposedItem, 'ordinal'>)[];
   health: string | null;
   commandsEnabled: boolean;
   /** settings digest.time ("08:00"): picks the greeting. */
@@ -156,7 +165,7 @@ export function greeting(n: number, digestTime = '08:00'): string {
   return `${hi} ${n === 1 ? 'Just one thing today.' : `${n} things for today.`}`;
 }
 
-/** The closing lines of the last item's text. */
+/** The closing lines of the brief. */
 export function closing(items: Pick<ComposedItem, 'ordinal'>[], commandsEnabled: boolean): string[] {
   if (!commandsEnabled) return [`That's it! It's all at ${TODAY_LINK}`];
   if (items.length === 1) return [`That's it! Reply "done", "skip" or "snooze" anytime.`, TODAY_LINK];
@@ -164,13 +173,17 @@ export function closing(items: Pick<ComposedItem, 'ordinal'>[], commandsEnabled:
   return [`That's it! Reply "done ${n}", "skip ${n}" or "snooze ${n}" anytime.`, TODAY_LINK];
 }
 
-/** One item's lines (no marker, no greeting/closing): the numbered headline, its context, an opener draft. */
-export function itemLines(i: Pick<ComposedItem, 'line' | 'copy' | 'body' | 'openers' | 'sensitive'>): string[] {
+/**
+ * One item's lines (no marker, no greeting/closing, no blank line: blank lines separate the items): the numbered
+ * headline, its context, its details, an opener draft.
+ */
+export function itemLines(i: ItemText): string[] {
   if (i.sensitive) return [i.line, SENSITIVE_BODY];
   const lines = [i.line];
   if (i.body) lines.push(truncate(i.body, MAX_SUB_LINE * 2));
+  for (const d of i.details ?? []) lines.push(truncate(d, MAX_SUB_LINE * 2));
   const opener = i.copy === 'llm' ? i.openers[0] : undefined;
-  if (opener) lines.push('', `Maybe: “${truncate(opener.replace(/["“”]/g, ''), MAX_SUB_LINE)}”`);
+  if (opener) lines.push(`Maybe: “${truncate(opener.replace(/["“”]/g, ''), MAX_SUB_LINE)}”`);
   return lines;
 }
 
@@ -179,15 +192,23 @@ const bareLines = (ordinal: number): string[] => [`${ordinal}. One for you in th
 
 const asText = (lines: string[]): string => `${BOT_MARKER} ${lines.join('\n')}`;
 
-/** One text per item (greeting on the first, closing on the last), then the health text. */
+/**
+ * The brief as one text: the greeting, every item (a blank line between them), the health line, the closing. A day
+ * with no items is just the health text, if any.
+ */
 export function digestTexts(p: TextParts, linesOf: (i: TextParts['items'][number], k: number) => string[] = (i) => itemLines(i)): string[] {
-  const n = p.items.length;
-  const texts = p.items.map((i, k) => {
-    const lines = [...(k === 0 ? [greeting(n, p.digestTime), ''] : []), ...linesOf(i, k), ...(k === n - 1 ? ['', ...closing(p.items, p.commandsEnabled)] : [])];
-    return asText(lines);
-  });
-  if (p.health) texts.push(asText([p.health]));
-  return texts;
+  if (!p.items.length) return p.health ? [asText([p.health])] : [];
+  const blocks = p.items.flatMap((i, k) => ['', ...linesOf(i, k)]);
+  return [asText([greeting(p.items.length, p.digestTime), ...blocks, ...(p.health ? ['', p.health] : []), '', ...closing(p.items, p.commandsEnabled)])];
+}
+
+/**
+ * What each of digestTexts' texts carries: a one-item brief's text is that item's (an inline "done" acts on it);
+ * otherwise the text is the whole brief (null).
+ */
+export function textParts(items: Pick<ComposedItem, 'suggestionId' | 'ordinal'>[], texts: string[]): (TextPart | null)[] {
+  const only = items.length === 1 ? items[0]! : null;
+  return texts.map(() => (only ? { suggestionId: only.suggestionId, ordinal: only.ordinal } : null));
 }
 
 /** The last resort: one text with the count and the link (always passes the outbound rules). */
@@ -225,6 +246,7 @@ export async function composeSelection(
   // gets the full last name everywhere (template and LLM copy alike).
   const names = briefNames(items.flatMap((i) => i.people), ownerNames(db));
   const templates = new Map<string, ItemCopy>(items.map((i) => [i.suggestionId, templateCopy(i, { db, now: o.now, timeZone: tz, names })]));
+  const details = new Map(items.map((i) => [i.suggestionId, i.sensitive ? [] : itemDetails(i, { db, now: o.now, timeZone: tz, names })]));
   let llm: LlmComposeResult | null = null;
   if (o.useLlm !== false && items.length) {
     llm = await composeWithLlm({
@@ -246,24 +268,34 @@ export async function composeSelection(
   const build = (i: SelectedItem, useLlmCopy: boolean): ComposedItem => {
     const llmCopy = useLlmCopy ? llm?.copies.get(i.suggestionId) : undefined;
     const c = llmCopy ?? templates.get(i.suggestionId)!;
-    return { ...i, copy: llmCopy ? 'llm' : 'template', headline: c.headline, body: c.body, openers: c.openers, line: mainLine(i.ordinal, c.headline, i.sensitive) };
+    return {
+      ...i,
+      copy: llmCopy ? 'llm' : 'template',
+      headline: c.headline,
+      body: c.body,
+      openers: c.openers,
+      line: mainLine(i.ordinal, c.headline, i.sensitive),
+      details: details.get(i.suggestionId) ?? [],
+    };
   };
   const { lastNight, health } = statusLines(db, o.now);
-  // Per item: LLM copy if its text passes the outbound rules, else template copy, else a bare "open the app" line.
+  // Per item: LLM copy if its text passes the outbound rules, else template copy, else a bare "open the app" line;
+  // a detail line that breaks a rule is dropped on its own (it never costs the item its copy).
   const ok = (lines: string[]) => checkOutboundText(asText(lines)).length === 0;
+  const fit = (i: ComposedItem): ComposedItem => ({ ...i, details: i.details.filter((d) => ok([d])) });
   let rejected = 0;
   const composed = items.map((i) => {
     const withLlm = build(i, true);
-    if (ok(itemLines(withLlm))) return withLlm;
+    if (ok(itemLines({ ...withLlm, details: [] }))) return fit(withLlm);
     rejected++;
-    return build(i, false);
+    return fit(build(i, false));
   });
-  const parts: TextParts = { items: composed, health, commandsEnabled: settings['commands.enabled'], digestTime: settings['digest.time'] };
-  let texts = digestTexts(parts, (i) => (ok(itemLines(i)) ? itemLines(i) : bareLines(i.ordinal)));
-  let textParts: (TextPart | null)[] = [...composed.map((i) => ({ suggestionId: i.suggestionId, ordinal: i.ordinal })), ...(health ? [null] : [])];
+  const input: TextParts = { items: composed, health, commandsEnabled: settings['commands.enabled'], digestTime: settings['digest.time'] };
+  let texts = digestTexts(input, (i) => (ok(itemLines(i)) ? itemLines(i) : bareLines(i.ordinal)));
+  let parts = textParts(composed, texts);
   if (texts.some((t) => checkOutboundText(t).length)) {
     texts = [minimalText(composed.length)];
-    textParts = [null];
+    parts = [null];
   }
   if (rejected) o.log?.warn('digest.text_rejected', { counts: { items: rejected } });
   const usage: LlmUsage | null = llm?.usage ?? null;
@@ -272,7 +304,7 @@ export async function composeSelection(
     digestId: selection.digest.id,
     items: composed,
     texts,
-    parts: textParts,
+    parts,
     text: joinTexts(texts),
     pushBody: pushBodyFor(composed, settings['push.names_in_notifications']),
     composer: composed.some((i) => i.copy === 'llm') ? 'llm' : 'template',
@@ -303,6 +335,7 @@ export function webBodyOf(c: ComposedDigest): WebBody {
       body: i.body,
       openers: i.openers,
       line: i.line,
+      details: i.details,
       personIds: i.people.map((p) => p.id),
     })),
   };
@@ -333,7 +366,8 @@ export function compositionCurrent(selection: DigestSelection): boolean {
   const d = selection.digest;
   if (!d.composed_at || !d.imessage_text) return false;
   const body = parseWebBody(d.web_body);
-  if (!body?.texts?.length) return false;
+  // One text per suggestion (composed before 2026-10-25) is recomposed into one text while nothing has gone out.
+  if (!body?.texts?.length || body.texts.length > 1) return false;
   const now = selection.items.map((i) => i.suggestionId);
   if (body.suggestionIds.length !== now.length || body.suggestionIds.some((id, k) => id !== now[k])) return false;
   const byId = new Map(body.items.map((i) => [i.suggestionId, i]));
@@ -396,7 +430,7 @@ export function storedComposition(selection: DigestSelection): ComposedDigest | 
     if (!b) return [];
     const fresh = peopleChanged(i, b) ? i.currentCopy : undefined;
     const c = fresh ? { ...fresh, copy: 'template' as const, line: mainLine(i.ordinal, fresh.headline, i.sensitive) } : b;
-    return [{ ...i, copy: c.copy, headline: c.headline, body: c.body, openers: c.openers, line: c.line }];
+    return [{ ...i, copy: c.copy, headline: c.headline, body: c.body, openers: c.openers, line: c.line, details: b.details ?? [] }];
   });
   let llm: ComposedDigest['llm'] = null;
   try {

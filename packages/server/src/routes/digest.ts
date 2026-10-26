@@ -5,7 +5,7 @@
  *   POST /digest/send-test                DigestSendTest (+ force) → DigestSendTestResult
  *        403 SEND_DISABLED unless settings delivery.allow_test_send or digest.enabled is on, or the owner passes
  *        {force: true}. The recipient is always the owner's own handle (sendToSelf has no `to`), the text starts
- *        with the 🅨 marker, and at most 15 test texts go out per hour (a test brief is one text per suggestion).
+ *        with the 🅨 marker, and at most 15 test texts go out per hour (a test brief is one text; older stored briefs may be several).
  *   GET  /digest/history?limit=            → DigestHistory
  */
 import { Router } from 'express';
@@ -22,7 +22,7 @@ import type { RouteDeps } from './index';
 const SendTestBody = DigestSendTest.extend({ force: z.boolean().optional() });
 const HistoryQuery = z.object({ limit: z.coerce.number().int().min(1).max(90).default(14) });
 
-/** Test texts per hour (a test brief is one text per suggestion, so this is texts, not tests). */
+/** Test texts per hour (texts, not tests: a stored brief from before 2026-10-25 may be one text per suggestion). */
 export const MAX_TEST_SENDS_PER_HOUR = 15;
 export const HELLO_TEXT = `${BOT_MARKER} Hi, it's yeackbot! This is how your brief will show up.`;
 
