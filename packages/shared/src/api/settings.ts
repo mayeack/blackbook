@@ -106,6 +106,17 @@ export const SettingsValues = z.object({
     )
     .max(50),
 
+  // ---- event picks (intel/eventPicks; group features): a weekly text of public events on free nights, from the web
+  'events.enabled': z.boolean(),
+  /** Day the picks are sent (0 = Sunday … 6 = Saturday); they cover that night and the six after it. */
+  'events.weekday': z.number().int().min(0).max(6),
+  'events.time': HHMM,
+  'events.max_picks': z.number().int().min(2).max(8),
+  /** City to search; null = the home city (travel.home_city, else the owner's location fact). */
+  'events.city': z.string().min(2).max(80).nullable(),
+  /** Web searches per week across both passes (each is billed: $0.01). */
+  'events.max_searches': z.number().int().min(2).max(12),
+
   // ---- locale
   /** IANA zone for digests, day boundaries and LLM windows; defaults to the system zone. */
   tz: TimeZoneName,

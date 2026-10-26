@@ -1,12 +1,12 @@
 /**
  * Settings → Agent: fading/dormant thresholds and the ignore cooldown (intelligence §3: only the owner moves these,
- * learning never does), the ranker (learning on/off, 🎲 wildcard chance), and features (text commands, intros,
- * home city for travel intel).
+ * learning never does), the ranker (learning on/off, 🎲 wildcard chance), features (text commands, intros, home city
+ * for travel intel) and the weekly event picks (on/off, when they're sent, how many, where, the web-search cap).
  */
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { fieldId, NumberField, SectionTitle, SettingRow, SettingsFrame, Toggle, useSettingsForm, type SettingsForm } from './form';
-import { parseSenderDomains, pct } from './logic';
+import { fieldId, NumberField, SectionTitle, SettingRow, SettingsFrame, TimeField, Toggle, useSettingsForm, type SettingsForm } from './form';
+import { hhmmLabel, parseSenderDomains, pct, weekdayName } from './logic';
 
 function WildcardRow({ form }: { form: SettingsForm }) {
   const v = form.values['learner.wildcard_epsilon'];
@@ -28,22 +28,23 @@ function WildcardRow({ form }: { form: SettingsForm }) {
   );
 }
 
-function HomeCityRow({ form }: { form: SettingsForm }) {
-  const v = form.values['travel.home_city'];
+/** A city name, empty = null: travel.home_city (empty = the location fact) and events.city (empty = the home city). */
+function CityRow({ form, k, unset, placeholder }: { form: SettingsForm; k: 'travel.home_city' | 'events.city'; unset: string; placeholder: string }) {
+  const v = form.values[k];
   const [text, setText] = useState(v ?? '');
   useEffect(() => setText((t) => (t.trim() === (v ?? '') ? t : (v ?? ''))), [v]);
   return (
-    <SettingRow form={form} k="travel.home_city" formatDefault={(x) => (x == null ? 'your location fact' : String(x))}>
+    <SettingRow form={form} k={k} formatDefault={(x) => (x == null ? unset : String(x))}>
       <input
-        id={fieldId('travel.home_city')}
+        id={fieldId(k)}
         className="input input-sm st-text-input"
         value={text}
         maxLength={80}
-        placeholder="e.g. Springfield"
+        placeholder={placeholder}
         onChange={(e) => {
           setText(e.target.value);
           const t = e.target.value.trim();
-          form.set('travel.home_city', t ? t : null);
+          form.set(k, t ? t : null);
         }}
       />
     </SettingRow>
@@ -142,8 +143,48 @@ function AgentForm({ form }: { form: SettingsForm }) {
         <SettingRow form={form} k="commands.read_images">
           <Toggle id={fieldId('commands.read_images')} checked={v['commands.read_images']} onChange={(x) => form.set('commands.read_images', x)} />
         </SettingRow>
-        <HomeCityRow form={form} />
+        <CityRow form={form} k="travel.home_city" unset="your location fact" placeholder="e.g. Springfield" />
         <ExtraSendersRow form={form} />
+      </div>
+
+      <SectionTitle>Event picks</SectionTitle>
+      <div className="card st-card">
+        <p className="caption st-lead">
+          Once a week yeackbot texts you public events on nights your calendar is free, found on the web, with ticket links. This week’s are in{' '}
+          <Link to="/picks">Event picks</Link>.
+        </p>
+        <SettingRow form={form} k="events.enabled">
+          <Toggle id={fieldId('events.enabled')} checked={v['events.enabled']} onChange={(x) => form.set('events.enabled', x)} />
+        </SettingRow>
+        <SettingRow
+          form={form}
+          k="events.weekday"
+          description="Day the picks are sent; they cover that night and the six after it."
+          formatDefault={(x) => weekdayName(Number(x))}
+        >
+          <select
+            id={fieldId('events.weekday')}
+            className="input input-sm"
+            value={v['events.weekday']}
+            onChange={(e) => form.set('events.weekday', Number(e.target.value))}
+          >
+            {[0, 1, 2, 3, 4, 5, 6].map((d) => (
+              <option key={d} value={d}>
+                {weekdayName(d)}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+        <SettingRow form={form} k="events.time" formatDefault={(x) => hhmmLabel(String(x))}>
+          <TimeField id={fieldId('events.time')} value={v['events.time']} onChange={(t) => form.set('events.time', t)} />
+        </SettingRow>
+        <SettingRow form={form} k="events.max_picks">
+          <NumberField form={form} k="events.max_picks" suffix="events" />
+        </SettingRow>
+        <CityRow form={form} k="events.city" unset="your home city" placeholder={v['travel.home_city'] ?? 'Your home city'} />
+        <SettingRow form={form} k="events.max_searches">
+          <NumberField form={form} k="events.max_searches" suffix="searches" />
+        </SettingRow>
       </div>
     </>
   );

@@ -49,6 +49,8 @@ export default defineConfig({
     proxy: {
       '/api': { target: api },
       '/healthz': { target: api },
+      // Event-pick ticket links: the server counts the tap and redirects (outside the SPA).
+      '/go/': { target: api },
     },
   },
   build: {

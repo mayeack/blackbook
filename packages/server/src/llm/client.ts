@@ -56,6 +56,7 @@ import {
   sendsFallbacks,
   supportsSyncFallbacks,
   thinkingParam,
+  WEB_SEARCH_USD,
   type LlmRoute,
   type RouteOverrides,
   type RouteParams,
@@ -89,6 +90,10 @@ import {
   type LlmUnavailable,
   type LlmUnavailableReason,
   type LlmUsage,
+  type LlmSearchLocation,
+  type LlmSearchResult,
+  type LlmWebSearchOutcome,
+  type LlmWebSearchRequest,
   type SpendCheck,
 } from './types';
 
@@ -133,6 +138,7 @@ export function unavailableLlmClient(reason: LlmUnavailableReason = 'no_key', db
     canSpend: () => ({ ok: false, reason }),
     parse: async () => out,
     runTools: async () => out,
+    webSearch: async () => out,
     submitBatch: async () => out,
     batchStatus: async (batchId) => ({
       batchId,
@@ -250,6 +256,57 @@ export function finalText(content: readonly { type: string }[]): string | null {
 export function echoContent<T extends { type: string }>(content: readonly T[]): readonly T[] {
   const start = afterLastFallback(content);
   return start === 0 ? content : content.filter((b, i) => i >= start || b.type === 'text' || b.type === 'fallback');
+}
+
+/** Hard ceiling on searches in one webSearch() call, whatever the caller asks (each is billed). */
+export const MAX_WEB_SEARCHES = 12;
+/** pause_turn continuations of one webSearch() call. */
+export const MAX_PAUSE_TURNS = 2;
+
+/** The server-side web_search tool (basic version: results go straight into the context; no code execution). */
+export function webSearchTool(maxUses: number, location?: LlmSearchLocation | null, blockedDomains?: readonly string[]): Record<string, unknown> {
+  const tool: Record<string, unknown> = { type: 'web_search_20250305', name: 'web_search', max_uses: maxUses };
+  if (location?.city) {
+    tool.user_location = {
+      type: 'approximate',
+      city: location.city,
+      ...(location.region ? { region: location.region } : {}),
+      ...(location.country ? { country: location.country } : {}),
+      ...(location.timezone ? { timezone: location.timezone } : {}),
+    };
+  }
+  if (blockedDomains?.length) tool.blocked_domains = [...blockedDomains];
+  return tool;
+}
+
+/**
+ * What a web-search answer's content says: the queries, every result page (deduplicated by URL, in order), the
+ * search errors, and the final text — the text blocks after the last search result (the model narrates before and
+ * between searches). Exported for tests.
+ */
+export function readSearchContent(content: readonly unknown[]): { text: string; results: LlmSearchResult[]; queries: string[]; errors: string[] } {
+  const results = new Map<string, LlmSearchResult>();
+  const queries: string[] = [];
+  const errors: string[] = [];
+  let lastResult = -1;
+  content.forEach((raw, i) => {
+    const b = raw as { type?: string; name?: string; input?: { query?: unknown }; content?: unknown };
+    if (b.type === 'server_tool_use' && b.name === 'web_search' && typeof b.input?.query === 'string') queries.push(b.input.query.slice(0, 200));
+    if (b.type !== 'web_search_tool_result') return;
+    lastResult = i;
+    if (!Array.isArray(b.content)) {
+      const code = (b.content as { error_code?: unknown } | null)?.error_code;
+      errors.push(typeof code === 'string' ? code.slice(0, 40) : 'unknown');
+      return;
+    }
+    for (const r of b.content as { type?: string; url?: unknown; title?: unknown; page_age?: unknown }[]) {
+      if (r?.type !== 'web_search_result' || typeof r.url !== 'string' || results.has(r.url)) continue;
+      results.set(r.url, { url: r.url, title: typeof r.title === 'string' ? r.title.slice(0, 300) : '', pageAge: typeof r.page_age === 'string' ? r.page_age.slice(0, 60) : null });
+    }
+  });
+  const after = content.slice(lastResult + 1) as { type: string }[];
+  const text = finalText(after) ?? finalText(content as { type: string }[]) ?? '';
+  return { text, results: [...results.values()], queries, errors };
 }
 
 const refusalCategory = (m: unknown): string | null => (m as { stop_details?: { category?: string | null } | null }).stop_details?.category ?? null;
@@ -876,6 +933,82 @@ class AnthropicLlmClient implements LlmClient {
     if (problems.length) return invalid(problems);
     ledger.recordOutcome(this.db, id, { ...base, status: 'succeeded', output: text }, now);
     return { status: 'ok', value: parsed.data, text, usage, requestId: id };
+  }
+
+  // ---- server-side web search
+
+  async webSearch(req: LlmWebSearchRequest): Promise<LlmWebSearchOutcome> {
+    const pool = req.pool ?? 'steady';
+    const rp = effectiveParams(this.params(req.route), req.effortOverride);
+    const maxSearches = Math.max(1, Math.min(MAX_WEB_SEARCHES, Math.floor(req.maxSearches)));
+    const params = requestParams(rp, { system: req.system, messages: req.messages, maxTokens: req.maxTokens, mode: 'sync' });
+    params.tools = [webSearchTool(maxSearches, req.location, req.blockedDomains)];
+    const bad = shapeGate(params, this.log, req.kind);
+    if (bad) return bad;
+    // The searches are billed on top of the tokens: the budget check sees the worst case.
+    const estimate = (req.estimateUsd ?? 0) + maxSearches * WEB_SEARCH_USD;
+    const blocked = this.gate(pool, estimate, userTextOfParams(params as { messages: unknown[] }));
+    if (blocked) return blocked;
+
+    const started = this.now();
+    const id = ledger.syncRequestId(started);
+    ledger.insertRequest(
+      this.db,
+      {
+        customId: id,
+        kind: req.kind,
+        subjectRef: req.subjectRef,
+        attempt: 0,
+        promptVersion: req.promptVersion,
+        model: rp.model,
+        inputHash: inputHash(params),
+        pool,
+        mode: 'sync',
+        runId: req.runId ?? null,
+        purpose: req.kind,
+        effort: rp.effort,
+        maxTokens: params.max_tokens as number,
+        params: null,
+        estimateUsd: estimate,
+      },
+      started,
+    );
+    const content: unknown[] = [];
+    let messages: unknown[] = [...req.messages];
+    let usage: LlmUsage = ZERO_USAGE;
+    let searches = 0;
+    let msg: BetaMessage | null = null;
+    const withSearches = (): LlmUsage => ({ ...usage, costUsd: usage.costUsd + searches * WEB_SEARCH_USD });
+    for (let turn = 0; turn <= MAX_PAUSE_TURNS; turn++) {
+      try {
+        msg = await this.sdk.beta.messages.create({ ...params, messages } as unknown as BetaParams, req.signal ? { signal: req.signal } : undefined);
+      } catch (e) {
+        const u = unavailableFromError(e);
+        ledger.recordOutcome(this.db, id, { status: 'errored', errorType: ledgerErrorType(u), ...(turn ? { usage: withSearches() } : {}) }, this.now());
+        this.log.warn('llm_call_failed', { job: req.kind, ...failureFields(u) });
+        return u;
+      }
+      usage = addUsage(usage, usageFrom(msg as never, 'sync', '5m', rp.model));
+      searches += (msg.usage as { server_tool_use?: { web_search_requests?: number | null } | null }).server_tool_use?.web_search_requests ?? 0;
+      this.checkPromptSize(req.kind, msg.usage as UsageLike);
+      content.push(...msg.content);
+      // A paused turn continues with its content echoed back unchanged (the API resumes the same turn).
+      if (msg.stop_reason !== 'pause_turn') break;
+      messages = [...req.messages, { role: 'assistant', content: [...content] }];
+    }
+    const total = withSearches();
+    const stop = msg!.stop_reason as LlmStopReason | null;
+    const base = { stopReason: stop, servedByModel: msg!.model, usage: total };
+    this.logCall('llm_call', req.kind, total, { searches });
+    if (stop === 'refusal') {
+      const category = refusalCategory(msg);
+      ledger.recordOutcome(this.db, id, { ...base, status: 'refused', refusalCategory: category }, this.now());
+      return { status: 'refused', category, usage: total, requestId: id };
+    }
+    const read = readSearchContent(content);
+    const status = stop === 'end_turn' || stop === 'stop_sequence' ? 'ok' : 'max_tokens';
+    ledger.recordOutcome(this.db, id, { ...base, status: status === 'ok' ? 'succeeded' : 'max_tokens', output: read.text.slice(0, 20_000) }, this.now());
+    return { status, text: read.text, results: read.results, queries: read.queries, searches, searchErrors: read.errors, usage: total, requestId: id };
   }
 
   // ---- read-only tool loop

@@ -216,6 +216,28 @@ const DEFS: { [K in AnySettingKey]: Def<K> } = {
     description: 'Sender domains to treat as ticket vendors besides the built-in list.',
     default: () => [],
   },
+  // ---- event picks (intel/eventPicks)
+  'events.enabled': {
+    group: 'features',
+    label: 'Weekly event picks',
+    description: 'Each week, text me public events I might like on nights my calendar is free, with ticket links (uses Claude web search, about $0.10 a week).',
+    default: v(true),
+  },
+  'events.weekday': { group: 'features', label: 'Event picks day', description: 'Day the picks are sent (0 = Sunday … 6 = Saturday); they cover the next 7 nights.', default: v(1) },
+  'events.time': { group: 'features', label: 'Event picks time', description: 'When the picks are sent (local time).', default: v('09:30') },
+  'events.max_picks': { group: 'features', label: 'Events per week', description: 'Most events in one week’s picks (2–8).', default: v(5) },
+  'events.city': {
+    group: 'features',
+    label: 'Event picks city',
+    description: 'Where to look for events; empty = your home city.',
+    default: v(null),
+  },
+  'events.max_searches': {
+    group: 'features',
+    label: 'Web searches per week',
+    description: 'Most web searches the weekly picks may run (2–12, $0.01 each).',
+    default: v(10),
+  },
   // ---- locale
   tz: { group: 'locale', label: 'Time zone', description: 'Digest times, day boundaries and dates in briefs.', default: systemTimeZone },
   // ---- internal

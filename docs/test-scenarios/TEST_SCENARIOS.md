@@ -1545,3 +1545,51 @@ Four connected pieces (design: `docs/design/tickets-met-at.md`):
 - Server, web and collector (Swift).
 - Not deployed. Not checked in a browser or on the live Gmail / Google Photos APIs.
 - Haiku parse quality was checked on 2 real emails only.
+
+## 2026-10-22 — Weekly event picks (public events on your free nights, with ticket links)
+
+Once a week yeackbot searches the web (Claude Haiku 5.5 with Anthropic's web search) for public events in your
+city on the nights your calendar is free. It texts up to 5 of them with a ticket link each, and learns from which
+ones you go to. Design: `docs/design/event-picks.md`.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii && npm run build` from the repo root: 2024 tests pass
+   (new: `test/intel/eventPicks.test.ts`, `test/llm/webSearch.test.ts`, `packages/web/test/picks.test.ts`), 1034
+   files clean, build OK.
+2. Live dry run on a copy of the live database for the week of Oct 26 (no text sent). One free night, 14 events
+   found, 5 picked with event pages on Ticketmaster, AXS, Academy LA and DICE. 9 searches, $0.10.
+3. Browser check of `/picks` on that copy, desktop and 375 px:
+   - "Not for me" stays after a reload and offers Undo;
+   - `/go/<id>` answers 302 to the ticket page and the tap is counted;
+   - Settings → Agent shows the Event picks section.
+
+### Scenario B — The weekly text
+1. Settings → Agent → Event picks: leave it on. Set the day to today and the time to a few minutes from now.
+2. **Expected**, within 10 minutes of that time:
+   - an intro text, "Event picks for this week: N ideas for your free nights (Thu, …)";
+   - then one text per pick, "1. Thu Oct 29 · <event>", then "<venue>, 10pm. <why>", then
+     "Tickets: yeackbot.com/go/…".
+3. Tap a Tickets link. **Expected**: after Cloudflare Access (if signed out), the event's own ticket page opens
+   (DICE, Ticketmaster, AXS, a venue …), not a list of events.
+4. **Expected**: no event lands on a night you have a plan after 6 pm, a trip, held tickets or a Partiful RSVP.
+   A 4–6 pm afternoon plan doesn't block the night.
+
+### Scenario C — Answers and learning
+1. Open yeackbot.com/picks. Tap **Not for me** on one pick and **I'm going** on another. Reload. **Expected**: both
+   stick, and Undo puts a pick back.
+2. Buy tickets to a pick (or add it to your calendar, or RSVP on Partiful). **Expected**: by the next morning
+   (06:45), the card reads "Going · found your ticket" (or "on your calendar" / "Partiful RSVP").
+3. Next week. **Expected**: kinds you went to or tapped come up more; kinds you said no to come up less. The same
+   event is never picked twice.
+
+**Edge cases**:
+- A week with no free night → no text and no searches ("empty").
+- Mac asleep at the picks time → the run happens on the next tick that day (until 21:00).
+- Quiet hours or the collector down → the picks wait as "ready" on `/picks` and go out on a later tick that day.
+- An event whose venue is TBA / Unknown, or a private party → never picked.
+- A ticket link the model wrote itself (not a page the search returned) → dropped.
+
+**Platforms**:
+- Server and web. Not deployed.
+- No real text sent yet.
+- Taste is calendar-only until Gmail is connected (no ticket history yet).

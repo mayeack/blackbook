@@ -1,5 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  EventPickFeedback,
+  EventPickItem,
+  EventPicksResponse,
   GmailDisconnectResult,
   GmailStatus,
   GphotosDisconnectResult,
@@ -10,6 +13,7 @@ import type {
 } from '@yb/shared';
 import { normalizeEventsPage, normalizeGoogleStatus, normalizeOccasionDetail } from '../lib/events';
 import { gmailNotConfigured, gphotosNotConfigured, sessionActive } from '../lib/googleProducts';
+import { withPick } from '../lib/picks';
 import type { TicketsWhen } from '../lib/tickets';
 import { api, ApiError, isApiError, qs } from './client';
 import type {
@@ -42,6 +46,7 @@ export const keys = {
   clues: (eventId: string, personId: string) => ['event', eventId, 'clues', personId] as const,
   google: ['google', 'status'] as const,
   tickets: (when: TicketsWhen) => ['tickets', when] as const,
+  eventPicks: ['event-picks'] as const,
   gmail: ['gmail', 'status'] as const,
   gphotos: ['gphotos', 'status'] as const,
   gphotosSession: (id: string) => ['gphotos', 'session', id] as const,
@@ -234,6 +239,33 @@ export function useTickets(when: TicketsWhen) {
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
     retry: retryOnce,
+  });
+}
+
+// ---------------------------------------------------------------------------------------------- event picks
+
+/** The latest week's picks (sent or ready), the answer counts the ranker learns from, and whether picks are on. */
+export const useEventPicks = () =>
+  useQuery({ queryKey: keys.eventPicks, queryFn: () => api.get<EventPicksResponse>('/event-picks'), retry: retryOnce });
+
+export interface PickFeedbackVars {
+  id: string;
+  verdict: EventPickFeedback['verdict'];
+}
+
+/** POST /event-picks/:id/feedback: the owner's own answer on one pick ('undo' takes it back). Answers the updated pick. */
+export const postPickFeedback = ({ id, verdict }: PickFeedbackVars) =>
+  api.post<EventPickItem>(`/event-picks/${encodeURIComponent(id)}/feedback`, { verdict } satisfies EventPickFeedback);
+
+/** Shows the updated pick right away, then refetches for the new history counts. Errors toast (not silent). */
+export function usePickFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: postPickFeedback,
+    onSuccess: (item) => {
+      qc.setQueryData<EventPicksResponse>(keys.eventPicks, (old) => (old ? withPick(old, item) : old));
+      void qc.invalidateQueries({ queryKey: keys.eventPicks });
+    },
   });
 }
 
