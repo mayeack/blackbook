@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { uuidv7, EventBrief } from '@yb/shared';
+import { itemLines } from '../../src/delivery/compose';
+import { selectedItemById } from '../../src/delivery/selection';
+import { itemDetails, templateCopy } from '../../src/delivery/template';
 import { eventBrief } from '../../src/intel/brief';
 import { followupCandidates, preEventCandidates, preEventPushTick } from '../../src/intel/events';
 import { eventFollowupGenerator, preEventBriefGenerator } from '../../src/intel/generators';
@@ -7,6 +10,7 @@ import { nullLogger } from '../../src/ops/logger';
 import type { GeneratorContext } from '../../src/pipeline/suggestions/types';
 import { settingsSnapshot } from '../../src/settings/registry';
 import { FakePushSender } from '../fakes/delivery';
+import { seedSuggestion } from '../delivery/world';
 import { seedPerson } from '../helpers';
 import { at, DAY, HOUR, intelWorld, NOW, occasion, setSetting, TZ, type IntelWorld } from './world';
 
@@ -113,6 +117,19 @@ describe('the brief', () => {
     expect(b.composer).toBe('template');
     expect(JSON.stringify(b)).not.toContain('Hidden');
     expect(JSON.stringify(b)).not.toContain('private matter');
+  });
+
+  it('the morning text carries it: a line per person with when you last talked, what’s open and one fact', () => {
+    const id = seedSuggestion(w.db, { kind: 'pre_event_brief', personId: ana, occasionId: dinner });
+    w.db.prepare('UPDATE suggestions SET person_ids = ? WHERE id = ?').run(JSON.stringify([ana, bo]), id);
+    const item = selectedItemById(w.db, id, 1)!;
+    const tctx = { db: w.db, now: at(0, 8), timeZone: TZ };
+    const copy = templateCopy(item, tctx);
+    const details = itemDetails(item, tctx);
+    expect(copy.body).toBe('Ana A. and Bo B. are going.');
+    expect(details).toEqual(['Ana A.: You talked 5 days ago. Into climbing.', "Bo B.: You talked 5 days ago. You said you'd send the playlist."]);
+    const lines = itemLines({ line: `1. ${copy.headline}`, copy: 'template', body: copy.body, openers: [], sensitive: false, details });
+    expect(lines.join('\n')).not.toMatch(/in the app|private matter|Hidden/);
   });
 
   it('a Partiful event lists its roster-only guests by name; sensitive and non-social occasions have no brief', () => {

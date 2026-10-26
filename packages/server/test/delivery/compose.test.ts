@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { uuidv7 } from '@yb/shared';
-import { allClearText, composeDigest, digestTexts, joinTexts, mainLine, minimalText, pushBodyFor } from '../../src/delivery/compose';
+import { allClearText, composeDigest, digestTexts, joinTexts, mainLine, minimalText, pushBodyFor, textParts } from '../../src/delivery/compose';
 import { COMPOSER_SYSTEM } from '../../src/delivery/llmComposer';
 import { readDigestSelection } from '../../src/delivery/selection';
 import { checkOutboundText, BOT_MARKER } from '../../src/delivery/types';
@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 describe('template composer', () => {
-  it('writes the brief one suggestion per text, like a person would: marker first, numbered, short names, one link', async () => {
+  it('writes the whole brief in one text, like a person would: marker first, numbered, short names, one link', async () => {
     typicalDay(w);
     agentBatches('merge', 2, NOW - 5 * 3_600_000);
     agentBatches('attach_identity', 4, NOW - 5 * 3_600_000);
@@ -47,12 +47,29 @@ describe('template composer', () => {
     expect(c.composer).toBe('template');
     expect(llm.calls).toHaveLength(0);
     expect(c.texts).toEqual([
-      `${BOT_MARKER} Good morning! 4 things for today.\n\n1. Check in with Ava Q.\nIt's been 6 weeks. You usually talk about once a week.`,
-      `${BOT_MARKER} 2. Reply to Ben O.\nBen has been waiting 2 days for an answer.`,
-      `${BOT_MARKER} 3. Introduce Cleo M. and Dora V.?\nThey might get along.`,
-      `${BOT_MARKER} 4. Something personal\nThe details are in the app.\n\nThat's it! Reply "done 2", "skip 2" or "snooze 2" anytime.\nyeackbot.com/today`,
-      `${BOT_MARKER} Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up.`,
+      [
+        `${BOT_MARKER} Good morning! 4 things for today.`,
+        '',
+        '1. Check in with Ava Q.',
+        "It's been 6 weeks. You usually talk about once a week.",
+        '',
+        '2. Reply to Ben O.',
+        'Ben has been waiting 2 days for an answer.',
+        '',
+        '3. Introduce Cleo M. and Dora V.?',
+        'They might get along.',
+        '',
+        '4. Something personal',
+        'The details are in the app.',
+        '',
+        "Heads up: WhatsApp hasn't synced in 4 days. Open WhatsApp on your phone to wake it up.",
+        '',
+        `That's it! Reply "done 2", "skip 2" or "snooze 2" anytime.`,
+        'yeackbot.com/today',
+      ].join('\n'),
     ]);
+    // One text for the whole brief: an inline reply to it names no item on its own.
+    expect(c.parts).toEqual([null]);
     for (const t of c.texts) {
       expect(t.codePointAt(0)).toBe(0x1f168);
       expect(checkOutboundText(t)).toEqual([]);
@@ -104,6 +121,10 @@ describe('template composer', () => {
     expect(digestTexts({ items: [], health: null, commandsEnabled: false })).toEqual([]);
     const one = digestTexts({ items: [{ ordinal: 1, line: '1. Reply to Sam R.', copy: 'template', body: null, openers: [], sensitive: false }], health: null, commandsEnabled: true, digestTime: '18:00' });
     expect(one).toEqual([`${BOT_MARKER} Evening! Just one thing today.\n\n1. Reply to Sam R.\n\nThat's it! Reply "done", "skip" or "snooze" anytime.\nyeackbot.com/today`]);
+    expect(textParts([{ suggestionId: 's1', ordinal: 1 }], one)).toEqual([{ suggestionId: 's1', ordinal: 1 }]);
+    expect(textParts([{ suggestionId: 's1', ordinal: 1 }, { suggestionId: 's2', ordinal: 2 }], ['x'])).toEqual([null]);
+    // A day with nothing but a health line is just that line.
+    expect(digestTexts({ items: [], health: 'Heads up: x.', commandsEnabled: true })).toEqual([`${BOT_MARKER} Heads up: x.`]);
   });
 
   it('an item whose copy breaks an outbound rule falls back on its own; the rest of the brief still goes', async () => {
@@ -158,8 +179,8 @@ describe('LLM composer', () => {
     expect(c.items[0]).toMatchObject({ headline: 'Ask Ava Q. how Lisbon is going', body: 'Ava Q. is in Lisbon now.', openers: ['Hey Ava! How is Lisbon treating you?'] });
     expect(c.items[1]!.headline).toBe('Reply to Ben O.');
     expect(c.items[2]!.headline).toBe('Introduce Cleo M. and Dora V.?');
-    expect(c.texts[0]).toBe(
-      `${BOT_MARKER} Good morning! 4 things for today.\n\n1. Ask Ava Q. how Lisbon is going\nAva Q. is in Lisbon now.\n\nMaybe: “Hey Ava! How is Lisbon treating you?”`,
+    expect(c.texts[0]).toContain(
+      `${BOT_MARKER} Good morning! 4 things for today.\n\n1. Ask Ava Q. how Lisbon is going\nAva Q. is in Lisbon now.\nMaybe: “Hey Ava! How is Lisbon treating you?”\n\n2. Reply to Ben O.\n`,
     );
     expect(c.text).not.toContain('Marcus');
     for (const t of c.texts) expect(checkOutboundText(t)).toEqual([]);
