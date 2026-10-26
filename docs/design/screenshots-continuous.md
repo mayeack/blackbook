@@ -165,7 +165,7 @@ Everything after "a row is `downloaded` and its file is in `<dataDir>/screenshot
 `screenshots/process.ts` reads any `downloaded` row, and the gphotos job's 7-day expiry and stray-file cleanup cover
 every row. So a new source only has to land files and rows.
 
-**Migration 026** (`026_screenshot_inbox.ts`):
+**Migration 027** (`027_screenshot_inbox.ts`):
 - `widenTableCheck(db, 'contact_screenshots', 'source', ['shortcut'])`, using 023's helper. Add `'photokit'` too if
   (b1) is ever built.
 - `source_ref` is the inbox file name: the taken time with its UTC offset, plus the iPhone's `IMG_nnnn`.
@@ -207,7 +207,7 @@ and its `taken_at` is a met-at signal. Nothing from a screenshot reaches an LLM.
 
 **Tests:**
 - a fake collector serving synthetic names and a generated PNG;
-- migration 026 on a 025 database;
+- migration 027 on a 026 database;
 - the Picker-duplicate skip;
 - the heartbeat health states;
 - the scoped disconnect.
