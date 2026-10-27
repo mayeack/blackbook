@@ -412,7 +412,7 @@ async function digestStep(deps: DeliveryDeps, c: Clock): Promise<DeliveryTickRes
   }
   const statusOnSent = d.status === 'sent' || d.status === 'fallback_sent' ? d.status : sentStatus(composed);
 
-  // iMessage: one text per suggestion.
+  // iMessage: the brief as one text (stored briefs from before 2026-10-25 may still hold one text per suggestion).
   let im: ChannelStep & { sent?: boolean; outboundId?: string | null; sentAt?: number | null };
   const priorReason = d.skip_reason;
   if (d.imessage_status === 'sent') im = { state: 'sent', final: true, reason: null };

@@ -42,13 +42,13 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('GET /digest/preview', () => {
-  it('renders the exact texts, one per suggestion, without sending, spending or writing', async () => {
+  it('renders the exact text, the whole brief in one, without sending, spending or writing', async () => {
     typicalDay(w);
     const res = await request(app()).get('/api/v1/digest/preview');
     expect(res.status).toBe(200);
     const p = DigestPreview.parse(res.body);
     expect(p.date).toBe(DAY_DATE);
-    expect(p.texts).toHaveLength(4);
+    expect(p.texts).toHaveLength(1);
     for (const t of p.texts) expect(t.codePointAt(0)).toBe(0x1f168);
     expect(p.texts[0]!.split('\n')[0]).toBe(`${BOT_MARKER} Good morning! 4 things for today.`);
     expect(p.text).toBe(p.texts.join('\n\n'));
@@ -93,12 +93,14 @@ describe('POST /digest/send-test', () => {
     typicalDay(w);
     const digest = await post('/api/v1/digest/send-test', { confirm: true, mode: 'digest' });
     expect(digest.status).toBe(200);
-    // the test brief goes out exactly like the real one: one text per suggestion, in order
-    expect(outbound.sent.slice(1).map((x) => x.text.split('\n')[0])).toEqual([
+    // the test brief goes out exactly like the real one: every suggestion in one text, in order
+    expect(outbound.sent.slice(1)).toHaveLength(1);
+    expect(outbound.sent[1]!.text.split('\n').filter((l) => /^(\u{1F168} Good|\d\. )/u.test(l))).toEqual([
       `${BOT_MARKER} Good morning! 4 things for today.`,
-      `${BOT_MARKER} 2. Reply to Ben O.`,
-      `${BOT_MARKER} 3. Introduce Cleo M. and Dora V.?`,
-      `${BOT_MARKER} 4. Something personal`,
+      '1. Check in with Ava Q.',
+      '2. Reply to Ben O.',
+      '3. Introduce Cleo M. and Dora V.?',
+      '4. Something personal',
     ]);
     expect(outbound.sent.slice(1).every((x) => x.purpose === 'test')).toBe(true);
   });
@@ -146,7 +148,7 @@ describe('delivery jobs', () => {
     expect(todayDigest(w.db, DAY_DATE)).toMatchObject({ status: 'ready', imessage: 'disabled', skipReason: 'disabled' });
     setSettings(w.db, { 'digest.enabled': true });
     await jobs[1]!.run(ctx(zoned(DAY_DATE, '08:01')));
-    expect(outbound.sent).toHaveLength(4);
+    expect(outbound.sent).toHaveLength(1);
     // The fake LLM answered nothing usable at 07:30, so the template copy went out: 'fallback_sent'.
     expect(todayDigest(w.db, DAY_DATE)).toMatchObject({ status: 'fallback_sent', imessage: 'sent' });
   });

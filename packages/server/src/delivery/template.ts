@@ -7,8 +7,10 @@
  * (the full last name when that would be ambiguous: briefNames); every dynamic fragment goes through safeFragment
  * (no URLs, phones, emails, amounts, long digit runs).
  */
+import type { BriefAttendee, OpenLoop } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { ownerNames } from '../identity/ownerNames';
+import { eventBrief } from '../intel/brief';
 import { happeningOf, metRefOf } from '../intel/eventInvites';
 import { preferredPeople } from '../pipeline/circles/preferences';
 import type { SelectedItem } from './selection';
@@ -133,7 +135,8 @@ export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy
       const title = occ?.sensitive ? null : safeFragment(occ?.title ?? str(p.title), 40);
       const when = occ?.startsAt ? whenPhrase(occ.startsAt, ctx.timeZone, ctx.now) : null;
       headline = mid(title) ? `${mid(title)} is ${when ?? 'coming up'}` : `You have something ${when ?? 'coming up'}`;
-      body = names.length ? `${peopleList(names)} ${names.length > 1 ? 'are' : 'is'} going. There's a quick brief in the app.` : "There's a quick brief in the app.";
+      // Who they are and what's open with them follows in the item's details (itemDetails), not in the app.
+      body = names.length ? `${peopleList(names)} ${names.length > 1 ? 'are' : 'is'} going.` : null;
       break;
     }
     case 'commitment_due': {
@@ -283,6 +286,85 @@ export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy
 
   if (item.isWildcard) headline = `🎲 ${headline}`;
   return { headline: truncate(headline, 90), body: body ? truncate(cap(body), 240) : null, openers: [] };
+}
+
+// ---------------------------------------------------------------------------------------------- details
+
+/** How many of an event's people the brief's text tells about. */
+export const EVENT_PEOPLE_LINES = 3;
+
+/** Whole local days from `ms` to `now` (0 = the same local date). */
+function localDaysAgo(ms: number, now: number, timeZone: string): number {
+  const ymd = (t: number) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
+  const utc = (d: string) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
+  return Math.round((utc(ymd(now)) - utc(ymd(ms))) / DAY);
+}
+
+/** "You talked yesterday.", "You talked 3 weeks ago.", "You haven't talked in 9 months." */
+function talkedLine(lastAt: number | null, now: number, timeZone: string): string | null {
+  if (lastAt === null || lastAt > now) return null;
+  const d = localDaysAgo(lastAt, now, timeZone);
+  if (d <= 0) return 'You talked today.';
+  if (d === 1) return 'You talked yesterday.';
+  return d < 60 ? `You talked ${humanDuration(d)} ago.` : `You haven't talked in ${humanDuration(d)}.`;
+}
+
+/** The first thing open with someone, as a sentence ("You said you'd send the trail map."); null for none. */
+function loopSentence(loops: readonly OpenLoop[]): string | null {
+  for (const l of loops) {
+    if (l.type === 'reply_debt') return /^waiting\b/i.test(l.title) ? endSentence(l.title) : `${mid(l.title)} and is waiting on your reply.`;
+    const what = mid(safeFragment(l.title, 60));
+    // A sensitive promise's title is a stand-in ("Something personal"): nothing to say outside the web.
+    if (!what || what === 'Something personal') continue;
+    const verbLed = ACTION_START.test(what);
+    const act = verbLed ? what.charAt(0).toLowerCase() + what.slice(1) : what;
+    // A thing rather than an action ("game night at my place") reads as a plan, like the template's headline.
+    if (l.owner === 'them') return verbLed ? `They said they'd ${act}.` : `They owe you: ${what}.`;
+    return verbLed && l.owner === 'me' ? `You said you'd ${act}.` : `Your plan: ${what}.`;
+  }
+  return null;
+}
+
+/** One recent fact as a sentence ("Lives in Austin, TX.", "Into climbing."); null when nothing usable is left. */
+function factSentence(f: BriefAttendee['recentFact']): string | null {
+  const v = f ? mid(safeFragment(f.value, 60)) : null;
+  if (!f || !v) return null;
+  const lead: Record<string, string> = {
+    interest: 'Into',
+    activity_pref: 'Likes',
+    location_current: 'Lives in',
+    location_next: 'Moving to',
+    employer: 'Works at',
+    hometown: 'From',
+    pet: 'Pet:',
+  };
+  return lead[f.type] ? `${lead[f.type]} ${v}.` : `${cap(v)}.`;
+}
+
+/**
+ * Lines under an item's body that aren't copy (the same under template and LLM copy). For an event today: one
+ * line each for its first few people, with when you last talked, the first thing open between you and one recent
+ * fact ("Sam R.: You talked 2 days ago. You said you'd send the trail map."), from the event's brief
+ * (intel/brief.ts), so the text holds what the app's brief shows. Sensitive items never get here (compose).
+ */
+export function itemDetails(item: SelectedItem, ctx: TemplateContext): string[] {
+  if (item.kind !== 'pre_event_brief') return [];
+  const id = item.links.occasionId ?? item.links.eventId;
+  const brief = id ? eventBrief(ctx.db, id, { now: ctx.now, timeZone: ctx.timeZone }) : null;
+  if (!brief) return [];
+  const named = ctx.names ?? briefNames(item.people, ownerNames(ctx.db));
+  const byId = new Map(brief.attendees.map((a) => [a.person.id, a]));
+  const lines: string[] = [];
+  for (const p of item.people) {
+    const a = byId.get(p.id);
+    const name = named.of(p);
+    if (!a || !name) continue;
+    const said = [talkedLine(a.lastContactAt, ctx.now, ctx.timeZone), loopSentence(a.openLoops), factSentence(a.recentFact)].filter((x): x is string => !!x);
+    if (!said.length) continue;
+    lines.push(`${name}: ${said.join(' ')}`);
+    if (lines.length === EVENT_PEOPLE_LINES) break;
+  }
+  return lines;
 }
 
 /** Stand-in headline for sensitive items outside the web. */
