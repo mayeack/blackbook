@@ -1,22 +1,27 @@
 /**
  * Which picks the owner went to (design docs/design/event-picks.md §6): the owner asked yeackbot to "regularly
- * check which events I'm going to" to refine the picks. Job 'event-picks-outcomes' (daily, and right before each
+ * check which events I'm going to" and to "continuously try and improve on your weekly digest based on what events I
+ * actually go to, based on signals in calendar and email". Job 'event-picks-outcomes' (daily, and right before each
  * weekly run) moves every sent pick still 'picked':
  *
  *   → going (outcome_source):
- *       ticket     a ticket event (Gmail ticket mail) on the same local date that shares a performer, or whose title
- *                  is alike (sim ≥ PICK_MATCH.sim), or at the same venue;
- *       calendar   a calendar event on that date (not declined / cancelled) whose title names a performer, the
- *                  title's distinctive words, or the venue;
+ *       ticket     a ticket event (Gmail ticket / RSVP / registration mail) on the same local date that shares a
+ *                  performer, or whose title is alike (sim ≥ PICK_MATCH.sim), or at the same venue;
+ *       calendar   a calendar plan on that date (not declined / cancelled) whose title names a performer, the
+ *                  title's distinctive words, or the venue. A listing (his Recurring Events calendar: recurring, no
+ *                  invitees, nights.ts isListing) only says it happens, never that he went — so a pick taken from
+ *                  that calendar needs a real plan, ticket or RSVP;
  *       partiful   a Partiful event he's going to that date with an alike title or the same venue;
- *   → passed     the date is over with none of those (date). A ticket or calendar entry that shows up within
- *                PICK_MATCH.lateDays after the night still turns it into going.
+ *   → passed     the date is over with none of those: 'date', or 'busy' when that night had other plans (nights.ts):
+ *                he couldn't have gone, so the ranker learns nothing from it. A ticket or calendar entry that shows
+ *                up within PICK_MATCH.lateDays after the night still turns it into going.
  * Picks the owner answered himself ('owner': going / not_for_me) are never changed here. Writes event_picks only.
  */
 import { addDays, localDate } from '@yb/shared';
 import type { DB } from '../../db/connection';
 import { distinctiveTokens, venueKey } from '../../pipeline/occasions/text';
 import { PARTIFUL_ATTENDING_SQL } from '../common';
+import { isListing, nightsOf } from './nights';
 import { features, performerKey, sharedPerformer, similarity, type EventFeatures } from '../similarity';
 
 export const PICK_MATCH = {
@@ -77,7 +82,7 @@ export function updatePickOutcomes(db: DB, now: number, timeZone: string): Outco
   const open = db
     .prepare(
       `SELECT id, title, performers, genres, category, venue, venue_key, local_date, status FROM event_picks
-       WHERE ordinal IS NOT NULL AND (status = 'picked' OR (status = 'passed' AND outcome_source = 'date' AND local_date >= ?))`,
+       WHERE ordinal IS NOT NULL AND (status = 'picked' OR (status = 'passed' AND outcome_source IN ('date','busy') AND local_date >= ?))`,
     )
     .all(addDays(today, -PICK_MATCH.lateDays)) as OpenPick[];
   const counts: OutcomeCounts = { checked: open.length, going: 0, passed: 0 };
@@ -87,13 +92,13 @@ export function updatePickOutcomes(db: DB, now: number, timeZone: string): Outco
      WHERE merged_into_id IS NULL AND status IN ('holding','unconfirmed','gave_away') AND local_date = ?`,
   );
   const calendar = db.prepare(
-    `SELECT summary, location, starts_at, start_date FROM calendar_events_included
+    `SELECT summary, location, starts_at, start_date, treatment, recurring_event_id, attendees FROM calendar_events_included
      WHERE status <> 'cancelled' AND coalesce(self_response, '') <> 'declined'
        AND ((all_day = 0 AND starts_at >= @from AND starts_at < @to) OR (all_day = 1 AND start_date = @date))`,
   );
   const partiful = db.prepare(`SELECT e.title, e.location_text, e.starts_at FROM events e WHERE e.source = 'partiful' AND ${PARTIFUL_ATTENDING_SQL} AND e.starts_at >= @from AND e.starts_at < @to`);
   const setGoing = db.prepare(`UPDATE event_picks SET status = 'going', outcome_at = @now, outcome_source = @source, updated_at = @now WHERE id = @id AND status IN ('picked','passed')`);
-  const setPassed = db.prepare(`UPDATE event_picks SET status = 'passed', outcome_at = @now, outcome_source = 'date', updated_at = @now WHERE id = @id AND status = 'picked'`);
+  const setPassed = db.prepare(`UPDATE event_picks SET status = 'passed', outcome_at = @now, outcome_source = @source, updated_at = @now WHERE id = @id AND status = 'picked'`);
   for (const p of open) {
     const f = pickFeatures(p);
     // The local day, ±12 h of slack for a zone guess on either side.
@@ -108,8 +113,17 @@ export function updatePickOutcomes(db: DB, now: number, timeZone: string): Outco
       }
     }
     if (!source) {
-      for (const c of calendar.all({ from, to, date: p.local_date }) as { summary: string | null; location: string | null; starts_at: number; start_date: string | null }[]) {
+      for (const c of calendar.all({ from, to, date: p.local_date }) as {
+        summary: string | null;
+        location: string | null;
+        starts_at: number;
+        start_date: string | null;
+        treatment: string;
+        recurring_event_id: string | null;
+        attendees: string | null;
+      }[]) {
         if (c.start_date !== p.local_date && localDate(c.starts_at, timeZone) !== p.local_date) continue;
+        if (isListing(c)) continue;
         if (sameEvent(f, c.summary, c.location)) {
           source = 'calendar';
           break;
@@ -129,7 +143,8 @@ export function updatePickOutcomes(db: DB, now: number, timeZone: string): Outco
       setGoing.run({ id: p.id, now, source });
       counts.going++;
     } else if (p.status === 'picked' && p.local_date < today) {
-      setPassed.run({ id: p.id, now });
+      const busy = nightsOf(db, p.local_date, 1, timeZone)[0]?.free === false;
+      setPassed.run({ id: p.id, now, source: busy ? 'busy' : 'date' });
       counts.passed++;
     }
   }

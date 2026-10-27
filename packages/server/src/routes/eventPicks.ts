@@ -3,6 +3,12 @@
  *
  *   GET  /event-picks                   → EventPicksResponse   the latest sent (or ready) week and its picks
  *   POST /event-picks/:id/feedback      ← EventPickFeedback    the owner's answer ("going", "not for me", undo)
+ *   GET  /event-picks/email             → EventPicksEmailStatus  "Email me" (Google product gmail_send): connected?,
+ *                                         the address it sends to (his own), the last email, its problem
+ *   POST /event-picks/email/test        → EventPicksEmailTest  a short test email to that address (delivery/email.ts)
+ *   POST /event-picks/email/disconnect  → EventPicksEmailDisconnect  drops the gmail_send token and address; revokes
+ *                                         the shared Google grant only when nothing else is connected
+ *                                         (routes/googleProducts.ts)
  *   GET  /go/:id   (outside /api, still behind Cloudflare Access; http/app.ts)  the link in the texts: counts the tap,
  *        then 302 to the pick's checked ticket page (else the page it came from); an unknown id goes to /picks.
  *
@@ -12,12 +18,17 @@
 import type { RequestHandler } from 'express';
 import { Router } from 'express';
 import { localDate } from '@yb/shared';
-import { EventPickFeedback, type EventPickItem, type EventPicksResponse } from '@yb/shared';
+import { EventPickFeedback, type EventPickItem, type EventPicksEmailDisconnect, type EventPicksEmailStatus, type EventPicksEmailTest, type EventPicksResponse } from '@yb/shared';
+import { connectedAt, isConnected, type FetchLike } from '../adapters/calendar/google';
+import { GoogleOAuthFlow } from '../adapters/calendar/oauth';
 import type { DB } from '../db/connection';
+import { createEmailSender, EMAIL_SOURCE, sendAddress, type EmailSender } from '../delivery/email';
 import { badRequest, notFound } from '../http/errors';
 import { normalizeUrl } from '../intel/eventPicks/links';
 import * as store from '../intel/eventPicks/store';
 import { readSetting, settingTimeZone } from '../settings/registry';
+import { resolveServices } from '../services';
+import { disconnectGoogleProduct, googleNotConfigured, healthProblemText, healthView } from './googleProducts';
 import type { RouteDeps } from './index';
 
 const PICK_ID = /^[A-Za-z0-9_-]{8,40}$/;
@@ -46,6 +57,7 @@ export function pickItem(p: store.PickRow): EventPickItem {
     ticketHost: p.ticket_url ? p.ticket_host : null,
     why: p.why,
     wildcard: p.wildcard === 1,
+    source: p.source,
     status: p.status === 'found' ? 'picked' : p.status,
     outcomeSource: (p.outcome_source as EventPickItem['outcomeSource']) ?? null,
     clicks: p.clicks,
@@ -69,6 +81,8 @@ export function eventPicksResponse(db: DB): EventPicksResponse {
           sentAt: run.sent_at,
           found: run.found,
           searches: run.searches,
+          newsletters: run.newsletters,
+          channel: run.status === 'sent' ? (run.channel ?? 'text') : null,
           picks: store.picksOfRun(db, run.id, { pickedOnly: true }).map(pickItem),
         }
       : null,
@@ -99,8 +113,59 @@ export function goRedirect(db: DB): RequestHandler {
   };
 }
 
-export function eventPicksRoutes({ db }: RouteDeps): Router {
+export function emailStatus(db: DB, secretsKey: Buffer | null): EventPicksEmailStatus {
+  const connected = isConnected(db, 'gmail_send');
+  const health = healthView(db, EMAIL_SOURCE);
+  return {
+    configured: true,
+    secretsAvailable: secretsKey !== null,
+    connected,
+    address: sendAddress(db, secretsKey),
+    connectedAt: connectedAt(db, 'gmail_send'),
+    needsReconnect: connected && health?.status === 'auth_required',
+    lastSentAt: health?.lastOkAt ?? null,
+    problem: connected ? healthProblemText(health) : null,
+  };
+}
+
+export const TEST_EMAIL = {
+  subject: 'yeackbot can email you',
+  text: 'This is a test from yeackbot. Your weekly event picks will arrive like this on Sunday evenings.\n\n— yeackbot',
+  html: '<p style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:15px">This is a test from yeackbot. Your weekly event picks will arrive like this on Sunday evenings.</p><p style="font-family:-apple-system,Helvetica,Arial,sans-serif;color:#6e6e73">— yeackbot</p>',
+  tag: 'test',
+} as const;
+
+export interface EventPicksRouterOptions {
+  /** Tests pass a fetch bound to an undici MockAgent (the revoke call) and a fake sender. */
+  fetch?: FetchLike;
+  email?: EmailSender;
+}
+
+export function createEventPicksRouter(deps: RouteDeps, o: EventPicksRouterOptions = {}): Router {
+  const { db, log, config } = deps;
   const r = Router();
+  const google = config?.google ?? null;
+  const secretsKey = config?.secretsKey ?? null;
+  const flow = google ? new GoogleOAuthFlow({ config: google, fetch: o.fetch }) : null;
+  const email = (): EmailSender => o.email ?? resolveServices(deps).email ?? createEmailSender({ db, secretsKey, google, log });
+
+  r.use('/event-picks/email', (_req, res, next) => {
+    if (!flow) return googleNotConfigured(res);
+    next();
+  });
+  r.get('/event-picks/email', (_req, res) => {
+    res.json(emailStatus(db, secretsKey) satisfies EventPicksEmailStatus);
+  });
+  r.post('/event-picks/email/test', async (_req, res) => {
+    const out = await email().sendToSelf({ ...TEST_EMAIL }, { now: Date.now() });
+    res.json({ sent: out.status === 'sent', reason: out.status === 'sent' ? null : out.reason } satisfies EventPicksEmailTest);
+  });
+  r.post('/event-picks/email/disconnect', async (_req, res) => {
+    const out = await disconnectGoogleProduct(db, 'gmail_send', { flow, secretsKey, log, now: Date.now() });
+    if (out.had) log.info('gmail_send.disconnected', { counts: { revoked: out.revoked ? 1 : 0, all: out.all ? 1 : 0 } });
+    res.json({ connected: false, revoked: out.revoked } satisfies EventPicksEmailDisconnect);
+  });
+
   r.get('/event-picks', (_req, res) => {
     res.json(eventPicksResponse(db) satisfies EventPicksResponse);
   });
@@ -115,4 +180,8 @@ export function eventPicksRoutes({ db }: RouteDeps): Router {
     res.json(pickItem(store.pickById(db, id)!) satisfies EventPickItem);
   });
   return r;
+}
+
+export function eventPicksRoutes(deps: RouteDeps): Router {
+  return createEventPicksRouter(deps);
 }

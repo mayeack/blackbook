@@ -76,6 +76,9 @@ const values = (o: Partial<SettingsValues> = {}): SettingsValues => ({
   'events.max_picks': 5,
   'events.city': null,
   'events.max_searches': 10,
+  'events.channel': 'email',
+  'events.newsletters': true,
+  'events.listings': true,
   tz: 'UTC',
   ...o,
 });

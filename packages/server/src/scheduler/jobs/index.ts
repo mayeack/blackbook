@@ -104,6 +104,9 @@ export function agentJobDeps(deps: JobDeps): AgentJobDepsSet {
       vapid: c.vapid ?? null,
       collectorUrl: c.collectorUrl ?? COLLECTOR_DEFAULT_URL,
       collectorTokenFile: tokenFile,
+      // Email + Gmail for the event picks (services.ts); absent = those stay inert.
+      ...(c.google ? { google: c.google } : {}),
+      ...(c.secretsKey ? { secretsKey: c.secretsKey } : {}),
     },
   };
   return { pipeline: base, llm: c.anthropicApiKey ? base : null, commands: sourceJobDeps(deps).imessage ? base : null };

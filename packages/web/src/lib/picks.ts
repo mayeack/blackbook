@@ -21,11 +21,17 @@ export function pickTime(hhmm: string): string {
   return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'}`;
 }
 
-/** "Week of Mon, Oct 26 · Springfield · 3 free nights · sent". */
-export function weekLine(w: Pick<EventPicksWeek, 'weekStart' | 'city' | 'freeNights' | 'status'>): string {
+/** "Week of Mon, Oct 26 · Springfield · 3 free nights · emailed" ("texted" / "sent" when the channel isn't known). */
+export function weekLine(w: Pick<EventPicksWeek, 'weekStart' | 'city' | 'freeNights' | 'status'> & Partial<Pick<EventPicksWeek, 'channel'>>): string {
   const start = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(localDayMs(w.weekStart));
-  const parts = [`Week of ${start}`, w.city?.trim() || null, plural(w.freeNights.length, 'free night'), w.status === 'sent' ? 'sent' : null];
+  const sent = w.status === 'sent' ? (w.channel === 'email' ? 'emailed' : w.channel === 'text' ? 'texted' : 'sent') : null;
+  const parts = [`Week of ${start}`, w.city?.trim() || null, plural(w.freeNights.length, 'free night'), sent];
   return parts.filter(Boolean).join(' · ');
+}
+
+/** Where a pick came from, for its pill (none for the web: that's the default). */
+export function pickSource(p: Pick<EventPickItem, 'source'>): string | null {
+  return p.source === 'newsletter' ? 'From your newsletters' : p.source === 'calendar' ? 'Recurring Events calendar' : null;
 }
 
 /** "Example Hall · 10pm" (either may be missing). */
@@ -54,7 +60,7 @@ export function pickStatus(p: Pick<EventPickItem, 'status' | 'outcomeSource'>): 
     case 'not_for_me':
       return { label: 'Not for me', tone: 'neutral' };
     case 'passed':
-      return { label: 'Passed', tone: 'neutral' };
+      return { label: p.outcomeSource === 'busy' ? 'Passed · you had plans' : 'Passed', tone: 'neutral' };
   }
 }
 

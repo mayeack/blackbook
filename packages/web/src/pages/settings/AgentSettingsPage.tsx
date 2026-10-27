@@ -150,8 +150,9 @@ function AgentForm({ form }: { form: SettingsForm }) {
       <SectionTitle>Event picks</SectionTitle>
       <div className="card st-card">
         <p className="caption st-lead">
-          Once a week yeackbot texts you public events on nights your calendar is free, found on the web, with ticket links. This week’s are in{' '}
-          <Link to="/picks">Event picks</Link>.
+          Once a week yeackbot emails you events on nights your calendar is free, with ticket links: found on the web, in your event newsletters
+          and on your Recurring Events calendar. It learns from the ones you go to (ticket emails, your calendar, Partiful). This week’s are in{' '}
+          <Link to="/picks">Event picks</Link>; connect email in <Link to="/settings#email-photos">Email &amp; photos</Link>.
         </p>
         <SettingRow form={form} k="events.enabled">
           <Toggle id={fieldId('events.enabled')} checked={v['events.enabled']} onChange={(x) => form.set('events.enabled', x)} />
@@ -159,7 +160,7 @@ function AgentForm({ form }: { form: SettingsForm }) {
         <SettingRow
           form={form}
           k="events.weekday"
-          description="Day the picks are sent; they cover that night and the six after it."
+          description="Day the picks are sent. Sent in the evening, they cover the next seven nights (a Sunday email: Monday to Sunday)."
           formatDefault={(x) => weekdayName(Number(x))}
         >
           <select
@@ -184,6 +185,23 @@ function AgentForm({ form }: { form: SettingsForm }) {
         <CityRow form={form} k="events.city" unset="your home city" placeholder={v['travel.home_city'] ?? 'Your home city'} />
         <SettingRow form={form} k="events.max_searches">
           <NumberField form={form} k="events.max_searches" suffix="searches" />
+        </SettingRow>
+        <SettingRow form={form} k="events.channel" formatDefault={(x) => (x === 'text' ? 'Text' : 'Email')}>
+          <select
+            id={fieldId('events.channel')}
+            className="input input-sm"
+            value={v['events.channel']}
+            onChange={(e) => form.set('events.channel', e.target.value === 'text' ? 'text' : 'email')}
+          >
+            <option value="email">Email</option>
+            <option value="text">Text</option>
+          </select>
+        </SettingRow>
+        <SettingRow form={form} k="events.newsletters">
+          <Toggle id={fieldId('events.newsletters')} checked={v['events.newsletters']} onChange={(x) => form.set('events.newsletters', x)} />
+        </SettingRow>
+        <SettingRow form={form} k="events.listings">
+          <Toggle id={fieldId('events.listings')} checked={v['events.listings']} onChange={(x) => form.set('events.listings', x)} />
         </SettingRow>
       </div>
     </>

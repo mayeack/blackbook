@@ -189,8 +189,8 @@ const KIND_LABEL: Readonly<Record<TicketCategory, string>> = {
   other: 'other',
 };
 
-/** The candidates user turn: everything volatile (dates, taste) lives here; the system prompt is byte-stable. */
-export function candidatesPrompt(profile: TasteProfile, s: SearchSetup): string {
+/** The CITY / NIGHTS / TASTE sections every events prompt starts with (only what profile.ts deems safe to send). */
+export function tasteLines(profile: TasteProfile, s: Pick<SearchSetup, 'city' | 'nights'>): string[] {
   // Public kinds only (Partiful parties are private: never searched for), as shares of the public ones.
   const pub = [...profile.categoryShare.entries()].filter(([c]) => PUBLIC_CATEGORIES.has(c));
   const total = pub.reduce((a, [, x]) => a + x, 0);
@@ -212,8 +212,16 @@ export function candidatesPrompt(profile: TasteProfile, s: SearchSetup): string 
   if (profile.venues.length) lines.push(`Venues: ${profile.venues.map((v) => v.label).join(', ')}`);
   if (profile.titles.length) lines.push(`Events he went to: ${profile.titles.join(' | ')}`);
   if (profile.disliked.length) lines.push(`Not for him: ${profile.disliked.join(' | ')}`);
-  lines.push('### FIND', `Up to ${s.want} events, spread across the nights and kinds, best fits first. One or two may be good events a little outside his usual taste.`);
-  return lines.join('\n');
+  return lines;
+}
+
+/** The candidates user turn: everything volatile (dates, taste) lives here; the system prompt is byte-stable. */
+export function candidatesPrompt(profile: TasteProfile, s: SearchSetup): string {
+  return [
+    ...tasteLines(profile, s),
+    '### FIND',
+    `Up to ${s.want} events, spread across the nights and kinds, best fits first. One or two may be good events a little outside his usual taste.`,
+  ].join('\n');
 }
 
 export interface TicketQuery {

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import type { EventPickItem, EventPicksResponse, EventPicksWeek } from '@yb/shared';
 import { keys, postPickFeedback } from '../src/api/hooks';
-import { historyLine, localDayMs, pickActions, pickLink, pickMeta, pickStatus, pickTime, sortPicks, weekLine, withPick } from '../src/lib/picks';
+import { historyLine, localDayMs, pickActions, pickLink, pickMeta, pickSource, pickStatus, pickTime, sortPicks, weekLine, withPick } from '../src/lib/picks';
 import { PickCard, PicksPage } from '../src/pages/events/PicksPage';
 
 // Synthetic only: invented bands, venues and hosts (*.example). Nothing may reach the network unless a test stubs it.
@@ -34,6 +34,7 @@ const pick = (o: Partial<EventPickItem> = {}): EventPickItem => ({
   ticketHost: 'tickets.example',
   why: 'Like the indie shows you went to this summer.',
   wildcard: false,
+  source: 'web',
   status: 'picked',
   outcomeSource: null,
   clicks: 0,
@@ -69,6 +70,8 @@ const week = (o: Partial<EventPicksWeek> = {}): EventPicksWeek => ({
   sentAt: new Date(2026, 9, 26, 9, 30).getTime(),
   found: 14,
   searches: 6,
+  newsletters: 0,
+  channel: 'text',
   picks: PICKS,
   ...o,
 });
@@ -113,9 +116,19 @@ const press = (card: unknown, label: string) => {
 };
 
 describe('event pick lines', () => {
-  it('the week: start day, city, free nights, sent', () => {
-    expect(weekLine(week())).toBe('Week of Mon, Oct 26 · Springfield · 3 free nights · sent');
+  it('the week: start day, city, free nights, and how it went out', () => {
+    expect(weekLine(week())).toBe('Week of Mon, Oct 26 · Springfield · 3 free nights · texted');
+    expect(weekLine(week({ channel: 'email' }))).toBe('Week of Mon, Oct 26 · Springfield · 3 free nights · emailed');
+    expect(weekLine(week({ channel: null }))).toBe('Week of Mon, Oct 26 · Springfield · 3 free nights · sent');
     expect(weekLine(week({ status: 'ready', city: null, freeNights: ['2026-10-27'] }))).toBe('Week of Mon, Oct 26 · 1 free night');
+  });
+
+  it('where a pick came from, and a night that passed while he had plans', () => {
+    expect(pickSource(pick())).toBeNull();
+    expect(pickSource(pick({ source: 'newsletter' }))).toBe('From your newsletters');
+    expect(pickSource(pick({ source: 'calendar' }))).toBe('Recurring Events calendar');
+    expect(pickStatus(pick({ status: 'passed', outcomeSource: 'busy' }))?.label).toBe('Passed · you had plans');
+    expect(pickStatus(pick({ status: 'passed', outcomeSource: 'date' }))?.label).toBe('Passed');
   });
 
   it('venue · start time, compact; the date tile gets the local date and time', () => {
@@ -172,8 +185,8 @@ describe('Event picks page', () => {
   it('renders the week, one card per pick in the text’s order, and the history', () => {
     const html = render(response());
     expect(html).toContain('<h1>Event picks</h1>');
-    expect(html).toContain('Public events on your free nights, found on the web.');
-    expect(html).toContain('Week of Mon, Oct 26 · Springfield · 3 free nights · sent');
+    expect(html).toContain('Events on your free nights, from the web, your newsletters and your Recurring Events calendar.');
+    expect(html).toContain('Week of Mon, Oct 26 · Springfield · 3 free nights · texted');
     expect(cards(html).map((c) => /aria-label="([^"]+)"/.exec(c)?.[1])).toEqual(['Late Laughs', 'Sample Band', 'Neon Example', 'Quiet Example']);
     expect(html).toContain('So far: 3 went · 1 not for me');
   });

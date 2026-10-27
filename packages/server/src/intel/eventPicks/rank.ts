@@ -6,9 +6,11 @@
  *            match (a performer he has seen) counts and a pile of weak ones doesn't;
  *   kind     the share of his going-out that is this kind of event (club nights 45% …), scaled so the top kind = 1;
  *   learned  what his answers to earlier picks taught: a Beta(1 + yes, 1 + no) per feature value (category, each
- *            genre, venue, each performer) over picked events — went (a ticket, calendar entry or RSVP, or he said
- *            so) +1 yes, tapped the link without going +0.5 yes, "not for me" +1 no, the night passed untouched +0.25
- *            no — one Thompson draw per value, averaged (no history = 0.5);
+ *            genre, venue, each performer, and where it came from: the web, a newsletter or his Recurring Events
+ *            calendar) over picked events — went (a ticket email, calendar entry or RSVP, or he said so) +1 yes,
+ *            tapped the link without going +0.5 yes, "not for me" +1 no, the night passed untouched +0.25 no (but
+ *            nothing when he had other plans that night: outcome 'busy') — one Thompson draw per value, averaged
+ *            (no history = 0.5);
  *   link     an event's own ticket page 1, resale 0.6, a listing page 0.2.
  *
  *   score = 0.4·taste + 0.25·kind + 0.25·learned + 0.1·link
@@ -44,7 +46,11 @@ export interface Candidate {
   venueKey: string;
   title: string;
   linkKind: LinkKind | null;
+  /** Where it came from (default 'web'). */
+  source?: PickSource;
 }
+
+export type PickSource = 'web' | 'newsletter' | 'calendar';
 
 export interface ScoreParts {
   taste: number;
@@ -62,18 +68,22 @@ export interface PickOutcome {
   venueKey: string;
   status: 'going' | 'not_for_me' | 'passed' | 'picked';
   clicks: number;
+  source?: PickSource;
+  /** 'busy' = the night passed while he had other plans (teaches nothing). */
+  outcomeSource?: string | null;
 }
 
 export type Rng = () => number;
 
-/** Beta counts per feature value ("c:club", "g:techno", "v:<venue key>", "p:<performer key>"). */
+/** Beta counts per feature value ("c:club", "g:techno", "v:<venue key>", "p:<performer key>", "s:newsletter"). */
 export type Learned = Map<string, { yes: number; no: number }>;
 
-export const featureKeys = (f: Pick<EventFeatures, 'category' | 'genres' | 'performers' | 'venueKey'>): string[] => [
+export const featureKeys = (f: Pick<EventFeatures, 'category' | 'genres' | 'performers' | 'venueKey'>, source?: PickSource): string[] => [
   ...(f.category ? [`c:${f.category}`] : []),
   ...f.genres.map((g) => `g:${g}`),
   ...(f.venueKey ? [`v:${f.venueKey}`] : []),
   ...f.performers.map((p) => `p:${p}`),
+  ...(source ? [`s:${source}`] : []),
 ];
 
 export function learnFrom(outcomes: readonly PickOutcome[]): Learned {
@@ -84,10 +94,10 @@ export function learnFrom(outcomes: readonly PickOutcome[]): Learned {
     if (o.status === 'going') yes = PICK.outcome.going;
     else if (o.status === 'not_for_me') no = PICK.outcome.notForMe;
     else if (o.clicks > 0) yes = PICK.outcome.clicked;
-    else if (o.status === 'passed') no = PICK.outcome.passed;
+    else if (o.status === 'passed' && o.outcomeSource !== 'busy') no = PICK.outcome.passed;
     if (!yes && !no) continue;
     const f = features({ category: o.category, genres: o.genres, performers: o.performers, venueKey: o.venueKey });
-    for (const k of featureKeys(f)) {
+    for (const k of featureKeys(f, o.source ?? 'web')) {
       const cur = m.get(k) ?? { yes: 0, no: 0 };
       cur.yes += yes;
       cur.no += no;
@@ -136,7 +146,7 @@ export function scoreCandidate(c: Candidate, profile: TasteProfile, learned: Lea
   const taste = best.length ? best.reduce((a, b) => a + b, 0) / 3 : 0;
   const topShare = Math.max(0, ...profile.categoryShare.values());
   const kind = topShare > 0 ? (profile.categoryShare.get(c.category) ?? 0) / topShare : 0.5;
-  const keys = featureKeys(f);
+  const keys = featureKeys(f, c.source ?? 'web');
   const draws = keys.map((k) => {
     const n = learned.get(k);
     return n ? betaSample(1 + n.yes, 1 + n.no, rng) : 0.5;

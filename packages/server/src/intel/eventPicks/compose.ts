@@ -35,23 +35,26 @@ export interface PickText {
   why: string | null;
   wildcard: boolean;
   hasLink: boolean;
+  /** 'calendar' = a listing from his Recurring Events calendar (texted with that label). */
+  source?: 'web' | 'newsletter' | 'calendar';
 }
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const dayWord = (date: string): string => DOW[new Date(`${date}T12:00:00Z`).getUTCDay()]!;
 
-export function introText(picks: readonly PickText[], freeNights: readonly string[]): string {
+export function introText(picks: readonly PickText[], freeNights: readonly string[], note?: string | null): string {
   const nights = freeNights.map(dayWord);
   const ideas = picks.length === 1 ? '1 idea' : `${picks.length} ideas`;
   const where = nights.length && nights.length <= 7 ? ` (${nights.join(', ')})` : '';
-  return `${BOT_MARKER} Event picks for this week: ${ideas} for your free nights${where}.`;
+  return `${BOT_MARKER} Event picks for this week: ${ideas} for your free nights${where}.${note ? ` ${note}` : ''}`;
 }
 
 export function pickText(p: PickText, last: boolean): string {
   const title = safeFragment(p.title, 60) ?? 'An event';
   const venue = safeFragment(p.venue, 40);
   const why = safeFragment(p.why, 100);
-  const head = `${p.wildcard ? '🎲 ' : ''}${p.ordinal}. ${p.wildcard ? 'Something different: ' : ''}${headerDate(p.localDate)} · ${title}`;
+  const label = p.wildcard ? 'Something different: ' : p.source === 'calendar' ? 'On your Recurring Events calendar: ' : '';
+  const head = `${p.wildcard ? '🎲 ' : ''}${p.ordinal}. ${label}${headerDate(p.localDate)} · ${title}`;
   const where = [venue, p.startTime ? clockWords(p.startTime) : null].filter(Boolean).join(', ');
   const body = [where ? endSentence(where) : null, why ? endSentence(truncate(why, 100)) : null].filter(Boolean).join(' ');
   const lines = [`${BOT_MARKER} ${head}`];
@@ -64,8 +67,8 @@ export function pickText(p: PickText, last: boolean): string {
   return last ? `${bare}\n\nNot your thing? ${PICKS_LINK}` : bare;
 }
 
-/** Every text of one week's picks, in send order (intro first). */
-export function picksTexts(picks: readonly PickText[], freeNights: readonly string[]): string[] {
+/** Every text of one week's picks, in send order (intro first; `note` ends the intro, e.g. why it isn't an email). */
+export function picksTexts(picks: readonly PickText[], freeNights: readonly string[], note?: string | null): string[] {
   if (!picks.length) return [];
-  return [introText(picks, freeNights), ...picks.map((p, i) => pickText(p, i === picks.length - 1))];
+  return [introText(picks, freeNights, note), ...picks.map((p, i) => pickText(p, i === picks.length - 1))];
 }

@@ -16,6 +16,7 @@ import { TiebreakOutput } from './identity/tiebreak';
 import type { LlmRoute } from './llm/models';
 import type { LlmTool } from './llm/types';
 import { EventsExtract } from './intel/eventPicks/discover';
+import { NewsletterEvents } from './intel/eventPicks/newsletters';
 import { CircleNameOutput } from './pipeline/circles/naming';
 import { AdjudicationResult } from './pipeline/occasions/packet';
 import { DraftOut } from './pipeline/suggestions/feedback';
@@ -41,5 +42,6 @@ export const LLM_SCHEMAS: readonly LlmSchemaEntry[] = [
   { name: 'DraftSchema', route: 'draft_openers', schema: DraftSchema },
   { name: 'TicketEmail', route: 'ticket_parse', schema: TicketEmail },
   { name: 'EventsExtract', route: 'events_extract', schema: EventsExtract },
+  { name: 'NewsletterEvents', route: 'events_newsletter', schema: NewsletterEvents },
   { name: 'ASK_TOOL_DEFS', route: 'ask_web', tools: ASK_TOOL_DEFS },
 ];

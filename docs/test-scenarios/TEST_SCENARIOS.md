@@ -1635,3 +1635,50 @@ ones you go to. Design: `docs/design/event-picks.md`.
 - Server and web. Not deployed.
 - No real text sent yet.
 - Taste is calendar-only until Gmail is connected (no ticket history yet).
+
+## 2026-10-25 — Weekly event picks by email on Sunday evenings, plus newsletters and the Recurring Events calendar
+
+The weekly event picks now arrive as one email every Sunday at 6 pm, for Monday to Sunday. Besides the web, they
+include events from your event newsletters in Gmail and the best happenings on your Recurring Events calendar that
+fall when you're free. They learn from what you actually go to (ticket emails, your calendar, Partiful, taps).
+Design: `docs/design/event-picks.md` §1, §6–9.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: all tests pass (new:
+   `packages/server/test/intel/eventPicksDigest.test.ts`, 22 tests); 5 of 5 mutations caught (listing counted as
+   attendance, resend after a crash, send from a non-send client, busy-night learning, calendar twin).
+2. Dry run on a copy of the live database for the week of Oct 26 (no LLM call, nothing sent): 22 Recurring Events
+   listings, one free night; the email lists Monday's jazz night and the weekend morning markets.
+
+### Scenario B — Connect "Email me"
+1. Settings → Email & photos → **Email me** → **Connect email**. Allow "Send email on your behalf". **Expected**:
+   back on Settings, "Email connected…", and the panel says "Sends to <your Gmail address>".
+2. Tap **Send a test email**. **Expected**: "yeackbot can email you" arrives in your inbox within a minute, from and
+   to your own address.
+3. **Disconnect** → confirm. **Expected**: the panel offers Connect again; Gmail reading and Calendar stay connected.
+
+### Scenario C — The Sunday email
+1. With "Email me" connected, set Settings → Agent → Event picks to today, a few minutes from now (at or after 4 pm).
+2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)", with **Picks**, **On your
+   Recurring Events calendar**, and (from the second week) **Last week**. No texts.
+3. Tap **Get tickets** on a pick. **Expected**: the event's ticket page (after Cloudflare Access if signed out).
+4. **Expected**: nothing on a night you have a plan after 6 pm; a daytime market shows only when you have 2 free
+   hours of it; an event already on your Recurring Events calendar isn't repeated under Picks.
+
+### Scenario D — Learning from what you go to
+1. Buy a ticket to a pick, or add one to your own calendar. **Expected**: by the next morning `/picks` shows
+   "Going · found your ticket" / "on your calendar"; next Sunday's email says "Last week: you went to …".
+2. Skip a pick on a night that turned busy. **Expected**: `/picks` shows "Passed · you had plans" (not held against
+   that kind of event).
+3. Ignore a Recurring Events item for a week. **Expected**: that series rests for about three weeks; one you tapped
+   or went to keeps coming.
+
+**Edge cases**:
+- "Email me" not connected → the picks come by text, with "To get these by email, connect “Email me” in Settings →
+  Email & photos."
+- Gmail busy → retried every 10 minutes; still failing at 8:30 pm → texts, saying the email didn't go through.
+- The server stops mid-send → that week's email is never sent twice.
+- Gmail reading not connected, or Settings → "Read event newsletters" off → no newsletter call, web + calendar only.
+
+**Platforms**: server + web. Not deployed; no real email sent yet (needs the one-time "Email me" consent).
+

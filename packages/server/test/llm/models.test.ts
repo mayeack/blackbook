@@ -72,6 +72,7 @@ describe('route table defaults', () => {
       'ticket_parse',
       'events_search',
       'events_extract',
+      'events_newsletter',
     ]);
     for (const r of LLM_ROUTES) {
       const p = ROUTES[r];
@@ -84,7 +85,7 @@ describe('route table defaults', () => {
   });
 
   it('cache TTL: 1 h on batch routes, 5 min on synchronous ones, no marker where the prefix is never re-read', () => {
-    const unmarked = ['digest_compose', 'intent', 'events_search', 'events_extract'];
+    const unmarked = ['digest_compose', 'intent', 'events_search', 'events_extract', 'events_newsletter'];
     for (const r of LLM_ROUTES) expect(ROUTES[r].cacheTtl, r).toBe(ROUTES[r].mode === 'batch' ? '1h' : unmarked.includes(r) ? null : '5m');
     expect(LLM_ROUTES.filter((r) => ROUTES[r].mode === 'batch').sort()).toEqual(['adjudicate', 'extract_consolidate', 'extract_historical', 'extract_steady', 'ticket_parse']);
   });

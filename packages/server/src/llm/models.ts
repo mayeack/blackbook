@@ -222,6 +222,7 @@ export const LLM_ROUTES = [
   'ticket_parse',
   'events_search',
   'events_extract',
+  'events_newsletter',
 ] as const;
 export type LlmRoute = (typeof LLM_ROUTES)[number];
 export const isLlmRoute = (r: unknown): r is LlmRoute => typeof r === 'string' && (LLM_ROUTES as readonly string[]).includes(r);
@@ -319,6 +320,8 @@ export const ROUTES: Readonly<Record<LlmRoute, RouteDefaults>> = {
   events_search: r(HAIKU_5_5, 'low', 'disabled', 6000, null, 'sync', 2000),
   /** The fallback when a search answer isn't parseable JSON: the same answer, structured. Rare. */
   events_extract: r(HAIKU_5_5, 'low', 'disabled', 4000, null, 'sync', 1500),
+  /** The past week's event newsletters from Gmail (masked text, links as refs) → events on the free nights. Weekly. */
+  events_newsletter: r(HAIKU_5_5, 'low', 'disabled', 4000, null, 'sync', 1500),
 };
 
 // ---------------------------------------------------------------------------------------------- overrides

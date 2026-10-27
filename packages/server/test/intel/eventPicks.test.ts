@@ -273,6 +273,8 @@ function sentPick(o: { title: string; date: string; venue?: string; performers?:
         id,
         ordinal: 1,
         eventKey: eventKey({ date: o.date, venue: o.venue ?? 'Example Hall', title: o.title }),
+        source: 'web',
+        sourceRef: null,
         title: o.title,
         performers: o.performers ?? [],
         genres: [],

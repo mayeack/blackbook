@@ -1,15 +1,16 @@
 /**
- * Event picks: the latest week of public events yeackbot found on the web for the owner's free nights (GET
- * /event-picks; the same picks the weekly text sends). One card per pick in the text's order: when and where, why it
- * was picked, a 🎲 pill for the wildcard, the ticket link (/go/<id>, which counts the tap and redirects), and his
- * answer: "I’m going" / "Not for me" teach the ranker, Undo takes his own answer back. Picks yeackbot settled itself
- * (a ticket, calendar entry or Partiful RSVP it found) say so on the Going pill.
+ * Event picks: the latest week of events yeackbot found for the owner's free nights on the web, in his event
+ * newsletters and on his Recurring Events calendar (GET /event-picks; the same picks the weekly email or texts send).
+ * One card per pick in the email's order: when and where, why it was picked, where it came from, a 🎲 pill for the
+ * wildcard, the ticket link (/go/<id>, which counts the tap and redirects), and his answer: "I’m going" / "Not for me"
+ * teach the ranker, Undo takes his own answer back. Picks yeackbot settled itself (a ticket email, calendar entry or
+ * Partiful RSVP it found) say so on the Going pill.
  */
 import { Link } from 'react-router';
 import type { EventPickItem, EventPicksWeek } from '@yb/shared';
 import { isNotImplemented, useEventPicks, usePickFeedback, type PickFeedbackVars } from '../../api/hooks';
 import { Empty, PageHeader, PageState } from '../../components/PageState';
-import { historyLine, localDayMs, pickActions, pickLink, pickMeta, pickStatus, sortPicks, weekLine } from '../../lib/picks';
+import { historyLine, localDayMs, pickActions, pickLink, pickMeta, pickSource, pickStatus, sortPicks, weekLine } from '../../lib/picks';
 import { performersLine, ticketKindLine } from '../../lib/tickets';
 import { DateTile } from './eventFormat';
 
@@ -24,6 +25,7 @@ export function PickCard({ p, onVerdict, busy = false }: { p: EventPickItem; onV
   const link = pickLink(p);
   const actions = pickActions(p);
   const meta = pickMeta(p);
+  const source = pickSource(p);
   return (
     <article className="event-card pick-card" aria-label={p.title}>
       <div className="ev-head">
@@ -37,7 +39,8 @@ export function PickCard({ p, onVerdict, busy = false }: { p: EventPickItem; onV
       <div className="ev-badges">
         {status && <span className={TONE_CLASS[status.tone]}>{status.label}</span>}
         {p.wildcard && <span className="pill pill-accent">🎲 Something different</span>}
-        <span className="pill">{ticketKindLine(p)}</span>
+        {source && <span className="pill">{source}</span>}
+        {(p.source !== 'calendar' || p.linkKind) && <span className="pill">{ticketKindLine(p)}</span>}
       </div>
       {p.why && <p className="pick-why">{p.why}</p>}
       {(link || actions.answer || actions.undo) && (
@@ -77,7 +80,7 @@ function Week({ week }: { week: EventPicksWeek }) {
       <p className="picks-week">{weekLine(week)}</p>
       {picks.length === 0 ? (
         <div className="card-list">
-          <Empty title="No picks this week.">The web search found nothing for your free nights.</Empty>
+          <Empty title="No picks this week.">Nothing on the web, in your newsletters or on your Recurring Events calendar fit your free nights.</Empty>
         </div>
       ) : (
         <div className="event-list">
@@ -108,7 +111,8 @@ export function PicksPage() {
         title="Event picks"
         sub={
           <>
-            Public events on your free nights, found on the web. Get tickets and yeackbot notices. <Link to="/events">Events →</Link>
+            Events on your free nights, from the web, your newsletters and your Recurring Events calendar. Get tickets and yeackbot notices.{' '}
+            <Link to="/events">Events →</Link>
           </>
         }
       />

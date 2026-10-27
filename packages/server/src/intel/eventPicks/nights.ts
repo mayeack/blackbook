@@ -34,11 +34,18 @@ export interface Night {
  */
 export const EVENING = { fromHour: 18, toHour: 27 } as const;
 
-/** Local dates from..from+days-1 with whether each night is free. */
-export function nightsOf(db: DB, from: string, days: number, timeZone: string): Night[] {
-  const out: Night[] = [];
-  const windowFrom = dayStart(from, timeZone);
-  const windowTo = dayStart(addDays(from, days + 1), timeZone);
+/** A busy stretch of time (ms). */
+export interface Span {
+  start: number;
+  end: number;
+}
+
+/**
+ * Timed calendar plans overlapping [from, to): not declined, not cancelled, not marked "free", and not a listing (a
+ * recurring entry with no invitees on a non-primary calendar: his "Recurring Events" calendar says it happens, not
+ * that he goes).
+ */
+export function calendarPlans(db: DB, from: number, to: number): Span[] {
   const timed = db
     .prepare(
       `SELECT e.starts_at, e.ends_at, e.treatment, e.recurring_event_id, e.attendees, json_extract(e.raw, '$.transparency') AS transparency
@@ -46,7 +53,7 @@ export function nightsOf(db: DB, from: string, days: number, timeZone: string): 
        WHERE e.all_day = 0 AND e.status <> 'cancelled' AND coalesce(e.self_response, '') <> 'declined'
          AND e.starts_at < @to AND coalesce(e.ends_at, e.starts_at + ${HOUR}) > @from`,
     )
-    .all({ from: windowFrom, to: windowTo }) as {
+    .all({ from, to }) as {
     starts_at: number;
     ends_at: number | null;
     treatment: string;
@@ -54,7 +61,29 @@ export function nightsOf(db: DB, from: string, days: number, timeZone: string): 
     attendees: string | null;
     transparency: string | null;
   }[];
-  const plans = timed.filter((e) => e.transparency !== 'transparent' && !(e.treatment !== 'attending' && e.recurring_event_id && !hasInvitees(e.attendees)));
+  return timed
+    .filter((e) => e.transparency !== 'transparent' && !isListing(e))
+    .map((e) => ({ start: e.starts_at, end: e.ends_at ?? e.starts_at + HOUR }));
+}
+
+/** A calendar row that lists a happening rather than plans one (see calendarPlans). */
+export const isListing = (e: { treatment: string; recurring_event_id: string | null; attendees: string | null }): boolean =>
+  e.treatment !== 'attending' && !!e.recurring_event_id && !hasInvitees(e.attendees);
+
+/** Partiful events he's going to / maybe / hosting that start in [from - 1 day, to) (no end time = 2 hours). */
+export function partifulSpans(db: DB, from: number, to: number): Span[] {
+  const rows = db
+    .prepare(`SELECT e.starts_at, e.ends_at FROM events e WHERE e.source = 'partiful' AND ${PARTIFUL_ATTENDING_SQL} AND e.starts_at >= @from AND e.starts_at < @to`)
+    .all({ from: from - DAY, to }) as { starts_at: number; ends_at: number | null }[];
+  return rows.map((e) => ({ start: e.starts_at, end: e.ends_at && e.ends_at > e.starts_at ? e.ends_at : e.starts_at + 2 * HOUR }));
+}
+
+/** Local dates from..from+days-1 with whether each night is free. */
+export function nightsOf(db: DB, from: string, days: number, timeZone: string): Night[] {
+  const out: Night[] = [];
+  const windowFrom = dayStart(from, timeZone);
+  const windowTo = dayStart(addDays(from, days + 1), timeZone);
+  const plans = calendarPlans(db, windowFrom, windowTo);
   const allDay = db
     .prepare(
       `SELECT e.start_date, e.end_date FROM calendar_events_included e
@@ -75,19 +104,17 @@ export function nightsOf(db: DB, from: string, days: number, timeZone: string): 
     .prepare(`SELECT local_date FROM ticket_events WHERE merged_into_id IS NULL AND status = 'holding' AND local_date >= ? AND local_date < ?`)
     .pluck()
     .all(from, addDays(from, days)) as string[];
-  const partiful = db
-    .prepare(`SELECT e.starts_at, e.ends_at FROM events e WHERE e.source = 'partiful' AND ${PARTIFUL_ATTENDING_SQL} AND e.starts_at >= @from AND e.starts_at < @to`)
-    .all({ from: windowFrom - DAY, to: windowTo }) as { starts_at: number; ends_at: number | null }[];
+  const partiful = partifulSpans(db, windowFrom, windowTo);
   for (let i = 0; i < days; i++) {
     const date = addDays(from, i);
     const start = dayStart(date, timeZone) + EVENING.fromHour * HOUR;
     const end = dayStart(date, timeZone) + EVENING.toHour * HOUR;
     const overlaps = (a: number, b: number) => a < end && b > start;
     let reason: BusyReason | null = null;
-    if (plans.some((e) => overlaps(e.starts_at, e.ends_at ?? e.starts_at + HOUR))) reason = 'calendar';
+    if (plans.some((e) => overlaps(e.start, e.end))) reason = 'calendar';
     else if (stays.some((s) => s.start_date <= date && s.end_date > date) || flights.some((t) => localDate(t, timeZone) === date)) reason = 'away';
     else if (tickets.includes(date)) reason = 'tickets';
-    else if (partiful.some((e) => overlaps(e.starts_at, e.ends_at && e.ends_at > e.starts_at ? e.ends_at : e.starts_at + 2 * HOUR))) reason = 'partiful';
+    else if (partiful.some((e) => overlaps(e.start, e.end))) reason = 'partiful';
     out.push({ date, free: reason === null, reason });
   }
   return out;

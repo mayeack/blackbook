@@ -143,6 +143,9 @@ const CARDS: readonly CardDef[] = [
 const PRODUCT_CARDS: Readonly<Record<string, GoogleProduct>> = { gmail: 'gmail', gphotos: 'photos' };
 
 /** The card a source name reports into (itself when it isn't a known alias). */
+/** source_health rows that belong to an outbound channel, not an ingest source. */
+const NOT_SOURCES: ReadonlySet<string> = new Set(['gmail_send']);
+
 export function cardFor(source: string): string {
   return CARDS.find((c) => c.source === source || c.aliases.includes(source))?.source ?? source;
 }
@@ -375,7 +378,8 @@ export function sourcesView(db: DB, now = Date.now(), opts: SourcesOptions = {})
 
   const names = new Set<string>([
     ...CARDS.filter((c) => c.core).map((c) => c.source),
-    ...[...health, ...cursors, ...msgCounts].map((x) => cardFor(x.source)),
+    // Delivery channels are not sources (gmail_send: the weekly email; its status lives in Settings → Email & photos).
+    ...[...health, ...cursors, ...msgCounts].map((x) => cardFor(x.source)).filter((s) => !NOT_SOURCES.has(s)),
   ]);
   const sources = [...names]
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))

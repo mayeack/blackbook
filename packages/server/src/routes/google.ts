@@ -16,8 +16,8 @@
  *                             partifulLinked?}]} → journaled settings batch → {batchId, calendars}
  *                             An excluded calendar's synced events are deleted at once (purgeUnusedCalendars).
  *   POST /google/disconnect   {deleteData?} deletes the calendar secret and sync tokens; revokes the grant (best
- *                             effort) only when Gmail and Photos hold no token either, and then disconnects all
- *                             three (routes/googleProducts.ts); with deleteData also every synced calendar and event
+ *                             effort) only when no other product holds a token either, and then disconnects all
+ *                             of them (routes/googleProducts.ts); with deleteData also every synced calendar and event
  *
  * Every path answers 503 GOOGLE_NOT_CONFIGURED until GOOGLE_CLIENT_ID/SECRET are set. Tokens, codes and states are
  * never logged or returned.
@@ -80,7 +80,7 @@ export interface GoogleStatus {
 const SETTINGS_PATH = '/settings';
 
 /** source_health / source_cursors name of each Google product's source (adapters/gmail, adapters/gphotos). */
-export const PRODUCT_SOURCE: Readonly<Record<GoogleProduct, string>> = { calendar: GCAL_SOURCE, gmail: 'gmail', photos: 'gphotos' };
+export const PRODUCT_SOURCE: Readonly<Record<GoogleProduct, string>> = { calendar: GCAL_SOURCE, gmail: 'gmail', photos: 'gphotos', gmail_send: 'gmail_send' };
 
 export function calendarViews(db: DB): GoogleCalendarView[] {
   const rows = db
@@ -263,8 +263,13 @@ export function createGoogleRouter({ db, log, config }: RouteDeps, o: GoogleRout
       log.warn('gcal.oauth_no_refresh_token', { route: product });
       return back('error');
     }
+    if (spec.addressSecret && !result.email) {
+      log.warn('gcal.oauth_no_address', { route: product });
+      return back('scope');
+    }
     const at = now();
     setSecret(db, secretsKey, spec.secret, result.refreshToken, at);
+    if (spec.addressSecret && result.email) setSecret(db, secretsKey, spec.addressSecret, result.email, at);
     recordSourceHealth(db, PRODUCT_SOURCE[product], at, 'unknown', { error: null, newestDataAt: null, details: { connected: true } });
     log.info('gcal.connected', { route: product });
     return back('connected');
@@ -278,7 +283,7 @@ export function createGoogleRouter({ db, log, config }: RouteDeps, o: GoogleRout
 
   r.post('/google/disconnect', async (req, res) => {
     const body = DisconnectBody.parse(req.body ?? {});
-    // Revokes the shared grant only when Gmail and Photos hold no token either (routes/googleProducts.ts); sync
+    // Revokes the shared grant only when no other product holds a token either (routes/googleProducts.ts); sync
     // tokens belong to the old grant's view of the calendars, so a reconnect starts with full listings.
     const out = await disconnectGoogleProduct(db, 'calendar', { flow, secretsKey, log, now: now() });
     const deleted = body.deleteData ? deleteCalendarData(db) : null;
