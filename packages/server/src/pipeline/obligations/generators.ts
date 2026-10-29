@@ -9,11 +9,13 @@
  *                   owner = them ("waiting on") only for priority people or T ≥ 60, at × 0.5. Expires when it
  *                   would lapse. A commitment that lapsed in the last 7 days is asked about once ("did this
  *                   happen?", subject `lapsed:<id>`, base 0.4) unless that question was already delivered.
+ *                   A plan or event whose time has passed is never brought up again (no "did it happen?")
+ *                   unless it carries a documented intent to follow up (followUpIntent).
  * Persons are canonical and visible; sensitive commitments are flagged (never shown in iMessage or push).
  */
 import type { DB } from '../../db/connection';
 import type { Candidate, CandidateGenerator, GeneratorContext, WildcardSource } from '../suggestions/types';
-import { commitmentPeople, dueMoment, lapseMoment, madeAt, type CommitmentRow } from './commitments';
+import { commitmentPeople, dueMoment, eventPast, followUpIntent, lapseMoment, madeAt, type CommitmentRow } from './commitments';
 import { COMMITMENT, DAY, HOUR, REPLY_DEBT } from './constants';
 import { recentlyLapsed, waitingOnSurfaces } from './loops';
 import { debtPriority, type DebtRow } from './replyDebt';
@@ -106,6 +108,7 @@ export function commitmentCandidates(db: DB, now: number): Candidate[] {
     const due = dueMoment(k);
     const isDue = k.status === 'due' || now >= due;
     if (!isDue && due - now > COMMITMENT.upcomingMs) continue;
+    if (!followUpIntent(k) && eventPast(k, now)) continue;
     const them = k.owner === 'them';
     if (them && !waitingOnSurfaces(k.tie_strength, k.is_priority === 1)) continue;
     const people = commitmentPeople(db, k).filter((p) => isVisible(db, p));
@@ -134,6 +137,7 @@ export function commitmentCandidates(db: DB, now: number): Candidate[] {
   // "Did this happen?" — once per lapsed commitment.
   const asked = db.prepare(`SELECT 1 FROM suggestions WHERE dedupe_key = ? AND delivered_at IS NOT NULL LIMIT 1`).pluck();
   for (const k of recentlyLapsed(db, now)) {
+    if (!followUpIntent(k)) continue;
     const pid = (db.prepare('SELECT pv.id FROM person_canon pc JOIN person_visible pv ON pv.id = pc.canonical_id WHERE pc.person_id = ?').pluck().get(k.person_id) as
       | string
       | undefined) ?? null;

@@ -81,6 +81,32 @@ export function dueMoment(c: Pick<CommitmentRow, 'due_end' | 'due_at' | 'due_sta
 /** When it lapses without a signal (30 days past the due moment). */
 export const lapseMoment = (c: Parameters<typeof dueMoment>[0]): number => dueMoment(c) + COMMITMENT.lapseMs;
 
+/** Kinds that are a follow-up someone said they'd do: send, call, intro, reply later, a favor. */
+const FOLLOW_UP_KINDS = new Set(['send', 'call', 'intro', 'reply_later', 'favor']);
+/** An "other" commitment worded as a follow-up ("text her the address", "pay back the tickets"). */
+const FOLLOW_UP_WHAT =
+  /^(?:send|call|text|email|e-mail|introduce|intro|pay|return|share|follow up|reply|write|ask|tell|let \S+ know|check in|lend|mail|post|schedule|invite|connect|book|order|buy|get back)\b/i;
+
+/**
+ * A documented intent to follow up: a reminder the owner set by text, or a promise to do something (send, call,
+ * intro, reply later, a favor, or an "other" worded that way). A plan to meet or a thing tied to an event
+ * ("Halloween party at mine", "bring tomatoes") is not: once its time has passed there is nothing left to do.
+ */
+export function followUpIntent(k: Pick<CommitmentRow, 'kind' | 'what' | 'origin'>): boolean {
+  return k.origin === 'command' || FOLLOW_UP_KINDS.has(k.kind) || (k.kind === 'other' && FOLLOW_UP_WHAT.test(k.what.trim()));
+}
+
+/**
+ * The plan or event a commitment is about is behind us: its date has passed, or (undated, and not a plan to meet
+ * "sometime") it fell due weeks after it was made.
+ */
+export function eventPast(k: Parameters<typeof dueMoment>[0] & Pick<CommitmentRow, 'kind'>, now: number): boolean {
+  // dueMoment's own notion of a date.
+  const dated = k.due_precision !== 'vague' && (k.due_end ?? k.due_at ?? k.due_start) !== null;
+  if (dated) return now > dueMoment(k);
+  return k.kind !== 'meet' && k.kind !== 'plan' && now >= dueMoment(k);
+}
+
 export const otherIds = (c: Pick<CommitmentRow, 'other_person_ids'>): string[] => {
   try {
     const v = JSON.parse(c.other_person_ids) as unknown;

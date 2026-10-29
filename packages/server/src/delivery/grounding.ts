@@ -7,7 +7,9 @@
  *     whitelist (weekday/month names and common sentence words) — so invented names, places and dates fail;
  *   - no URLs, emails, phone numbers, @handles, money amounts, or quotes longer than 6 words in headline/body;
  *   - no ambiguous first name in headline/body (the owner's own, or one shared with someone the brief names by full
- *     last name): those people go by token, which becomes the brief's unambiguous name locally.
+ *     last name): those people go by token, which becomes the brief's unambiguous name locally;
+ *   - an item about people names one of them (token or first name) in the headline or body: never "Reply to
+ *     someone" / "They sent you a message".
  * Pure; exported for tests.
  */
 
@@ -26,6 +28,8 @@ export interface GroundingPacket {
   refIds: ReadonlySet<string>;
   /** First names that don't pin down one person in this brief (text.ts BriefNames.ambiguousFirstNames). */
   ambiguousNames?: ReadonlySet<string>;
+  /** Tokens and first names this item's people go by in the packet; when given, headline or body must use one. */
+  personNames?: ReadonlySet<string>;
 }
 
 export const LIMITS = { headline: 90, body: 240, openers: 2, opener: 160, quoteWords: 6 } as const;
@@ -159,5 +163,6 @@ export function groundingIssues(out: ComposerItemOut, packet: GroundingPacket, w
     const bad = ungroundedTokens(s, vocab, whitelist);
     if (bad.length) issues.push(`${field}: ungrounded ${bad.length === 1 ? 'token' : 'tokens'} (${bad.length})`);
   }
+  if (packet.personNames?.size && !usesName(headline, packet.personNames) && !usesName(out.body ?? '', packet.personNames)) issues.push('copy: names nobody');
   return issues;
 }

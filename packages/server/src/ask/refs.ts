@@ -7,6 +7,7 @@
  * phone number the scanner would block (10–11 digits). Only ids a tool returned in the session are valid; every
  * other id is stripped server-side and counted as a violation.
  */
+import { secondPerson } from '../llm/secondPerson';
 
 export const b36 = (n: number): string => n.toString(36);
 
@@ -128,9 +129,10 @@ export function detokenize(text: string, personName: (token: string) => string |
   return parts
     .map((part, i) => {
       if (i % 2 === 1) return part;
-      return scrubPlaceholders(part)
+      const out = scrubPlaceholders(part)
         .replace(TOKEN_RE, (tok: string) => personName(tok) ?? tok)
         .replace(/\bME\b/g, me);
+      return me === 'you' ? secondPerson(out) : out;
     })
     .join('');
 }

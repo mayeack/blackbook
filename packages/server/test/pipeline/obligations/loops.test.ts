@@ -209,6 +209,54 @@ describe('generators', () => {
   });
 });
 
+describe('past plans and events', () => {
+  /** Sam (T 80) with: a party last week, a reminder he set about it, an undated "bring" made 25 days ago, a vague coffee plan, a dinner tonight. */
+  function pastScene() {
+    const w = world();
+    const sam = w.person('Sam', { tie: 80 });
+    const dm = w.dm(sam.identity);
+    const plan = (what: string, o: Partial<ExtractedCommitmentInput> & { at?: number } = {}) =>
+      promise(w, sam.id, dm, { kind: 'plan', owner: 'BOTH', what, text: what, at: ago(20 * DAY), ...o });
+    const party = plan('Halloween party at your place', { due: { kind: 'date', start: '2026-10-07', end: null } });
+    const reminder = plan('Follow up about the party photos', { due: { kind: 'date', start: '2026-10-07', end: null } });
+    w.db.prepare(`UPDATE commitments SET origin = 'command' WHERE id = ?`).run(reminder);
+    const tomatoes = promise(w, sam.id, dm, { kind: 'other', owner: 'ME', what: 'bring tomatoes', text: 'bring tomatoes?', at: ago(25 * DAY), due: { kind: 'none', start: null, end: null } });
+    const coffee = promise(w, sam.id, dm, { kind: 'meet', owner: 'BOTH', what: 'Coffee sometime', text: 'coffee sometime?', at: ago(25 * DAY), due: { kind: 'vague', start: null, end: null } });
+    const dinner = plan('Dinner at the noodle place', { due: { kind: 'date', start: '2026-10-14', end: null }, at: ago(3 * DAY) });
+    runCommitments(w.db, { now: NOW });
+    return { w, sam, party, reminder, tomatoes, coffee, dinner, mine: promise(w, sam.id, dm) };
+  }
+
+  it('no reminder about a plan or event whose time has passed, unless there was intent to follow up', () => {
+    const { w, party, reminder, tomatoes, coffee, dinner, mine } = pastScene();
+    const keys = commitmentCandidates(w.db, NOW).map((c) => c.subjectKey);
+    // The overdue promise to send photos and his own reminder stay; so does the vague coffee plan (never happened)
+    // and tonight's dinner (still ahead).
+    expect(keys.sort()).toEqual([reminder, coffee, dinner, mine].sort());
+    expect(keys).not.toContain(party);
+    expect(keys).not.toContain(tomatoes);
+  });
+
+  it('a past plan is never asked "did this happen?"; a lapsed promise still is', () => {
+    const { w, party, mine } = pastScene();
+    // The party (Oct 7) and the photos (Oct 13) both lapsed within the last week.
+    const later = Date.UTC(2026, 9, 13) + 31 * DAY;
+    runCommitments(w.db, { now: later });
+    const asks = commitmentCandidates(w.db, later).filter((x) => x.payload.lapsed).map((x) => x.subjectKey);
+    expect(asks).toContain(`lapsed:${mine}`);
+    expect(asks).not.toContain(`lapsed:${party}`);
+  });
+
+  it('Today’s strip and pre-event briefs leave past plans out; the person page keeps them to close', () => {
+    const { w, sam } = pastScene();
+    const titles = (loops: { title: string }[]) => loops.map((l) => l.title);
+    expect(titles(openLoops(w.db, { now: NOW }).commitments)).not.toContain('Halloween party at your place');
+    expect(titles(todayOpenLoops(w.db, { now: NOW, previewLimit: 10 }).preview)).not.toContain('Halloween party at your place');
+    expect(titles(openLoopsByPerson(w.db, [sam.id], { now: NOW }).get(sam.id)!)).not.toContain('Halloween party at your place');
+    expect(titles(personOpenLoops(w.db, sam.id, { now: NOW }).commitments)).toContain('Halloween party at your place');
+  });
+});
+
 describe('jobs', () => {
   it('reply-debt and commitments hourly, obligations at 07:00; a run reports non-zero stats; an aborted run is partial', async () => {
     const jobs = obligationsJobs({});

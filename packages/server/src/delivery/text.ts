@@ -150,13 +150,15 @@ export interface NameParts {
 }
 
 const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u;
-/** Emoji and other symbols people put in names ("Zed ⚡️", "Sam 🎸"), with their joiners and variation selectors. */
-const NAME_SYMBOLS = /[\p{Extended_Pictographic}\p{S}‍︎️]/gu;
+/** Emoji and other symbols people put in names ("Zed ⚡️", "Sam 🎸"), with their joiners, skin tones, variation selectors and keycaps. */
+const NAME_SYMBOLS = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{S}\u200d\ufe0e\ufe0f\u20e3]/gu;
+/** A note in brackets after a name ("Sam (climbing)"). */
+const BRACKET_NOTE = /[([{][^)\]}]*[)\]}]/g;
 
 /** The first name (one word) and last name a short name is made from; null when unusable. */
 function nameWords(p: NameParts): { first: string; last: string | null } | null {
   const clean = (s: string | null | undefined) => {
-    const t = s?.normalize('NFKC').replace(NAME_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
+    const t = s?.normalize('NFKC').replace(BRACKET_NOTE, ' ').replace(NAME_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
     return t && NAME_OK.test(t) ? t : null;
   };
   let first = clean(p.firstName) ?? clean(p.nickname);
@@ -184,8 +186,24 @@ export function longName(p: NameParts): string | null {
   return n.last && /\p{L}/u.test(n.last) ? `${n.first} ${truncate(n.last, 24)}` : n.first;
 }
 
+const IDENTIFIER = new RegExp(`${PHONE_LIKE.source}|${EMAIL_LIKE.source}|${URL_LIKE.source}|${LONG_DIGITS.source}`, 'i');
+
+/**
+ * What the brief calls someone with no usable name (a number the owner never saved): their display name, which the
+ * resolver keeps as the masked handle ("(310) •••-••12"), emoji removed. Null when nothing is left or it would
+ * show a whole phone number, email or link.
+ */
+export function nameLabel(p: NameParts): string | null {
+  const t = p.displayName?.normalize('NFKC').replace(NAME_SYMBOLS, ' ').replace(/\s+/g, ' ').trim() ?? '';
+  if (!/[\p{L}\p{N}]/u.test(t) || IDENTIFIER.test(t)) return null;
+  return truncate(t, 24);
+}
+
 export interface BriefNames {
-  /** The name the brief uses: shortName, or longName when the short one is ambiguous (see briefNames). */
+  /**
+   * The name the brief uses: shortName, or longName when the short one is ambiguous (see briefNames); nameLabel for
+   * someone with no usable name (firstNameOnly is null for them).
+   */
   of(p: NameParts & { id: string }): string | null;
   /**
    * First names that point at nobody in particular here: the owner's own, and those of the people named by their
@@ -205,7 +223,7 @@ export function briefNames(people: readonly (NameParts & { id: string })[], owne
     const first = nameWords(p)?.first;
     if (first) firsts.add(first);
   }
-  return { of: names.of, ambiguousFirstNames: firsts };
+  return { of: (p) => names.of(p) ?? nameLabel(p), ambiguousFirstNames: firsts };
 }
 
 /** First name only (push bodies with names turned on). */

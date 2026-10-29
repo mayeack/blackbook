@@ -36,6 +36,7 @@ import {
   type TokenMap,
   type TokenTarget,
 } from './types';
+import { secondPerson } from './secondPerson';
 
 // ---------------------------------------------------------------------------------------------- raw identifiers
 
@@ -583,10 +584,12 @@ class SqliteEgress implements Egress {
 
   detokenize(text: string, map: TokenMap): string {
     const cache = new Map<string, string>();
-    return text.replace(TOKEN_IN_TEXT, (m: string, token: string) => {
-      const target = map[token] ?? this.resolveToken(token);
-      return !target || target.kind === 'mention' ? m : this.displayOf(target, token, cache);
-    });
+    return secondPerson(
+      text.replace(TOKEN_IN_TEXT, (m: string, token: string) => {
+        const target = map[token] ?? this.resolveToken(token);
+        return !target || target.kind === 'mention' ? m : this.displayOf(target, token, cache);
+      }),
+    );
   }
 }
 

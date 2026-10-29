@@ -1624,3 +1624,32 @@ emoji in it ("Zed ⚡️") reads as "Zed", not "someone". Sensitive items still 
 stored; a person's line is dropped (not the item) if it would break an outbound rule; an attendee with nothing known
 gets no line.
 **Platforms**: server + web. Not deployed; the real 08:00 text needs the owner's phone to confirm.
+
+## 2026-10-25 — Briefs always name the person; no reminders about past plans
+
+What changed: a brief item that refers to someone always names them. A name decorated with emoji or a note in
+brackets ("Juno ⚡️", "Pia Rook (climbing)") is read as the name; someone known only by a number the owner never saved
+goes by the app's masked label ("(555) •••-••01"), never "someone". LLM copy that names none of the item's people falls
+back to the template. A plan or event whose time has passed (a dated meet/plan, or an undated "bring tomatoes" weeks
+later) is no longer brought up, and never asked "did it happen?", unless there was a documented intent to follow up: a
+reminder the owner set by text, or a promise to send / call / intro / reply / do a favor. The owner's token now reads
+"your place" / "at yours" / "you are", not "you's place" / "you is".
+
+### Scenario A — Automated
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2005 tests pass (with #84 merged).
+2. `test/delivery/names.test.ts` "people without a plain name" (template + LLM copy, the opener that would greet a
+   number is dropped, the "names nobody" grounding rule); `test/pipeline/obligations/loops.test.ts` "past plans and
+   events" (generator, "did this happen?", Today strip vs person page); `test/llm/secondPerson.test.ts`,
+   `test/llm/egress.test.ts`, `test/delivery/template.test.ts` ("you's" in old stored rows).
+
+### Scenario B — Brief (owner, after deploy)
+1. Look at the next morning brief. **Expected**: no item says "someone" or starts "They …" in place of a name; a
+   reply-to item for an Instagram contact whose name has an emoji shows the name without it.
+2. **Expected**: no "Your plan with …: Halloween party … Did it happen?" style item for a party already past; promises to
+   send / call / intro still show when overdue; a dinner later today still shows as coming up.
+3. yeackbot.com/today → open loops strip: the past party is gone; the person's page still lists it (to mark done).
+
+**Edge cases**: a vague "coffee sometime" plan still nudges after 3 weeks (it never happened, so it isn't past); a
+reminder set by text (`yb remind me to … `) about an event still fires after the event; people whose display name is
+a full phone number or email get no label (the old fallback).
+**Platforms**: server only. Not deployed; not checked against a live brief.
