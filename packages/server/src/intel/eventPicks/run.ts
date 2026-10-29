@@ -20,8 +20,8 @@
  *  10. send         events.channel 'email' (default): one email to his own Gmail (email.ts, delivery/email.ts;
  *                   email_state 'sending' is written first, so a crash mid-call never sends twice). Not connected,
  *                   or Gmail refused it → texts, with a line saying why. A failure worth retrying waits for the next
- *                   tick until LAST_EMAIL_TRY. 'text': one text per pick (compose.ts) to his own handle, purpose
- *                   'events', stable client refs, so a retry never double-sends. Delivery not configured, or quiet
+ *                   tick until LAST_EMAIL_TRY. 'text': one text with every pick (compose.ts) to his own handle,
+ *                   purpose 'events', a stable client ref, so a retry never double-sends. Delivery not configured, or quiet
  *                   hours → the run stays 'ready' (the web shows it) and a later tick sends it the same day.
  * A failed web discovery (API error, budget, unreadable answer) is retried every RETRY_AFTER_MS, at most MAX_ATTEMPTS
  * times a week; the last attempt goes on with the newsletters and listings alone. Costs: two web_search calls
@@ -41,7 +41,7 @@ import { METROS } from '../places';
 import { homePlace } from '../trips';
 import { venueKey as venueKeyOf } from '../../pipeline/occasions/text';
 import { features } from '../similarity';
-import { picksTexts, type PickText } from './compose';
+import { picksText, type PickText } from './compose';
 import { bestLink, eventKey, findTicketPages, searchCandidates, type CheckedEvent, type SearchSetup, type TicketQuery } from './discover';
 import { HOW_LABEL, picksEmail, type EmailPick, type LastWeek } from './email';
 import type { CheckedLink } from './links';
@@ -63,7 +63,7 @@ export const LAST_EMAIL_TRY = '20:30';
 /** Picks sent at or after this local time cover the next seven nights instead of starting that night. */
 export const EVENING_SEND = '16:00';
 
-/** Ends the intro text when the picks were meant to go by email. */
+/** Ends the text's first line when the picks were meant to go by email. */
 export const EMAIL_NOTES = {
   notConnected: 'To get these by email, connect “Email me” in Settings → Email & photos.',
   failed: 'The email didn’t go through, so here they are by text. Check “Email me” in Settings → Email & photos.',
@@ -495,8 +495,8 @@ async function emailRun(
 }
 
 /**
- * Sends a 'ready' run: the email (events.channel 'email' and connected), else the texts (intro + one per pick).
- * Idempotent: the email's state is written before the call; every text has a stable client ref.
+ * Sends a 'ready' run: the email (events.channel 'email' and connected), else one text with every pick.
+ * Idempotent: the email's state is written before the call; the text has a stable client ref.
  */
 export async function sendRun(db: DB, deps: EventPicksDeps, run: store.RunRow, o: RunOptions): Promise<RunResult> {
   const picks = store.picksOfRun(db, run.id, { pickedOnly: true });
@@ -522,7 +522,7 @@ export async function sendRun(db: DB, deps: EventPicksDeps, run: store.RunRow, o
     note = e.note;
   }
   if (!deps.outbound.configured) return { status: 'ready', ...base, sendReason: 'delivery_not_configured' };
-  const texts = picksTexts(
+  const text = picksText(
     picks.map(
       (p): PickText => ({
         id: p.id,
@@ -540,24 +540,20 @@ export async function sendRun(db: DB, deps: EventPicksDeps, run: store.RunRow, o
     jsonList(run.free_nights),
     note,
   );
-  const outboundIds: string[] = [];
-  const pickOutbound = new Map<string, string>();
-  for (const [i, text] of texts.entries()) {
-    const r = await deps.outbound.sendToSelf(text, 'events', stableUuid(`events:${run.id}:${i}`));
-    if (r.status === 'blocked' || r.status === 'disabled' || r.status === 'failed') {
-      deps.log?.warn('event_picks.send_failed', { error_code: r.reason ?? r.status, counts: { part: i } });
-      // Nothing more goes out of order; the next tick resumes (sent parts come back 'duplicate').
-      if (outboundIds.length) store.markSent(db, run.id, { now: o.now, outboundIds, pickOutbound });
-      db.prepare(`UPDATE event_pick_runs SET status = 'ready', updated_at = ? WHERE id = ?`).run(o.now, run.id);
-      return { status: 'ready', ...base, sendReason: r.reason ?? r.status };
-    }
-    if (r.outboundId) {
-      outboundIds.push(r.outboundId);
-      if (i > 0) pickOutbound.set(picks[i - 1]!.id, r.outboundId);
-    }
+  if (!text) return { status: 'ready', ...base, sendReason: 'no_picks' };
+  // Part 0's client ref (the intro's when the picks went out one text each), so a retry never double-sends.
+  const r = await deps.outbound.sendToSelf(text, 'events', stableUuid(`events:${run.id}:0`));
+  if (r.status === 'blocked' || r.status === 'disabled' || r.status === 'failed') {
+    deps.log?.warn('event_picks.send_failed', { error_code: r.reason ?? r.status });
+    // The run stays 'ready'; the next tick tries again the same day.
+    db.prepare(`UPDATE event_pick_runs SET status = 'ready', updated_at = ? WHERE id = ?`).run(o.now, run.id);
+    return { status: 'ready', ...base, sendReason: r.reason ?? r.status };
   }
+  const outboundIds = r.outboundId ? [r.outboundId] : [];
+  // Every pick is in that one text.
+  const pickOutbound = new Map(r.outboundId ? picks.map((p) => [p.id, r.outboundId!] as const) : []);
   store.markSent(db, run.id, { now: o.now, outboundIds, pickOutbound, channel: 'text' });
-  deps.log?.info('event_picks.sent', { counts: { texts: texts.length, picks: picks.length } });
+  deps.log?.info('event_picks.sent', { counts: { texts: 1, picks: picks.length } });
   return { status: 'sent', ...base, channel: 'text' };
 }
 

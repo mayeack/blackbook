@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventPicksResponse } from '@yb/shared';
 import { createApp } from '../../src/http/app';
 import { checkOutboundText } from '../../src/delivery/types';
-import { picksTexts, pickText } from '../../src/intel/eventPicks/compose';
+import { pickLines, picksText } from '../../src/intel/eventPicks/compose';
 import { candidatesPrompt, eventKey, jsonArrayIn, parseFound, parseTicketPages } from '../../src/intel/eventPicks/discover';
 import { checkLink, linkKind, normalizeUrl, resultIndex } from '../../src/intel/eventPicks/links';
 import { nightsOf } from '../../src/intel/eventPicks/nights';
@@ -334,8 +334,8 @@ describe('which picks he went to', () => {
 
 // ---------------------------------------------------------------------------------------------- texts
 
-describe('the texts', () => {
-  const pick = (o: Partial<Parameters<typeof pickText>[0]> = {}) => ({
+describe('the text', () => {
+  const pick = (o: Partial<Parameters<typeof pickLines>[0]> = {}) => ({
     id: 'Abc123xyz9',
     ordinal: 1,
     title: 'Sample Band',
@@ -348,20 +348,34 @@ describe('the texts', () => {
     ...o,
   });
 
-  it('one text per pick, marker first, only yeackbot.com links, closing line on the last', () => {
-    const texts = picksTexts([pick(), pick({ id: 'Def456uvw8', ordinal: 2, wildcard: true, title: 'Orcas vs Herons', startTime: null, why: null })], ['2026-10-15', '2026-10-16']);
-    expect(texts).toHaveLength(3);
-    expect(texts[0]).toBe('🅨 Event picks for this week: 2 ideas for your free nights (Thu, Fri).');
-    expect(texts[1]).toBe('🅨 1. Fri Oct 16 · Sample Band\nExample Hall, 10pm. Indie like the shows you go to.\nTickets: yeackbot.com/go/Abc123xyz9');
-    expect(texts[2]).toContain('🎲 2. Something different: Fri Oct 16 · Orcas vs Herons');
-    expect(texts[2]).toContain("Get tickets to any of these and I'll notice. Not your thing? yeackbot.com/picks");
-    for (const t of texts) expect(checkOutboundText(t)).toEqual([]);
+  it('the whole week in one text like the brief: marker first, a blank line between picks, only yeackbot.com links', () => {
+    const text = picksText([pick(), pick({ id: 'Def456uvw8', ordinal: 2, wildcard: true, title: 'Orcas vs Herons', startTime: null, why: null })], ['2026-10-15', '2026-10-16']);
+    expect(text).toBe(
+      [
+        '🅨 Event picks for this week: 2 ideas for your free nights (Thu, Fri).',
+        '',
+        '1. Fri Oct 16 · Sample Band',
+        'Example Hall, 10pm. Indie like the shows you go to.',
+        'Tickets: yeackbot.com/go/Abc123xyz9',
+        '',
+        '🎲 2. Something different: Fri Oct 16 · Orcas vs Herons',
+        'Example Hall.',
+        'Tickets: yeackbot.com/go/Def456uvw8',
+        '',
+        "Get tickets to any of these and I'll notice. Not your thing? yeackbot.com/picks",
+      ].join('\n'),
+    );
+    expect(checkOutboundText(text!)).toEqual([]);
+    expect(picksText([], ['2026-10-15'])).toBeNull();
+    expect(picksText([pick()], ['2026-10-15'], 'Email isn’t connected, so here it is by text.')).toMatch(/^🅨 Event picks for this week: 1 idea for your free nights \(Thu\)\. Email isn’t connected/);
   });
 
-  it('strips URLs, phones, emails and handles out of web text', () => {
-    const t = pickText(pick({ title: 'Big Night https://evil.example.net/x call 213-555-0142', venue: 'Hall @promoter', why: 'mail info@example.com now' }), false);
-    expect(t).not.toMatch(/evil|555|@|info/);
-    expect(checkOutboundText(t)).toEqual([]);
+  it('strips URLs, phones, emails and handles out of web text; a pick that still fails keeps only its link', () => {
+    const lines = pickLines(pick({ title: 'Big Night https://evil.example.net/x call 213-555-0142', venue: 'Hall @promoter', why: 'mail info@example.com now' }));
+    expect(lines.join('\n')).not.toMatch(/evil|555|@|info/);
+    const text = picksText([pick({ title: 'Big Night https://evil.example.net/x', why: 'mail info@example.com' }), pick({ id: 'Def456uvw8', ordinal: 2 })], ['2026-10-16'])!;
+    expect(checkOutboundText(text)).toEqual([]);
+    expect(text).toContain('Tickets: yeackbot.com/go/Def456uvw8');
   });
 });
 
@@ -422,17 +436,18 @@ describe('a weekly run', () => {
     const sent = picks.filter((p) => p.ordinal !== null);
     expect(sent.map((p) => p.title).sort()).toEqual(['Annex All Night', 'Open Mic', 'Sample Band']);
     expect(sent.map((p) => p.local_date)).toEqual(['2026-10-15', '2026-10-16', '2026-10-17']); // ordinals in date order
-    const texts = d.outbound.sent.map((s) => s.text);
-    expect(texts).toHaveLength(4);
-    expect(d.outbound.sent.every((s) => s.purpose === 'events')).toBe(true);
-    expect(texts[1]).toContain(`yeackbot.com/go/${sent[0]!.id}`);
+    // One text with every pick (like the brief).
+    expect(d.outbound.sent).toHaveLength(1);
+    expect(d.outbound.sent[0]!.purpose).toBe('events');
+    for (const p of sent) expect(d.outbound.sent[0]!.text).toContain(`yeackbot.com/go/${p.id}`);
+    expect(new Set(store.picksOfRun(w.db, r.runId, { pickedOnly: true }).map((p) => p.outbound_id))).toEqual(new Set([d.outbound.sent[0]!.outboundId]));
     const run = store.runForWeek(w.db, TODAY)!;
     expect(run).toMatchObject({ status: 'sent', searches: 6, found: 8 });
     expect(run.cost_usd).toBeGreaterThan(0.06); // 6 searches at $0.01 plus tokens
     expect(JSON.parse(run.free_nights)).not.toContain('2026-10-14');
     // Same week again: nothing more is searched or sent.
     expect(await runEventPicks(w.db, d, { now: NOW + HOUR, send: true })).toEqual({ status: 'skipped', reason: 'already_sent' });
-    expect(d.outbound.sent).toHaveLength(4);
+    expect(d.outbound.sent).toHaveLength(1);
   });
 
   it('only on the picks day and time; disabled means never', () => {

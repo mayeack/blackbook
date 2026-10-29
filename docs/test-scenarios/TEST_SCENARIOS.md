@@ -1644,10 +1644,11 @@ ones you go to. Design: `docs/design/event-picks.md`.
 
 ### Scenario B — The weekly text
 1. Settings → Agent → Event picks: leave it on. Set the day to today and the time to a few minutes from now.
-2. **Expected**, within 10 minutes of that time:
-   - an intro text, "Event picks for this week: N ideas for your free nights (Thu, …)";
-   - then one text per pick, "1. Thu Oct 29 · <event>", then "<venue>, 10pm. <why>", then
-     "Tickets: yeackbot.com/go/…".
+2. **Expected**, within 10 minutes of that time, ONE text (like the brief) with:
+   - the first line "Event picks for this week: N ideas for your free nights (Thu, …)";
+   - every pick, a blank line between them: "1. Thu Oct 29 · <event>", then "<venue>, 10pm. <why>", then
+     "Tickets: yeackbot.com/go/…";
+   - the closing line "Get tickets to any of these and I'll notice. Not your thing? yeackbot.com/picks".
 3. Tap a Tickets link. **Expected**: after Cloudflare Access (if signed out), the event's own ticket page opens
    (DICE, Ticketmaster, AXS, a venue …), not a list of events.
 4. **Expected**: no event lands on a night you have a plan after 6 pm, a trip, held tickets or a Partiful RSVP.

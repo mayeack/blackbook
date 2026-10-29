@@ -35,8 +35,8 @@ migration 027.
 7. **Score** (§5), then **ticket pages**: one targeted search per top candidate that has no event-specific page yet
    (the rest of the search budget). No search is spent on a busy night or a duplicate.
 8. **Choose** ≤ events.max_picks, then the **Recurring Events** listings (§9), numbered after the picks.
-9. **Send** (§7): one email to his own Gmail (events.channel 'email', the default), else an intro text plus one
-   text per pick, purpose `events`, stable client refs. If nothing can go out yet (Gmail busy, quiet hours, the
+9. **Send** (§7): one email to his own Gmail (events.channel 'email', the default), else one text with every pick
+   (like the brief since #84), purpose `events`, a stable client ref. If nothing can go out yet (Gmail busy, quiet hours, the
    collector down), the run stays `ready` (the web shows it) and a later tick sends it the same day.
 
 A failed web search (API error, budget cap, unreadable answer) is retried every 30 min, at most 3 times a week; the
@@ -132,8 +132,10 @@ yeackbot knew, what he tapped, what he waved off.
     20:30, then texts. Not connected, or refused → texts at once, with a line saying how to get it by email.
   - **Settings → Email & photos → Email me**: Connect (consent), the address, the last email, "Send a test email",
     Disconnect (the Google grant is revoked only when nothing else is connected).
-- **The texts.** One text per pick, written like the brief:
-  "1. Thu Oct 29 · <title>" / "<venue>, 10pm. <why, in the second person>." / "Tickets: yeackbot.com/go/<id>".
+- **The text.** One text for the whole week, like the brief since #84 (owner, 2026-10-25: everything in the text):
+  the count and the free nights, then each pick as "1. Thu Oct 29 · <title>" / "<venue>, 10pm. <why, in the second
+  person>." / "Tickets: yeackbot.com/go/<id>", a blank line between picks, and the closing line. A pick whose web
+  text still fails the outbound rules keeps only "N. <day>: details at yeackbot.com/go/<id>".
   Texts may only carry yeackbot.com links, so `/go/<id>` (behind Cloudflare Access) counts the tap and redirects
   (302) to the stored, re-normalized ticket page. The service worker leaves `/go/` to the browser. Web text passes
   `safeFragment` (no URLs, phones, emails, handles or money) and `checkOutboundText`.
