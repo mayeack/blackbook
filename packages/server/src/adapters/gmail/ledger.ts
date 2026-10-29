@@ -45,7 +45,7 @@
  */
 import { emailMatchKey, localDate, normalizeNamePart, uuidv7 } from '@yb/shared';
 import type { DB } from '../../db/connection';
-import { fullNameKey } from '../../identity/partifulLink';
+import { fullNameKey } from '../../identity/uniqueNameLink';
 import { venueKey as occasionVenueKey } from '../../pipeline/occasions/text';
 import type { TicketRefs } from './clean';
 import type { ParsedTicket } from './parse';
