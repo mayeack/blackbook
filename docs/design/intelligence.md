@@ -454,6 +454,12 @@ Original assumptions: 28 tokens per compact message, 75% kept after triage, abou
   3. for `send`: an outbound message from me with an attachment or link to the counterpart after msg_ts → "likely done" (auto-closed, undoable);
   4. a `done N` command.
 - `owner=THEM` items are "waiting on" items. They surface only for priority people or T ≥60, at rank weight ×0.5.
+- **Stakes** (owner, 2026-10-25: "Focus on important things. Bringing tomatoes isn't important"): the extraction
+  labels each commitment `high` (money, housing, work, legal, travel or ticket bookings, intros, something someone is
+  counting on), `low` (small logistics around a plan: bring food or drinks, what to wear, when to arrive, what to
+  order, an errand) or `normal`; a repeat only raises it. Rows from before the label are guessed from the
+  description (`pipeline/obligations/stakes.ts`). Low-stakes promises stay on the person page, in event briefs and
+  in Ask, and are listed last on Today, but never take a digest slot, Today's preview or a "did this happen?" ask.
 
 ### Candidate generators → ranker (nightly)
 Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[], expires_at}`.
@@ -462,7 +468,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 |---|---|---|---|
 | `reply_debt` | normalized priority | 1.00 | 2 days; ≤3 showings |
 | `pre_event_brief` | 0.8 | 1.00 | once per event |
-| `commitment_due` | 0.6 + 0.4·[owner ME] | 0.95 | 3 days |
+| `commitment_due` | (0.6 + 0.4·[owner ME]) × stakes (high 1, normal 0.8, low: never) | 0.95 | 3 days |
 | `event_followup` | 0.7 | 0.85 | once per event |
 | `party_invite` | 0.8 if ≤5 days out, else 0.7 | 0.80 | once per hosted event |
 | `event_invite` | 0.75 with a screenshot person, else 0.6 | 0.75 | once per ticketed event (`tkt:<id>`) |

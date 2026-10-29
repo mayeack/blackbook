@@ -5,10 +5,11 @@
  *   reply_debt      one per person (their most pressing open debt); base = normalized priority
  *                   urg · (0.3 + 0.7·T/100 + 0.3·priority) · age_w, clamped to [0, 1]; expires 30 days after it
  *                   was asked.
- *   commitment_due  due commitments and open ones due within 24 h; base 0.6 + 0.4·[owner me/both];
+ *   commitment_due  due commitments and open ones due within 24 h; base (0.6 + 0.4·[owner me/both]) × stakes
+ *                   (high 1, normal 0.8; a low-stakes promise like "bring tomatoes" is never a candidate);
  *                   owner = them ("waiting on") only for priority people or T ≥ 60, at × 0.5. Expires when it
  *                   would lapse. A commitment that lapsed in the last 7 days is asked about once ("did this
- *                   happen?", subject `lapsed:<id>`, base 0.4) unless that question was already delivered.
+ *                   happen?", subject `lapsed:<id>`, base 0.4 × stakes) unless that question was already delivered.
  *                   A plan or event whose time has passed is never brought up again (no "did it happen?")
  *                   unless it carries a documented intent to follow up (followUpIntent).
  * Persons are canonical and visible; sensitive commitments are flagged (never shown in iMessage or push).
@@ -20,6 +21,7 @@ import { COMMITMENT, DAY, HOUR, REPLY_DEBT } from './constants';
 import { recentlyLapsed, waitingOnSurfaces } from './loops';
 import { debtPriority, type DebtRow } from './replyDebt';
 import { isVisible } from './signals';
+import { stakesOf } from './stakes';
 
 const clamp01 = (x: number) => (Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 0);
 
@@ -111,12 +113,14 @@ export function commitmentCandidates(db: DB, now: number): Candidate[] {
     if (!followUpIntent(k) && eventPast(k, now)) continue;
     const them = k.owner === 'them';
     if (them && !waitingOnSurfaces(k.tie_strength, k.is_priority === 1)) continue;
+    const stakes = stakesOf(k);
+    if (stakes === 'low') continue;
     const people = commitmentPeople(db, k).filter((p) => isVisible(db, p));
     out.push({
       kind: 'commitment_due',
       personIds: people.length ? people : [k.pid],
       subjectKey: k.id,
-      base: clamp01((0.6 + 0.4 * (them ? 0 : 1)) * (them ? COMMITMENT.waitingWeight : 1)),
+      base: clamp01((0.6 + 0.4 * (them ? 0 : 1)) * (them ? COMMITMENT.waitingWeight : 1) * COMMITMENT.stakesWeight[stakes]),
       evidenceIds: commitmentEvidenceIds(db, k),
       expiresAt: lapseMoment(k),
       sensitive: k.sensitive === 1,
@@ -131,6 +135,7 @@ export function commitmentCandidates(db: DB, now: number): Candidate[] {
         overdueD: isDue ? Math.max(0, Math.floor((now - due) / DAY)) : 0,
         upcoming: !isDue,
         madeD: Math.floor((now - madeAt(k)) / DAY),
+        stakes,
       },
     });
   }
@@ -138,6 +143,8 @@ export function commitmentCandidates(db: DB, now: number): Candidate[] {
   const asked = db.prepare(`SELECT 1 FROM suggestions WHERE dedupe_key = ? AND delivered_at IS NOT NULL LIMIT 1`).pluck();
   for (const k of recentlyLapsed(db, now)) {
     if (!followUpIntent(k)) continue;
+    const stakes = stakesOf(k);
+    if (stakes === 'low') continue;
     const pid = (db.prepare('SELECT pv.id FROM person_canon pc JOIN person_visible pv ON pv.id = pc.canonical_id WHERE pc.person_id = ?').pluck().get(k.person_id) as
       | string
       | undefined) ?? null;
@@ -156,12 +163,12 @@ export function commitmentCandidates(db: DB, now: number): Candidate[] {
       kind: 'commitment_due',
       personIds: [pid],
       subjectKey,
-      base: clamp01(0.4 * (them ? COMMITMENT.waitingWeight : 1)),
+      base: clamp01(0.4 * (them ? COMMITMENT.waitingWeight : 1) * COMMITMENT.stakesWeight[stakes]),
       evidenceIds: commitmentEvidenceIds(db, k),
       expiresAt: lapseMoment(k) + COMMITMENT.lapseAskWindowMs,
       sensitive: k.sensitive === 1,
       links: { commitmentId: k.id },
-      payload: { commitment: `K${k.id}`, owner: k.owner, commitmentKind: k.kind, lapsed: true, question: 'did_this_happen', waitingOn: them },
+      payload: { commitment: `K${k.id}`, owner: k.owner, commitmentKind: k.kind, lapsed: true, question: 'did_this_happen', waitingOn: them, stakes },
     });
   }
   return out;
