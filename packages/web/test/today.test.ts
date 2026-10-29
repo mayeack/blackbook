@@ -12,6 +12,7 @@ import {
   loopsLine,
   pickedDateUntil,
   resolvedLabel,
+  shownInBrief,
   skipReasonLabel,
   snoozeUntil,
   sortAlerts,
@@ -112,6 +113,14 @@ describe('Today labels and card state', () => {
     expect(resolvedLabel('done')).toBe('Done');
     expect(resolvedLabel('dismissed')).toBe('Skipped');
     expect(isOpen({ status: 'snoozed' })).toBe(false);
+  });
+
+  it('done, skipped and wrong cards leave the brief; open and snoozed ones stay', () => {
+    expect(shownInBrief({ status: 'done' })).toBe(false);
+    expect(shownInBrief({ status: 'dismissed' })).toBe(false);
+    expect(shownInBrief({ status: 'wrong' })).toBe(false);
+    expect(shownInBrief({ status: 'delivered' })).toBe(true);
+    expect(shownInBrief({ status: 'snoozed' })).toBe(true);
   });
 
   it('cards offer the server’s actions, else the standard five', () => {

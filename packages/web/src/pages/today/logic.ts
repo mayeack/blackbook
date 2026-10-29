@@ -131,6 +131,10 @@ const STATUS_LABELS: Partial<Record<SuggestionStatus, string>> = {
 export const resolvedLabel = (s: SuggestionStatus): string | null => STATUS_LABELS[s] ?? null;
 export const isOpen = (i: Pick<DigestItem, 'status'>) => resolvedLabel(i.status) == null;
 
+/** Cards the owner has finished with (Done, Skip, Wrong) leave the brief; snoozed and expired ones stay, labelled. */
+const HIDDEN_STATUSES: ReadonlySet<SuggestionStatus> = new Set(['done', 'dismissed', 'wrong']);
+export const shownInBrief = (i: Pick<DigestItem, 'status'>) => !HIDDEN_STATUSES.has(i.status);
+
 const DEFAULT_ACTIONS: DigestAction[] = ['done', 'snooze', 'skip', 'wrong', 'why'];
 /** The buttons a card offers (the server's list; the standard five when it sends none). */
 export const cardActions = (i: Pick<DigestItem, 'actions'>): Set<DigestAction> => new Set(i.actions.length ? i.actions : DEFAULT_ACTIONS);

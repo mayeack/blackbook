@@ -1653,3 +1653,23 @@ reminder the owner set by text, or a promise to send / call / intro / reply / do
 reminder set by text (`yb remind me to … `) about an event still fires after the event; people whose display name is
 a full phone number or email get no label (the old fallback).
 **Platforms**: server only. Not deployed; not checked against a live brief.
+
+## 2026-10-28 — Today: done and skipped cards leave the brief
+
+On yeackbot.com/today, a brief card marked Done, Skip or Wrong… no longer stays in the list with a "Done" / "Skipped"
+pill; it drops out (after the refetch that follows the click). Open and snoozed cards stay. The remaining cards keep
+their brief numbers, so "done 3" still matches the text. When every card is finished the page shows only "All done for
+today ✓".
+
+### Scenario A — Automated
+1. `npm run typecheck && npx vitest run packages/web && npm run lint:pii` from the repo root.
+2. `packages/web/test/today.test.ts` "done, skipped and wrong cards leave the brief; open and snoozed ones stay".
+
+### Scenario B — Web (owner, after deploy)
+1. Open yeackbot.com/today with a brief that has a skipped item. **Expected**: the skipped card isn't shown.
+2. Tap Done on an open card. **Expected**: toast "Marked done.", the card disappears, the others keep their numbers.
+3. Snooze a card. **Expected**: it stays, labelled "Snoozed until …".
+4. Finish every card. **Expected**: only "All done for today ✓" under Your brief.
+
+**Edge cases**: a brief where every item was skipped shows "All done for today ✓", not the "No brief yet" empty state.
+**Platforms**: web only. Not checked in a browser; not deployed.
