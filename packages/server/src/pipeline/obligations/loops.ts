@@ -14,7 +14,7 @@ import type { DueWindow, EvidenceRef, OpenLoop, OpenLoopCounts, OpenLoopList, Pe
 import type { DB } from '../../db/connection';
 import { redact } from '../../ops/redact';
 import { readSetting } from '../../settings/registry';
-import { commitmentPeople, dueMoment, lapseMoment, madeAt, otherIds, type CommitmentRow } from './commitments';
+import { commitmentPeople, dueMoment, eventPast, followUpIntent, lapseMoment, madeAt, otherIds, type CommitmentRow } from './commitments';
 import { COMMITMENT } from './constants';
 import { shortDate } from './dates';
 import { debtPriority, type DebtRow } from './replyDebt';
@@ -26,6 +26,11 @@ export interface LoopQuery {
   timeZone?: string;
   /** Include snoozed loops (default: false; the person page passes true). */
   includeSnoozed?: boolean;
+  /**
+   * Leave out plans and events whose time has passed without a documented intent to follow up (commitments.ts
+   * eventPast / followUpIntent): reminders (Today's strip, pre-event briefs) skip them; the full lists keep them.
+   */
+  remindersOnly?: boolean;
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -240,6 +245,7 @@ function build(db: DB, o: LoopQuery, personId: string | null): Built {
   for (const k of commits) {
     const them = k.owner === 'them';
     if (them && personId === null && !waitingOnSurfaces(k.tie_strength, k.is_priority === 1)) continue;
+    if (o.remindersOnly && !followUpIntent(k) && eventPast(k, now)) continue;
     const loop = commitmentLoop(db, k, chips, tz, now);
     if (!loop) continue;
     const due = dueMoment(k);
@@ -281,7 +287,7 @@ export function decodeLoopCursor(cursor: string | null | undefined): number {
 
 /** Everyone's open loops (Today's expanded strip): each list paged by the same offset. */
 export function openLoops(db: DB, o: LoopQuery & { cursor?: string | null; limit?: number } = {}): OpenLoopList {
-  const b = build(db, o, null);
+  const b = build(db, { remindersOnly: true, ...o }, null);
   const offset = decodeLoopCursor(o.cursor);
   const limit = Math.max(1, Math.min(MAX_LIMIT, Math.floor(o.limit ?? DEFAULT_LIMIT)));
   const page = <T extends { loop: OpenLoop }>(xs: T[]) => xs.slice(offset, offset + limit).map((x) => x.loop);
@@ -301,7 +307,7 @@ export function openLoopCounts(db: DB, o: LoopQuery = {}): OpenLoopCounts {
 
 /** Today's strip: counts plus the most pressing few (debts by priority, due promises, gated waiting-on; no low stakes). */
 export function todayOpenLoops(db: DB, o: LoopQuery & { previewLimit?: number } = {}): { counts: OpenLoopCounts; preview: OpenLoop[] } {
-  const b = build(db, o, null);
+  const b = build(db, { remindersOnly: true, ...o }, null);
   const counts = { replyDebts: b.replyDebts.length, commitments: b.commitments.length, waitingOn: b.waitingOn.length };
   const all = [
     ...b.replyDebts.map((x) => ({ loop: x.loop, score: Math.min(1, x.score) })),
@@ -316,7 +322,7 @@ export function openLoopsByPerson(db: DB, personIds: readonly string[], o: LoopQ
   for (const raw of new Set(personIds)) {
     const pid = canonical(db, raw);
     if (out.has(pid)) continue;
-    const b = build(db, { includeSnoozed: false, ...o }, pid);
+    const b = build(db, { includeSnoozed: false, remindersOnly: true, ...o }, pid);
     out.set(pid, [...b.replyDebts, ...b.commitments, ...b.waitingOn].map((x) => x.loop));
   }
   return out;
