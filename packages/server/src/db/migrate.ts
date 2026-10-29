@@ -25,6 +25,7 @@ import * as partyInvite from './migrations/023_party_invite';
 import * as partifulGuestNames from './migrations/024_partiful_guest_names';
 import * as calls from './migrations/025_calls';
 import * as ticketsMetAt from './migrations/026_tickets_met_at';
+import * as commitmentStakes from './migrations/027_commitment_stakes';
 
 export interface Migration {
   version: number;
@@ -81,6 +82,7 @@ export const MIGRATIONS: Migration[] = [
   slot(24, 'partiful_guest_names', partifulGuestNames),
   slot(25, 'calls', calls),
   slot(26, 'tickets_met_at', ticketsMetAt),
+  slot(27, 'commitment_stakes', commitmentStakes),
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

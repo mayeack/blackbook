@@ -7,9 +7,9 @@
  * Writers:
  *   upsertCommitmentFromExtraction(t, input)   THE extraction hook, inside the window's journal batch:
  *       gate conf ≥ 0.70; a cited message is required; the due date is checked against chrono-node; a repeat of a
- *       live commitment (same person + kind, similar `what`, or a shared cited message) updates it; status
- *       done/cancelled with `closes` (or a matching live one) closes it; anything already decided — including an
- *       undone or "wrong" row — is never re-created (sticky).
+ *       live commitment (same person + kind, similar `what`, or a shared cited message) updates it (its stakes
+ *       only ever go up: stakes.ts); status done/cancelled with `closes` (or a matching live one) closes it;
+ *       anything already decided — including an undone or "wrong" row — is never re-created (sticky).
  *   commitmentSteps(...)                       the hourly lifecycle + auto-close pass:
  *       meet / plan / call → time together (log:, call, Partiful co-attendance, calendar occasion) or an occasion /
  *         Partiful event both of you are on, in [made_at, due_end + 7 d];
@@ -30,6 +30,7 @@ import { redact } from '../../ops/redact';
 import { readSetting } from '../../settings/registry';
 import { COMMITMENT, LIVE_COMMITMENT } from './constants';
 import { checkDue, resolveDue, type DueInput, type DuePrecision } from './dates';
+import { higherStakes, isStakes, stakesOf, type Stakes } from './stakes';
 import { canonical, dmConversationsOf, firstInboundFile, firstOutbound, firstScheduled, firstTogether, isVisible, undoneAt, type TogetherHit } from './signals';
 import { whatNorm, whatSimilarity } from './text';
 
@@ -62,6 +63,8 @@ export interface CommitmentRow {
   source_msg: number | null;
   what_norm: string | null;
   sensitive: number;
+  /** null on rows from before the extraction labeled it (stakes.ts guesses). */
+  stakes: Stakes | null;
   created_at: number;
   updated_at: number;
 }
@@ -132,6 +135,8 @@ export interface ExtractedCommitmentInput {
   kind: CommitmentKind;
   /** Short, display-ready (de-pseudonymized) description: "Send the gym link". ≤ 200 chars kept. */
   what: string;
+  /** How much it matters (stakes.ts); absent = guessed from `what`. */
+  stakes?: Stakes | null;
   /** The schema's due ({kind, start, end} with YYYY-MM-DD dates) — `precision` or `kind` names the precision. */
   due: { precision?: DuePrecision; kind?: DuePrecision; start: string | number | null; end: string | number | null };
   status: 'open' | 'done' | 'cancelled';
@@ -207,6 +212,7 @@ export function upsertCommitmentFromExtraction(t: JournalTx, input: ExtractedCom
   const made = input.madeAt ?? Math.min(...evidence.map((e) => msgAt.get(e.messageId) as number));
   const sensitive = input.sensitive === true;
   const norm = whatNorm(what);
+  const stakes: Stakes = isStakes(input.stakes) ? input.stakes : stakesOf({ what, kind: input.kind });
   const firstMsg = evidence[0]!.messageId;
   const ref = `m:${firstMsg}`;
 
@@ -292,6 +298,8 @@ export function upsertCommitmentFromExtraction(t: JournalTx, input: ExtractedCom
     const mergedOthers = [...new Set([...otherIds(match), ...others])];
     if (mergedOthers.length !== otherIds(match).length) patch.other_person_ids = JSON.stringify(mergedOthers);
     if (sensitive && match.sensitive !== 1) patch.sensitive = 1;
+    const raised = higherStakes(stakesOf(match), stakes);
+    if (raised !== match.stakes) patch.stakes = raised;
     if (input.promptVersion) patch.prompt_version = input.promptVersion;
     if (!match.what_norm) patch.what_norm = whatNorm(match.what);
     const changed = t.update('commitments', { id: match.id }, patch);
@@ -321,6 +329,7 @@ export function upsertCommitmentFromExtraction(t: JournalTx, input: ExtractedCom
     made_at: made,
     source_msg: firstMsg,
     sensitive: sensitive ? 1 : 0,
+    stakes,
   });
   addEvidence(db, id, evidence, sensitive);
   return { action: 'inserted', commitmentId: id };
