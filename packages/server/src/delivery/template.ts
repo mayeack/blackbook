@@ -12,6 +12,7 @@ import type { DB } from '../db/connection';
 import { ownerNames } from '../identity/ownerNames';
 import { eventBrief } from '../intel/brief';
 import { happeningOf, metRefOf } from '../intel/eventInvites';
+import { secondPerson } from '../llm/secondPerson';
 import { preferredPeople } from '../pipeline/circles/preferences';
 import type { SelectedItem } from './selection';
 import { briefNames, endSentence, firstNameOnly, humanDuration, humanEvery, peopleList, plural, safeFragment, shortDay, truncate, whenPhrase, type BriefNames } from './text';
@@ -114,7 +115,8 @@ export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy
   const named = ctx.names ?? briefNames(item.people, ownerNames(ctx.db));
   const names = item.people.map((p) => named.of(p) ?? 'someone');
   const who = names[0] ?? 'someone';
-  const first = who.split(' ')[0]!;
+  // Someone known only by a label ("(310) •••-••12") goes by the whole label.
+  const first = item.people[0] && firstNameOnly(item.people[0]) ? who.split(' ')[0]! : who;
   const p = item.payload;
   const st = statsOf(ctx.db, item.people[0]?.id);
   const silence = num(pick(p, 'silenceD', 'silence_d', 'silenceDays')) ?? st?.silence_d ?? null;
@@ -141,7 +143,8 @@ export function templateCopy(item: SelectedItem, ctx: TemplateContext): ItemCopy
     }
     case 'commitment_due': {
       const c = commitmentOf(ctx.db, item);
-      const what = mid(c ? safeFragment(c.what, 50) : safeFragment(str(p.what), 50));
+      // Older rows went through a plain ME → you swap ("at you's place").
+      const what = mid(secondPerson(c ? (safeFragment(c.what, 50) ?? '') : (safeFragment(str(p.what), 50) ?? '')) || null);
       // The row's own date; the generator's payload date only without a row (it invents one for vague promises).
       const dueAt = c ? c.dueAt : p.precision === 'vague' || p.precision === 'none' ? null : num(p.dueAt);
       const due = dueAt ? shortDay(dueAt, ctx.timeZone, ctx.now) : null;
