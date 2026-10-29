@@ -1697,7 +1697,7 @@ banner (and the privacy-filter one, `extraction:egress_blocked`) no longer shows
 where nothing could fix it; they show only **Dismiss**, and read "Extraction" / "Privacy filter" instead of the raw id.
 
 ### Scenario A — Automated
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2008 tests pass.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2014 tests pass (with #86 merged).
 2. `test/extraction/parts.test.ts` "windows the API refused under an older prompt": the alert stays open while the
    revived window is submitted and closes at the collect that applies it; a window still dead keeps it open; a
    dismissed alert is never reopened by a collect. `test/routes/today.test.ts` "alerts": an extraction alert's `href`
