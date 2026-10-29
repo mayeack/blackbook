@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generators, wildcardSources } from '../../src/intel/generators';
 import { runSuggestionsStage } from '../../src/pipeline/suggestions/stage';
+import { seedCommitment } from '../helpers';
 import { at, intelWorld, NOW, occasion } from './world';
 
 describe('the suggestions stage takes the intel candidates', () => {
@@ -16,6 +17,8 @@ describe('the suggestions stage takes the intel candidates', () => {
     const party = occasion(w.db, { title: 'Party', start: at(-1, 20), end: at(-1, 23) });
     w.attendee(party, ana, { status: 'attended' });
     w.attendee(party, gus, { status: 'attended' });
+    // A follow-up needs a documented intent: the owner said he'd send Gus the photos.
+    seedCommitment(w.db, gus, { kind: 'send', what: 'send the photos', created_at: at(-1, 22) });
 
     const r = await runSuggestionsStage(w.db, { now: at(0, 7, 16), seed: 7, generators, wildcardSources });
     expect(r.status).toBe('ok');

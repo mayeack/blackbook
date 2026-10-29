@@ -16,7 +16,7 @@ import { generators as defaultGenerators } from '../../src/pipeline/suggestions/
 import { runSuggestionsStage } from '../../src/pipeline/suggestions/stage';
 import type { Candidate } from '../../src/pipeline/suggestions/types';
 import { runTies } from '../../src/pipeline/ties/run';
-import { newRun, seedIdentity, seedPerson } from '../helpers';
+import { newRun, seedCommitment, seedIdentity, seedPerson } from '../helpers';
 import { at, intelWorld, NOW as INTEL_NOW, occasion as intelOccasion } from '../intel/world';
 import { DAY, NOW, socialWorld } from './socialWorld';
 import { circle, fadingFriend, fixedGenerator, friend, occasion, setSetting, stats, suggestionsDb, T0 } from './suggestions/world';
@@ -107,6 +107,8 @@ describe('suggestions stage', () => {
     for (const [p, tie] of [[ava.id, 50], [bo.id, 40], [stray.id, 90]] as const) stats(db, p, { tie, historical: 60, lastAt: T0 - 50 * DAY, expectedGapD: 7 });
 
     occasion(db, T0 - 365 * DAY, [stray.id, ava.id]);
+    // Both had a follow-up promised that day (memories need one); the record of mine is still left out.
+    for (const p of [stray.id, ava.id]) seedCommitment(db, p, { kind: 'send', what: 'send the photos', created_at: T0 - 365 * DAY });
     expect(memoryCandidates(db, T0, 'UTC').map((c) => c.personIds)).toEqual([[ava.id]]);
 
     const c = circle(db, 'Climbing crew', [ava.id, bo.id, stray.id]);
