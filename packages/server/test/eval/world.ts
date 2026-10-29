@@ -82,6 +82,7 @@ export async function buildEvalWorld(): Promise<EvalWorld> {
           what: 'send the Denver restaurant list',
           due: { kind: 'date', start: '2026-10-23', end: null },
           status: 'open',
+          stakes: 'normal',
           closes: null,
           ev: [{ msg: L(m4), quote: 'can you send me that list of Denver restaurants by Friday Oct 23?' }],
           conf: 0.85,

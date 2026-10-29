@@ -8,7 +8,7 @@
  * Every person comes through person_visible (canonical; never hidden, merged-away, roster-only, service or me):
  * a loop whose person isn't visible is not shown at all. Titles are templates or the extracted `what`; sensitive
  * commitments read "Something personal" and never carry quotes. Quotes are ≤ 160 chars with phones and emails
- * masked.
+ * masked. Low-stakes promises ("bring tomatoes", stakes.ts) are listed after the rest and never in Today's preview.
  */
 import type { DueWindow, EvidenceRef, OpenLoop, OpenLoopCounts, OpenLoopList, PersonChip } from '@yb/shared';
 import type { DB } from '../../db/connection';
@@ -19,6 +19,7 @@ import { COMMITMENT } from './constants';
 import { shortDate } from './dates';
 import { debtPriority, type DebtRow } from './replyDebt';
 import { canonical } from './signals';
+import { stakesOf } from './stakes';
 
 export interface LoopQuery {
   now?: number;
@@ -219,8 +220,8 @@ function commitmentLoop(db: DB, k: CommitView, chips: Map<string, PersonChip>, t
 
 interface Built {
   replyDebts: { loop: OpenLoop; score: number }[];
-  commitments: { loop: OpenLoop; score: number; due: number }[];
-  waitingOn: { loop: OpenLoop; score: number; due: number }[];
+  commitments: { loop: OpenLoop; score: number; due: number; low: boolean }[];
+  waitingOn: { loop: OpenLoop; score: number; due: number; low: boolean }[];
 }
 
 function build(db: DB, o: LoopQuery, personId: string | null): Built {
@@ -248,12 +249,16 @@ function build(db: DB, o: LoopQuery, personId: string | null): Built {
     const loop = commitmentLoop(db, k, chips, tz, now);
     if (!loop) continue;
     const due = dueMoment(k);
-    const base = (them ? 0.6 : 1) * (them ? COMMITMENT.waitingWeight : 1);
+    const stakes = stakesOf(k);
+    const base = (them ? 0.6 : 1) * (them ? COMMITMENT.waitingWeight : 1) * COMMITMENT.stakesWeight[stakes];
     const score = k.status === 'due' ? base : due - now <= COMMITMENT.upcomingMs ? base * 0.8 : base * 0.3;
-    (them ? waitingOn : commitments).push({ loop, score, due });
+    (them ? waitingOn : commitments).push({ loop, score, due, low: stakes === 'low' });
   }
-  const byDue = (a: { loop: OpenLoop; due: number }, b: { loop: OpenLoop; due: number }) =>
-    Number(b.loop.status === 'due') - Number(a.loop.status === 'due') || a.due - b.due || b.loop.since - a.loop.since;
+  const byDue = (a: { loop: OpenLoop; due: number; low: boolean }, b: { loop: OpenLoop; due: number; low: boolean }) =>
+    Number(a.low) - Number(b.low) ||
+    Number(b.loop.status === 'due') - Number(a.loop.status === 'due') ||
+    a.due - b.due ||
+    b.loop.since - a.loop.since;
   commitments.sort(byDue);
   waitingOn.sort(byDue);
   return { replyDebts, commitments, waitingOn };
@@ -300,14 +305,13 @@ export function openLoopCounts(db: DB, o: LoopQuery = {}): OpenLoopCounts {
   return { replyDebts: b.replyDebts.length, commitments: b.commitments.length, waitingOn: b.waitingOn.length };
 }
 
-/** Today's strip: counts plus the most pressing few (debts by priority, due promises, gated waiting-on). */
+/** Today's strip: counts plus the most pressing few (debts by priority, due promises, gated waiting-on; no low stakes). */
 export function todayOpenLoops(db: DB, o: LoopQuery & { previewLimit?: number } = {}): { counts: OpenLoopCounts; preview: OpenLoop[] } {
   const b = build(db, { remindersOnly: true, ...o }, null);
   const counts = { replyDebts: b.replyDebts.length, commitments: b.commitments.length, waitingOn: b.waitingOn.length };
   const all = [
     ...b.replyDebts.map((x) => ({ loop: x.loop, score: Math.min(1, x.score) })),
-    ...b.commitments.map((x) => ({ loop: x.loop, score: x.score })),
-    ...b.waitingOn.map((x) => ({ loop: x.loop, score: x.score })),
+    ...[...b.commitments, ...b.waitingOn].filter((x) => !x.low).map((x) => ({ loop: x.loop, score: x.score })),
   ].sort((a, b2) => b2.score - a.score || a.loop.since - b2.loop.since);
   return { counts, preview: all.slice(0, Math.max(0, o.previewLimit ?? 5)).map((x) => x.loop) };
 }

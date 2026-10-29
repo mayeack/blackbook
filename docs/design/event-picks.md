@@ -17,7 +17,7 @@ for the nights of the week ahead (Monday to Sunday) that his calendar is free, e
 the web and his event newsletters, plus the best happenings on his Recurring Events calendar that fall when he's free.
 It learns from which ones he goes to. Until "Email me" is connected (or with events.channel 'text') it texts them.
 Code: `packages/server/src/intel/eventPicks/`, `delivery/email.ts`; web: `/picks`, Settings → Email & photos;
-migration 027.
+migration 028.
 
 ## 1. The run (`run.ts`, job `event-picks`, every 10 min; acts only on the picks day from events.time to 21:00)
 

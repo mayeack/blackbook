@@ -1,5 +1,5 @@
 /**
- * event_pick_runs / event_picks reads and writes (migration 027; design docs/design/event-picks.md). Runs and picks
+ * event_pick_runs / event_picks reads and writes (migration 028; design docs/design/event-picks.md). Runs and picks
  * are the agent's own recommendations, not the owner's data, so they aren't journaled; the owner's answers
  * (going / not for me / undo) are stored on the pick itself and are what the ranker learns from.
  */

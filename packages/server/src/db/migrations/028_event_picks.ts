@@ -1,5 +1,5 @@
 /**
- * 027 event picks (owner requests 2026-10-22 and 2026-10-25; design docs/design/event-picks.md): a weekly email (or
+ * 028 event picks (owner requests 2026-10-22 and 2026-10-25; design docs/design/event-picks.md): a weekly email (or
  * text) of events the owner might like on nights his calendar is free, found on the web, in his event newsletters
  * and on his "Recurring Events" calendar, with a link to get tickets, learning from which ones he goes to.
  *
