@@ -1653,3 +1653,29 @@ reminder the owner set by text, or a promise to send / call / intro / reply / do
 reminder set by text (`yb remind me to … `) about an event still fires after the event; people whose display name is
 a full phone number or email get no label (the old fallback).
 **Platforms**: server only. Not deployed; not checked against a live brief.
+
+## 2026-10-28 — The "Extraction: invalid request" alert clears itself
+
+What changed: the `extraction:invalid_request` alert used to stay open forever, even after the windows it was opened
+for had been sent again and applied (the live one had been up since 10-16 although all 111 of its windows applied on
+10-18). Every 5-minute collect now resolves it once no window the API ever refused as invalid is still pending,
+submitted or dead-lettered. It only closes, never opens: a dismissed alert stays dismissed until a new refusal. Its
+banner (and the privacy-filter one, `extraction:egress_blocked`) no longer shows a **Fix** button that led to Sources,
+where nothing could fix it; they show only **Dismiss**, and read "Extraction" / "Privacy filter" instead of the raw id.
+
+### Scenario A — Automated
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2008 tests pass.
+2. `test/extraction/parts.test.ts` "windows the API refused under an older prompt": the alert stays open while the
+   revived window is submitted and closes at the collect that applies it; a window still dead keeps it open; a
+   dismissed alert is never reopened by a collect. `test/routes/today.test.ts` "alerts": an extraction alert's `href`
+   is null. `web/test/today.test.ts`: the two labels.
+
+### Scenario B — Live (owner, after deploy)
+1. Before deploy: yeackbot.com/today shows "Extraction:invalid request … since 12d ago" with Fix and Dismiss.
+2. Deploy, wait 5 minutes (one collect), reload Today. **Expected**: the banner is gone (all its windows were applied;
+   the live DB check found 0 unsettled). The server log's `extract.collect` line counts `alert_resolved_invalid_request: 1`.
+3. If an extraction alert opens again later, **Expected**: its banner reads "Extraction …" with only Dismiss.
+
+**Edge cases**: a window refused as invalid under the current prompt version stays dead (no revive), so its alert stays
+open until dismissed; a refusal of a consolidation request (no window) neither opens nor holds the alert.
+**Platforms**: server + web. Not deployed; not checked in a browser.
