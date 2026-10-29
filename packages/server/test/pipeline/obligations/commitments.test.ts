@@ -126,6 +126,22 @@ describe('upsertCommitmentFromExtraction', () => {
     void sam;
   });
 
+  it('stores the stakes (guessed when the extraction gave none); a repeat raises them but never lowers them', () => {
+    const { w, sam, dm, item } = setup();
+    inBatch(w, (t) => upsertCommitmentFromExtraction(t, item({ stakes: 'low' })));
+    expect(commitments(w.db)[0]).toMatchObject({ stakes: 'low' });
+    expect(inBatch(w, (t) => upsertCommitmentFromExtraction(t, item({ stakes: 'high' })))).toMatchObject({ action: 'updated' });
+    expect(commitments(w.db)[0]).toMatchObject({ stakes: 'high' });
+    expect(inBatch(w, (t) => upsertCommitmentFromExtraction(t, item({ stakes: 'low' })))).toMatchObject({ reason: 'duplicate' });
+    expect(commitments(w.db)[0]).toMatchObject({ stakes: 'high' });
+    const m2 = w.msg(dm, 'me', ago(1 * DAY), "I'll bring tomatoes saturday");
+    const tomatoes = inBatch(w, (t) =>
+      upsertCommitmentFromExtraction(t, item({ kind: 'favor', what: 'bring tomatoes', stakes: undefined, evidence: [{ messageId: m2, quote: "I'll bring tomatoes" }] })),
+    );
+    expect(commitments(w.db).find((k) => k.id === tomatoes.commitmentId)).toMatchObject({ stakes: 'low' });
+    void sam;
+  });
+
   it('sensitive commitments keep no quotes', () => {
     const { w, item } = setup();
     inBatch(w, (t) => upsertCommitmentFromExtraction(t, item({ sensitive: true })));

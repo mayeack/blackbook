@@ -500,6 +500,7 @@ export function applyWindow(ctx: ApplyContext, packet: Packet, v: ValidatedWindo
               owner: c.owner,
               kind: c.kind,
               what,
+              stakes: c.stakes,
               due: { precision: c.duePrecision, start: c.dueStart, end: c.dueEnd },
               status: c.status,
               closes: c.closesCommitmentId,

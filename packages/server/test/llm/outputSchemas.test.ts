@@ -44,15 +44,15 @@ describe('grammar nodes', () => {
   });
 
   it('the one-request extraction schema the API refused is over the budget and requestIssues refuses it locally', () => {
-    expect(formatNodes(Extraction)).toBe(86);
+    expect(formatNodes(Extraction)).toBe(87);
     const body = requestParams(resolveRoute('extract_steady'), { system: 's', messages: [{ role: 'user', content: 'x' }], format: outputFormat(Extraction), mode: 'batch' });
-    expect(grammarIssues(body)).toEqual([`86 schema nodes in the strict schemas (max ${GRAMMAR_MAX_NODES}: the compiled grammar would be too large)`]);
+    expect(grammarIssues(body)).toEqual([`87 schema nodes in the strict schemas (max ${GRAMMAR_MAX_NODES}: the compiled grammar would be too large)`]);
     expect(requestIssues(body)).toEqual(grammarIssues(body));
   });
 
   it("a window's two requests are each well under it (pinned: growing either is a decision, re-check with yb llm-smoke --live)", () => {
     expect(formatNodes(ExtractionKnowledge)).toBe(58);
-    expect(formatNodes(ExtractionObligations)).toBe(29);
+    expect(formatNodes(ExtractionObligations)).toBe(30);
     // Live on 2026-10-18 the knowledge schema still compiled with 16 extra fields and failed with 18 (with its enums
     // in the grammar: 16 ok, 17 refused).
     expect(GRAMMAR_MAX_NODES - formatNodes(ExtractionKnowledge)).toBeGreaterThanOrEqual(6);
@@ -83,9 +83,10 @@ describe('enums in the output format', () => {
     const commitment = o.properties.commitments!.items!.properties;
     expect(commitment.owner).toEqual({ type: 'string', enum: ['ME', 'THEM', 'BOTH'] });
     expect(commitment.kind).toEqual({ type: 'string', enum: [...COMMITMENT_KINDS] });
+    expect(commitment.stakes).toEqual({ type: 'string', enum: ['low', 'normal', 'high'] });
     expect(o.properties.needs_reply!.properties!.reason).toEqual({ anyOf: [{ type: 'string', enum: ['question', 'request', 'invitation', 'plan_confirm', 'emotional', 'other'] }, { type: 'null' }] });
     // Enums are not grammar nodes in the budget's unit (measured well under one each): the pinned sizes hold.
-    expect([formatNodes(ExtractionKnowledge), formatNodes(ExtractionObligations)]).toEqual([58, 29]);
+    expect([formatNodes(ExtractionKnowledge), formatNodes(ExtractionObligations)]).toEqual([58, 30]);
   });
 
   it('inside shared $defs, oneOf and nullable fields too; a description and the other moved constraints stay', () => {
@@ -152,9 +153,9 @@ describe('yb llm-smoke (smokeSchemas)', () => {
     }) as typeof globalThis.fetch;
     const rows = await smokeSchemas({ apiKey: 'test-key', cases, fetch });
     expect(rows.map((r) => [r.name, r.nodes, r.status, r.detail])).toEqual([
-      ['obligations', 29, 200, 'end_turn'],
+      ['obligations', 30, 200, 'end_turn'],
       ['knowledge', 58, 400, GRAMMAR_400],
-      ['one-request', 86, 'local', `86 schema nodes in the strict schemas (max ${GRAMMAR_MAX_NODES}: the compiled grammar would be too large)`],
+      ['one-request', 87, 'local', `87 schema nodes in the strict schemas (max ${GRAMMAR_MAX_NODES}: the compiled grammar would be too large)`],
     ]);
     // The over-budget schema never left; the others went out like the real route (Haiku, thinking off, effort low,
     // cached system block, the fixed literal user turn, no sampling parameters).

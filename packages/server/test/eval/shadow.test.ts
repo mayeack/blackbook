@@ -40,6 +40,7 @@ function scriptedLlm(w: EvalWorld, o: ConstructorParameters<typeof FakeLlmClient
           what: 'send Denver restaurant list',
           due: { kind: 'none', start: null, end: null },
           status: 'open',
+          stakes: 'normal',
           closes: null,
           ev: [{ msg: L(w.msgs.m4), quote: 'can you send me that list of Denver restaurants' }],
           conf: 0.8,
