@@ -56,7 +56,7 @@ export class LayoutClient {
       if (job !== this.job) return;
       const n = Math.min(CHUNK, remaining);
       remaining -= n;
-      const pos = runner.step(n);
+      const pos = runner.step(n, remaining <= 0);
       this.handler?.(pos, remaining <= 0);
       if (remaining > 0) this.fallbackTimer = window.setTimeout(tick, 16);
     };

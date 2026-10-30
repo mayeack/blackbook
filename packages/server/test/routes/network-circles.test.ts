@@ -92,6 +92,16 @@ describe('GET /network', () => {
     expect((await request(app).get('/api/v1/network?minStrength=2')).status).toBe(400);
   });
 
+  it('venues, brands and promoters are not people on the map', async () => {
+    const venue = w.person('Harbor', 'Hotel');
+    link(venue, ann, 'invited_by', 2, NOW - 5 * DAY, 'event:venue');
+    link(venue, ben, 'invited_by', 2, NOW - 5 * DAY, 'event:venue');
+    runGraph(w.db, { now: NOW });
+    const g = NetworkGraph.parse((await request(app).get('/api/v1/network?window=all')).body);
+    expect(g.nodes.map((n) => n.id).sort()).toEqual([ann, ben, cy].sort());
+    expect(g.edges.some((e) => e.a === venue || e.b === venue)).toBe(false);
+  });
+
   it('circle filter and node colors', async () => {
     againTogether();
     await runCircles(w.db, { now: NOW });

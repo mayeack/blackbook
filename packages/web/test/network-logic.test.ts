@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NetworkGraph, NetworkNode } from '@yb/shared';
-import { LayoutRunner } from '../src/pages/network/layout';
+import { DOT_GAP, LayoutRunner, MIN_VIEWPORT, layoutSettings, separateDots } from '../src/pages/network/layout';
 import {
   CIRCLE_PALETTE,
   DEFAULT_FILTERS,
@@ -156,9 +156,56 @@ describe('ForceAtlas2 runner (the worker’s engine)', () => {
   });
 
   it('survives an empty or single-node graph', () => {
-    expect(new LayoutRunner({ nodes: [], edges: [] }).step(10)).toHaveLength(0);
-    const one = new LayoutRunner({ nodes: [{ id: 'x', x: 1, y: 2, size: 3 }], edges: [] }).step(10);
+    expect(new LayoutRunner({ nodes: [], edges: [] }).step(10, true)).toHaveLength(0);
+    const one = new LayoutRunner({ nodes: [{ id: 'x', x: 1, y: 2, size: 3 }], edges: [] }).step(10, true);
     expect([...one]).toEqual([1, 2]);
+  });
+
+  it('runs in LinLog mode so friend groups stay apart', () => {
+    expect(layoutSettings(300)).toMatchObject({ linLogMode: true, adjustSizes: false });
+  });
+
+  /** Smallest gap (px) between two dots at the zoom that fits everything in a w×h canvas, sigma-style. */
+  function minGapPx(xs: ArrayLike<number>, ys: ArrayLike<number>, radii: readonly number[], w: number, h: number): number {
+    const span = (v: ArrayLike<number>) => Math.max(...Array.from(v)) - Math.min(...Array.from(v));
+    const scale = Math.min((w - 60) / span(xs), (h - 60) / span(ys));
+    let min = Infinity;
+    for (let i = 0; i < radii.length; i++)
+      for (let j = i + 1; j < radii.length; j++) min = Math.min(min, Math.hypot(xs[i]! - xs[j]!, ys[i]! - ys[j]!) * scale - radii[i]! - radii[j]!);
+    return min;
+  }
+
+  it('separates a dense cluster so every dot is clear of the others on screen', () => {
+    // 60 people piled into a tiny area (plus two far-away ones that set the zoom), several on the very same spot
+    const n = 62;
+    const xs = new Float64Array(n);
+    const ys = new Float64Array(n);
+    for (let i = 0; i < 60; i++) {
+      xs[i] = i % 5 === 0 ? 0 : Math.cos(i) * (i % 7);
+      ys[i] = i % 5 === 0 ? 0 : Math.sin(i) * (i % 7);
+    }
+    xs[60] = -500;
+    xs[61] = 500;
+    const radii = Array.from({ length: n }, (_, i) => 3 + (i % 4) * 3);
+    expect(minGapPx(xs, ys, radii, 760, 760)).toBeLessThan(0);
+    const again = [Float64Array.from(xs), Float64Array.from(ys)] as const;
+    separateDots(xs, ys, radii, { width: 760, height: 760 });
+    expect(minGapPx(xs, ys, radii, 760, 760)).toBeGreaterThanOrEqual(DOT_GAP - 0.5);
+    separateDots(again[0], again[1], radii, { width: 760, height: 760 });
+    expect([...again[0]]).toEqual([...xs]); // deterministic
+  });
+
+  it('the last chunk leaves no overlapping dots, spaced for at least a MIN_VIEWPORT canvas', () => {
+    const nodes = Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, x: (i % 3) * 0.01, y: Math.floor(i / 3) * 0.01, size: 4 + (i % 3) * 4 }));
+    const edges = nodes.slice(1).map((nd, i) => ({ a: nodes[i % 4]!.id, b: nd.id, weight: 0.8 }));
+    const radii = nodes.map((nd) => nd.size);
+    const pos = new LayoutRunner({ nodes, edges, viewport: { width: 375, height: 420 } }).step(100, true);
+    const xs = nodes.map((_, i) => pos[2 * i]!);
+    const ys = nodes.map((_, i) => pos[2 * i + 1]!);
+    expect(minGapPx(xs, ys, radii, MIN_VIEWPORT, MIN_VIEWPORT)).toBeGreaterThan(0);
+    // mid-run chunks are plain ForceAtlas2
+    const mid = new LayoutRunner({ nodes, edges }).step(1);
+    expect(mid).toHaveLength(80);
   });
 });
 
