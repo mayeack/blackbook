@@ -14,7 +14,7 @@ import { useAlerts, useToday } from './today/api';
 import { CheckThese } from './today/CheckThese';
 import { DigestCard } from './today/DigestCard';
 import { IntegrationsBanner } from './today/Integrations';
-import { deliveryLine, isOpen } from './today/logic';
+import { deliveryLine, isOpen, shownInBrief } from './today/logic';
 import { OpenLoopsStrip } from './today/OpenLoops';
 import './today/today.css';
 
@@ -28,6 +28,8 @@ function dayLabel(localDate: string | undefined): string {
 
 function Brief({ t }: { t: TodayResponse }) {
   const open = t.items.filter(isOpen);
+  // Done / skipped cards drop out; ordinals keep the brief's numbers so "done 3" still matches the text.
+  const shown = t.items.filter(shownInBrief);
   if (t.items.length === 0)
     return (
       <div className="card-list">
@@ -41,11 +43,13 @@ function Brief({ t }: { t: TodayResponse }) {
   return (
     <>
       {open.length === 0 && <p className="td-all-done">All done for today ✓</p>}
-      <div className="td-cards">
-        {t.items.map((i) => (
-          <DigestCard key={i.suggestionId} item={i} />
-        ))}
-      </div>
+      {shown.length > 0 && (
+        <div className="td-cards">
+          {shown.map((i) => (
+            <DigestCard key={i.suggestionId} item={i} />
+          ))}
+        </div>
+      )}
       {t.digest?.imessage === 'disabled' && (
         <p className="caption td-hint">
           The daily text is off, so this brief lives here only. <Link to="/settings/digest">Digest settings</Link>
