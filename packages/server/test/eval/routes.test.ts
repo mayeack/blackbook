@@ -94,6 +94,8 @@ describe('GET /eval/report', () => {
     const r = EvalReport.parse(res.body);
     expect(r.sets.map((s) => s.set)).toEqual(['extraction', 'identity', 'reply_debt', 'ask']);
     expect(r.online.map((m) => m.name)).toEqual(['digest_action_rate', 'dismiss_rate', 'wrong_rate', 'agent_undo_rate', 'merge_undo_rate']);
-    expect(JSON.stringify(r)).not.toMatch(/Sam|Lumen|Denver|555/);
+    // The clock can contain "555" (Date.now() ≈ 17932555…): only the report's content must not.
+    const { generatedAt: _at, ...content } = r;
+    expect(JSON.stringify(content)).not.toMatch(/Sam|Lumen|Denver|555/);
   });
 });

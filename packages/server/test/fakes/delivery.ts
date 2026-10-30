@@ -11,6 +11,7 @@
 import { uuidv7, type PushPayload } from '@yb/shared';
 import { outboundTextHash } from '../../src/adapters/imessage/mapping';
 import type { DB } from '../../src/db/connection';
+import type { EmailMessage, EmailResult, EmailSender } from '../../src/delivery/email';
 import {
   checkOutboundText,
   MAX_OUTBOUND_PER_HOUR,
@@ -123,5 +124,35 @@ export class FakePushSender implements PushSender {
     if (code) return { ok: false, gone: code === 404 || code === 410, statusCode: code, error: `push service answered ${code}` };
     this.sent.push({ target, payload });
     return { ok: true, statusCode: 201 };
+  }
+}
+
+/**
+ * Fake "Email me" sender: records each message it accepts. `results` scripts the answers in order (the last one
+ * repeats; default sent). Like the real sender it has no recipient parameter, and it enforces the picks email's rule:
+ * the only links are https://yeackbot.com ones.
+ */
+export class FakeEmailSender implements EmailSender {
+  readonly sent: EmailMessage[] = [];
+  readonly attempts: EmailMessage[] = [];
+  private readonly results: EmailResult[];
+
+  constructor(private readonly o: { configured?: boolean; results?: EmailResult[] } = {}) {
+    this.results = [...(o.results ?? [])];
+  }
+
+  get configured(): boolean {
+    return this.o.configured ?? true;
+  }
+
+  async sendToSelf(m: EmailMessage): Promise<EmailResult> {
+    if (!this.configured) return { status: 'disabled', reason: 'not_connected' };
+    const links = [...`${m.text}\n${m.html}`.matchAll(/https?:\/\/[^\s"'<>)]+/g)].map((x) => x[0]);
+    const foreign = links.filter((u) => !u.startsWith('https://yeackbot.com/'));
+    if (foreign.length) throw new Error(`FakeEmailSender: non-yeackbot links ${foreign.join(', ')}`);
+    this.attempts.push(m);
+    const r = (this.results.length > 1 ? this.results.shift() : this.results[0]) ?? { status: 'sent', messageId: `msg${this.attempts.length}` };
+    if (r.status === 'sent') this.sent.push(m);
+    return r;
   }
 }

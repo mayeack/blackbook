@@ -22,7 +22,7 @@ const SIDEBAR = [TODAY, PEOPLE, ASK, NETWORK, CIRCLES, EVENTS, SOURCES, SETTINGS
 /** Screens reached through the More tab on mobile. */
 export const MORE_ITEMS = [CIRCLES, EVENTS, SOURCES, SETTINGS];
 /** Detail screens of the More items: events, trips and tickets belong to Events, collections to Circles. */
-const EVENT_PATHS = ['/e', '/trips', '/tickets'];
+const EVENT_PATHS = ['/e', '/trips', '/tickets', '/picks'];
 const CIRCLE_PATHS = ['/c', '/tags', '/locations'];
 const MORE_PATHS = ['/more', ...EVENT_PATHS, ...CIRCLE_PATHS, ...MORE_ITEMS.map((i) => i.to)];
 const under = (pathname: string, paths: readonly string[]) => paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));

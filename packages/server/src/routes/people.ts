@@ -11,11 +11,12 @@
  *                                                      Beeper + the Instagram export; 'phone' / 'facetime' = calls)
  *   GET /people/:id/sessions/:sessionId/messages       one session's messages (timeline expand)
  *
- * List views never carry raw phone numbers or emails: names, titles and labels that look like one are masked.
+ * A person's phone numbers show in full (the owner's call, 2026-10-28). Emails and opaque ids stay masked, and
+ * names, titles and labels that look like a phone number or an email are masked.
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { maskPhone, normalizeNamePart, toE164 } from '@yb/shared';
+import { RAW_PHONE_PREFIX, formatPhone, maskPhone, normalizeNamePart, toE164 } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { closenessScore } from '../pipeline/ties/closeness';
 import { badRequest, notFound } from '../http/errors';
@@ -65,9 +66,10 @@ export interface IdentityView {
   status: string;
   label: string | null;
   displayName: string | null;
-  /** Safe display form: masked for phones, emails and opaque ids. */
+  /** Display form: phones in full, emails and opaque ids masked. */
   value: string;
   masked: boolean;
+  /** Masked and the owner can ask for the full value. */
   revealable: boolean;
   firstSeenAt: number | null;
   lastSeenAt: number | null;
@@ -262,16 +264,23 @@ const opaque = (prefix: string, key: string) => `${prefix} ••${key.slice(-4)
 
 const REVEALABLE = new Set(['phone', 'email', 'whatsapp_jid', 'whatsapp_lid', 'instagram_id', 'partiful_user', 'beeper_user']);
 
-/** The display form of an identity key. Phones, emails and opaque ids are masked; handles are not. */
+/** A phone key in full: formatted when it parses, else its digits as stored. */
+function fullPhone(key: string): string {
+  if (key.startsWith(RAW_PHONE_PREFIX)) return key.slice(RAW_PHONE_PREFIX.length);
+  const e164 = key.startsWith('+') ? key : toE164(key);
+  return e164 ? formatPhone(e164) : key;
+}
+
+/** The display form of an identity key. Phones and handles show in full; emails and opaque ids are masked. */
 export function identityValue(kind: string, key: string): { value: string; masked: boolean } {
   switch (kind) {
     case 'phone':
-      return { value: key.startsWith('raw:') ? `••• ${digitsOf(key).slice(-2)}` : maskPhoneLike(key), masked: true };
+      return { value: fullPhone(key), masked: false };
     case 'email':
       return { value: maskEmail(key), masked: true };
     case 'whatsapp_jid': {
       const d = digitsOf(key.split('@')[0] ?? '');
-      return { value: d.length >= 7 ? maskPhoneLike(`+${d}`) : opaque('WhatsApp', key), masked: true };
+      return d.length >= 7 ? { value: fullPhone(`+${d}`), masked: false } : { value: opaque('WhatsApp', key), masked: true };
     }
     case 'whatsapp_lid':
       // Keys are "<digits>@lid": the tail of the digits, not of the server suffix.
@@ -504,7 +513,7 @@ function pageExtras(db: DB, ids: string[]): Map<string, { sources: string[]; han
   return out;
 }
 
-/** The list subtitle's handle when there is no company, best first; phones and emails come out masked. */
+/** The list subtitle's handle when there is no company, best first; phones in full, emails masked. */
 const HANDLE_KINDS = ['instagram_username', 'x_username', 'phone', 'whatsapp_jid', 'email'];
 
 // ---------------------------------------------------------------------------------------------- one person
@@ -579,7 +588,7 @@ const toIdentityView = (i: IdentityRow): IdentityView => {
     displayName: safe(i.display_name),
     value: v.value,
     masked: v.masked,
-    revealable: REVEALABLE.has(i.kind),
+    revealable: v.masked && REVEALABLE.has(i.kind),
     firstSeenAt: i.first_seen_at,
     lastSeenAt: i.last_seen_at,
     createdAt: i.created_at,

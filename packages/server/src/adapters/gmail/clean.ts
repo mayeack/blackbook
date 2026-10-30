@@ -127,6 +127,13 @@ function walk(part: GmailPart | null | undefined, out: Bodies, depth = 0): void 
   for (const p of part.parts ?? []) walk(p, out, depth + 1);
 }
 
+/** A message's text/plain and text/html bodies (decoded), for readers other than the ticket cleaner (event newsletters). */
+export function messageBodies(payload: GmailPart | null | undefined): { plain: string; html: string } {
+  const out: Bodies = { plain: [], html: [], pkpass: 0, ics: false };
+  walk(payload, out);
+  return { plain: out.plain.join('\n'), html: out.html.join('\n') };
+}
+
 // ---------------------------------------------------------------------------------------------- HTML → text
 
 const NAMED: Record<string, string> = {

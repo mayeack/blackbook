@@ -80,6 +80,7 @@ describe('service worker navigations', () => {
     expect(shouldHandle(u('/p/abc?tab=timeline'), o, 'navigate', 'GET')).toBe(true);
     expect(shouldHandle(u('/api/v1/me'), o, 'navigate', 'GET')).toBe(false);
     expect(shouldHandle(u('/healthz'), o, 'navigate', 'GET')).toBe(false);
+    expect(shouldHandle(u('/go/Abc123xyz9'), o, 'navigate', 'GET')).toBe(false); // event-picks ticket redirect
     expect(shouldHandle(u('/cdn-cgi/access/logout'), o, 'navigate', 'GET')).toBe(false);
     expect(shouldHandle(u('/people'), o, 'cors', 'GET')).toBe(false);
     expect(shouldHandle(u('/people'), o, 'navigate', 'POST')).toBe(false);

@@ -183,6 +183,13 @@ export function priceTokens(t: PricedTokens, o: { model: string; mode: 'sync' | 
   return (k * (inputUsd + t.output * card.output)) / 1e6;
 }
 
+/**
+ * Server-side web search (web_search tool): USD per search, on top of the tokens its results add to the prompt.
+ * Claude API price, docs "Web search tool" → Usage and pricing ($10 per 1,000 searches; 2026-10-22). A search that
+ * errors is not billed.
+ */
+export const WEB_SEARCH_USD = 0.01;
+
 /** Cost of one request from its token counts (all cache writes at `cacheTtl`). */
 export function costUsd(t: TokenCounts, mode: 'sync' | 'batch', cacheTtl: CacheTtl = '1h', model: string = DEFAULT_MODEL): number {
   return priceTokens(
@@ -213,6 +220,9 @@ export const LLM_ROUTES = [
   'ask_imessage',
   'eval_shadow',
   'ticket_parse',
+  'events_search',
+  'events_extract',
+  'events_newsletter',
 ] as const;
 export type LlmRoute = (typeof LLM_ROUTES)[number];
 export const isLlmRoute = (r: unknown): r is LlmRoute => typeof r === 'string' && (LLM_ROUTES as readonly string[]).includes(r);
@@ -303,6 +313,15 @@ export const ROUTES: Readonly<Record<LlmRoute, RouteDefaults>> = {
   eval_shadow: r(HAIKU_5_5, 'low', 'disabled', 8000, '5m', 'sync', 700),
   /** Ticket emails (adapters/gmail): one Message Batch per Gmail pass with new candidates; the backfill pool while backfilling. */
   ticket_parse: r(HAIKU_5_5, 'low', 'disabled', 1200, '1h', 'batch', 220),
+  /**
+   * Weekly event picks (intel/eventPicks): two web_search calls a week (candidates, then ticket pages), free-text
+   * JSON answers. A week apart, so no cache marker. Search results count as input (~10–15K tokens per search).
+   */
+  events_search: r(HAIKU_5_5, 'low', 'disabled', 6000, null, 'sync', 2000),
+  /** The fallback when a search answer isn't parseable JSON: the same answer, structured. Rare. */
+  events_extract: r(HAIKU_5_5, 'low', 'disabled', 4000, null, 'sync', 1500),
+  /** The past week's event newsletters from Gmail (masked text, links as refs) → events on the free nights. Weekly. */
+  events_newsletter: r(HAIKU_5_5, 'low', 'disabled', 4000, null, 'sync', 1500),
 };
 
 // ---------------------------------------------------------------------------------------------- overrides

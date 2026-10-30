@@ -1285,12 +1285,37 @@ select.input-sm {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
-.ticket-card .ev-head:is(div):hover {
+.ticket-card .ev-head:is(div):hover,
+.pick-card .ev-head:hover {
   background: none;
 }
 .met-here-label {
   align-self: center;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------- Event picks */
+.picks-week,
+.picks-off {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.pick-why {
+  margin: 8px 14px 0;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.pick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+.picks-history {
+  margin-top: 12px;
 }
 
