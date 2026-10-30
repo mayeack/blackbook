@@ -314,7 +314,7 @@ Alerts go to the Today banner and to Web Push. iMessage alerts go to self, marke
 ```
 /  (repo root; product name "yeackbot")
 ├── package.json            # workspaces ["packages/*"]; scripts: dev, build, test, typecheck, service:*, yb, smoke
-├── tsconfig.base.json  vitest.config.ts  .node-version (25)
+├── tsconfig.base.json  vitest.config.ts  .node-version (26)
 ├── .env.example            # HOST PORT YB_DATA_DIR ANTHROPIC_API_KEY CF_ACCESS_TEAM CF_ACCESS_AUD ALLOWED_EMAIL
 │                           # VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT SECRETS_KEY COLLECTOR_URL BACKUP_AGE_RECIPIENT
 ├── packages/
