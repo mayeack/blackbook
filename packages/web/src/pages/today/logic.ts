@@ -38,7 +38,7 @@ const SKIP_REASONS: Record<string, string> = {
 };
 export const skipReasonLabel = (r: string | null) => (r ? (SKIP_REASONS[r] ?? humanize(r).toLowerCase()) : 'not sent');
 
-function channelPart(name: 'iMessage' | 'push', s: ChannelDelivery): string | null {
+function channelPart(name: 'iMessage' | 'push' | 'email', s: ChannelDelivery): string | null {
   switch (s) {
     case 'sent':
       return `${name} ✓`;
@@ -61,13 +61,16 @@ export function deliveryLine(d: TodayDigest | null, fmtTime: (ms: number) => str
   const channels: [ChannelDelivery, string | null][] = [
     [d.imessage, channelPart('iMessage', d.imessage)],
     [d.push, channelPart('push', d.push)],
+    [d.email, channelPart('email', d.email)],
   ];
   const parts = channels.map(([, p]) => p).filter((p): p is string => p != null);
   // "via" names the channels that delivered; the others follow ("Sent 8:00 via push ✓ · texting off").
   const delivered = channels.filter(([st, p]) => st === 'sent' && p != null).map(([, p]) => p!);
   const rest = channels.filter(([st, p]) => st !== 'sent' && p != null).map(([, p]) => p!);
-  const failed = d.imessage === 'failed' || d.push === 'failed';
-  switch (d.status) {
+  const failed = d.imessage === 'failed' || d.push === 'failed' || d.email === 'failed';
+  // Texting off but the email went: the brief reached him ("Sent 8:00 via email ✓ · texting off").
+  const status = (d.status === 'ready' || d.status === 'skipped') && d.email === 'sent' ? 'sent' : d.status;
+  switch (status) {
     case 'composing':
       return { text: 'Composing today’s brief…', tone: 'muted' };
     case 'failed':
@@ -78,7 +81,7 @@ export function deliveryLine(d: TodayDigest | null, fmtTime: (ms: number) => str
       return { text: parts.length ? `Ready · ${parts.join(' · ')}` : 'Ready', tone: 'muted' };
     case 'sent':
     case 'fallback_sent': {
-      const at = d.sentAt ?? d.pushSentAt;
+      const at = d.sentAt ?? d.pushSentAt ?? d.emailSentAt;
       const head = at != null ? `Sent ${fmtTime(at)}` : 'Sent';
       const tail = d.status === 'fallback_sent' ? ' · basic version' : '';
       const via = delivered.length ? ` via ${delivered.join(' · ')}` : '';

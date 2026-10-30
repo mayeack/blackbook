@@ -53,6 +53,9 @@ export interface DigestRow {
   push_status: string | null;
   notice_outbound_id: string | null;
   delivery_checked_at: number | null;
+  email_status: string | null;
+  email_sent_at: number | null;
+  email_id: string | null;
 }
 
 export interface ItemLinks {

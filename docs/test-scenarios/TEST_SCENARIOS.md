@@ -1987,3 +1987,36 @@ today ✓".
 **Edge cases**: an iMessage `?` question is listed with the web ones; asking while older pages are open refetches
 them in order, nothing doubled.
 **Platforms**: web (desktop + phone widths checked) and the server list route.
+
+## 2026-10-30 — The daily brief by email too
+
+Each morning at the brief time, the whole brief also goes to your own Gmail, from your address to the same address
+(the "Email me" grant the weekly event picks use). It holds what the text holds: the greeting, every numbered item
+with its details and opener draft, the "Heads up" line, and one yeackbot.com/today link. Sensitive items stay
+"Something personal". It's sent once a day (migration 030 records its state on the digest), retried each minute
+after a Gmail 5xx until catch-up, and never sent twice. It still goes when texting is off. It follows quiet hours,
+pause and catch-up like the text. Settings → Digest has the new toggle "Email me the daily brief" (on by default; it
+does nothing until "Email me" is connected). Today's header shows "email ✓".
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root (2106 tests, 1054 files clean).
+2. `packages/server/test/delivery/send.test.ts` "the brief by email": the email goes once at digest.time beside the
+   text with the same lines; texting off; not connected, then connected before catch-up; digest.email off; 5xx
+   retried, revoked grant final; a crash mid-call never sends twice; quiet hours, pause and catch-up; someone hidden
+   after the text went is left out; empty days send none.
+3. `packages/server/test/delivery/digestEmail.test.ts`: exact plain text, the outbound-rule fallback ("One for you in
+   the app"), HTML escaping, yeackbot.com/today as the only link. `packages/web/test/today.test.ts`: header lines.
+4. A copy of the live DB migrates v28 → [29, 30] and today's stored brief renders as a 4-item email that matches the
+   text. Nothing was sent.
+
+### Scenario B — Owner, after deploy
+1. Settings → Email & photos → connect "Email me", signing in as the Gmail account you want it from and to.
+   **Expected**: connected. The address comes from Google's verified sign-in.
+2. Settings → Digest. **Expected**: "Email me the daily brief" is on.
+3. Next morning at the brief time. **Expected**: the usual text, plus an email "Your brief for <day>: N things" from
+   yeackbot <you> to you, with the same items, and Today shows "Sent 8:00 via iMessage ✓ · email ✓".
+4. Turn the toggle off. **Expected**: no email the next day; the text is unchanged.
+
+**Edge cases**: a revoked grant marks the email ✗ on Today and Sources asks for a reconnect. With texting off the
+email alone shows "Sent 8:00 via email ✓ · texting off". A brief that arrives after catch-up sends no email.
+**Platforms**: server + web. Not checked in Gmail; not deployed.

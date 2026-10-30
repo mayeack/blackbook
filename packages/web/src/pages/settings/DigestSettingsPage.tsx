@@ -144,6 +144,7 @@ function History() {
               {d.hadWildcard ? ' · 🎲' : ''}
               {d.sentAt != null ? ` · ${dateTime(d.sentAt)}` : ''}
               {d.pushSentAt != null ? ' · push ✓' : ''}
+              {d.emailSentAt != null ? ' · email ✓' : ''}
             </span>
           </div>
         );
@@ -206,6 +207,9 @@ function DigestForm({ form }: { form: SettingsForm }) {
             checked={v['digest.enabled']}
             onChange={(on) => (on ? setConfirmOn(true) : form.set('digest.enabled', false))}
           />
+        </SettingRow>
+        <SettingRow form={form} k="digest.email">
+          <Toggle id={fieldId('digest.email')} checked={v['digest.email']} onChange={(x) => form.set('digest.email', x)} />
         </SettingRow>
         <SettingRow form={form} k="digest.time" formatDefault={(x) => hhmmLabel(String(x))}>
           <TimeField id={fieldId('digest.time')} value={v['digest.time']} onChange={(t) => form.set('digest.time', t)} />

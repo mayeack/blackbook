@@ -23,6 +23,8 @@ const days = (min: number, max: number) => z.number().int().min(min).max(max);
 export const SettingsValues = z.object({
   // ---- digest (PLAN "Digest"; delivery §3). Ships DISABLED: nothing is sent until the owner turns it on.
   'digest.enabled': z.boolean(),
+  /** The brief also goes to the owner's own Gmail ("Email me", the gmail_send grant); inert until that is connected. */
+  'digest.email': z.boolean(),
   'digest.time': HHMM,
   /** A digest missed while the Mac was down still goes out before this time; later, Today only. */
   'digest.catch_up_until': HHMM,

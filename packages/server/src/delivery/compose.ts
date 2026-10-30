@@ -192,6 +192,12 @@ const bareLines = (ordinal: number): string[] => [`${ordinal}. One for you in th
 
 const asText = (lines: string[]): string => `${BOT_MARKER} ${lines.join('\n')}`;
 
+/** Whether lines pass the outbound rules (no phone numbers, emails or non-yeackbot links) as the brief would send them. */
+export const passesOutbound = (lines: string[]): boolean => checkOutboundText(asText(lines)).length === 0;
+
+/** An item's lines as the brief shows them: its own when they pass the outbound rules, else the bare "in the app" line. */
+export const safeItemLines = (i: ItemText & Pick<ComposedItem, 'ordinal'>): string[] => (passesOutbound(itemLines(i)) ? itemLines(i) : bareLines(i.ordinal));
+
 /**
  * The brief as one text: the greeting, every item (a blank line between them), the health line, the closing. A day
  * with no items is just the health text, if any.
@@ -281,7 +287,7 @@ export async function composeSelection(
   const { lastNight, health } = statusLines(db, o.now);
   // Per item: LLM copy if its text passes the outbound rules, else template copy, else a bare "open the app" line;
   // a detail line that breaks a rule is dropped on its own (it never costs the item its copy).
-  const ok = (lines: string[]) => checkOutboundText(asText(lines)).length === 0;
+  const ok = passesOutbound;
   const fit = (i: ComposedItem): ComposedItem => ({ ...i, details: i.details.filter((d) => ok([d])) });
   let rejected = 0;
   const composed = items.map((i) => {
@@ -291,7 +297,7 @@ export async function composeSelection(
     return fit(build(i, false));
   });
   const input: TextParts = { items: composed, health, commandsEnabled: settings['commands.enabled'], digestTime: settings['digest.time'] };
-  let texts = digestTexts(input, (i) => (ok(itemLines(i)) ? itemLines(i) : bareLines(i.ordinal)));
+  let texts = digestTexts(input, safeItemLines);
   let parts = textParts(composed, texts);
   if (texts.some((t) => checkOutboundText(t).length)) {
     texts = [minimalText(composed.length)];

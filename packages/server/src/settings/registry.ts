@@ -75,6 +75,12 @@ const DEFS: { [K in AnySettingKey]: Def<K> } = {
     description: 'Send the morning brief to yourself over iMessage. Off until you turn it on.',
     default: v(false),
   },
+  'digest.email': {
+    group: 'digest',
+    label: 'Email me the daily brief',
+    description: 'Also send the brief to your own Gmail, from and to your address (once “Email me” is connected in Email & photos).',
+    default: v(true),
+  },
   'digest.time': { group: 'digest', label: 'Brief time', description: 'When the brief is sent (local time).', default: v('08:00') },
   'digest.catch_up_until': {
     group: 'digest',

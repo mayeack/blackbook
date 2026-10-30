@@ -28,6 +28,7 @@ import * as ticketsMetAt from './migrations/026_tickets_met_at';
 import * as commitmentStakes from './migrations/027_commitment_stakes';
 import * as eventPicks from './migrations/028_event_picks';
 import * as eventPicksByDay from './migrations/029_event_picks_by_day';
+import * as digestEmail from './migrations/030_digest_email';
 
 export interface Migration {
   version: number;
@@ -87,6 +88,7 @@ export const MIGRATIONS: Migration[] = [
   slot(27, 'commitment_stakes', commitmentStakes),
   slot(28, 'event_picks', eventPicks),
   slot(29, 'event_picks_by_day', eventPicksByDay),
+  slot(30, 'digest_email', digestEmail),
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

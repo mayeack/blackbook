@@ -14,7 +14,7 @@ import { DigestItem } from './suggestions';
 export const DigestStatus = z.enum(['composing', 'ready', 'sent', 'fallback_sent', 'skipped', 'failed']);
 export type DigestStatus = z.infer<typeof DigestStatus>;
 
-/** Per-channel delivery state for the header ("Sent 8:00 via iMessage ✓ · push ✓"). */
+/** Per-channel delivery state for the header ("Sent 8:00 via iMessage ✓ · email ✓"). */
 export const ChannelDelivery = z.enum(['sent', 'pending', 'skipped', 'failed', 'disabled', 'not_configured']);
 export type ChannelDelivery = z.infer<typeof ChannelDelivery>;
 
@@ -28,6 +28,9 @@ export const TodayDigest = z.object({
   pushSentAt: Ms.nullable(),
   imessage: ChannelDelivery,
   push: ChannelDelivery,
+  /** The brief emailed to the owner's own Gmail (settings digest.email). */
+  email: ChannelDelivery,
+  emailSentAt: Ms.nullable(),
   /** Why nothing went out ('disabled', 'paused', 'empty', 'quiet_hours', 'catch_up_passed', 'llm_unavailable', …). */
   skipReason: z.string().nullable(),
 });
