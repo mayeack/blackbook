@@ -1,5 +1,5 @@
 /**
- * Today (delivery §2): date + delivery status → alerts → today's digest cards → Open loops → Check these →
+ * Today (delivery §2): date + delivery status → integrations to fix → alerts → today's digest cards → Open loops → Check these →
  * "What the agent did". Works before the agent loop exists: if /today isn't available the brief says so and the
  * activity feed still shows.
  */
@@ -13,6 +13,7 @@ import { AlertsBanner } from './today/Alerts';
 import { useAlerts, useToday } from './today/api';
 import { CheckThese } from './today/CheckThese';
 import { DigestCard } from './today/DigestCard';
+import { IntegrationsBanner } from './today/Integrations';
 import { deliveryLine, isOpen } from './today/logic';
 import { OpenLoopsStrip } from './today/OpenLoops';
 import './today/today.css';
@@ -75,6 +76,7 @@ export function TodayPage() {
           </>
         }
       />
+      <IntegrationsBanner />
       <AlertsBanner alerts={t ? t.alerts : (fallbackAlerts.data?.alerts ?? [])} />
 
       <h2 className="section-title">Your brief</h2>
