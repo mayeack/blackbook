@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { joinBatchParts, isObligationsCustomId, mergedText, obligationsCustomId, windowCustomId } from '../../src/extraction/parts';
 import { EXTRACTION_PROMPT_VERSION } from '../../src/extraction/prompt';
 import type { DB } from '../../src/db/connection';
-import { collect, MAX_ATTEMPTS, reviveDeadLetters, submitSteady, type Counts } from '../../src/extraction/run';
+import { collect, INVALID_REQUEST_ALERT, MAX_ATTEMPTS, resolveInvalidRequestAlert, reviveDeadLetters, submitSteady, type Counts } from '../../src/extraction/run';
 import { EMPTY_OBLIGATIONS, Extraction } from '../../src/extraction/schema';
 import { needsObligations } from '../../src/extraction/validate';
 import type { LlmBatchResult } from '../../src/llm/types';
@@ -188,6 +188,31 @@ describe('windows the API refused under an older prompt', () => {
     const rep = await submitSteady(deps(w, f, NOW + DAY));
     expect(rep.counts.revived_invalid_request).toBeUndefined();
     expect(windowsOf(w.db, w.dm)[0]!.status).toBe('dead_letter');
+  });
+
+  const openAlerts = (db: DB) => count(db, `SELECT count(*) FROM alerts WHERE source = ? AND resolved_at IS NULL`, INVALID_REQUEST_ALERT);
+
+  it('the alert stays open while the revived window is on its way and closes itself once it is applied', async () => {
+    const { w, f, win } = await deadLettered();
+    expect(openAlerts(w.db)).toBe(1);
+    w.db.prepare(`UPDATE extraction_items SET prompt_version = '7e37e334' WHERE window_id = ?`).run(win);
+    await submitSteady(deps(w, f, NOW + DAY));
+    expect(resolveInvalidRequestAlert(w.db, NOW + DAY)).toBe(0); // submitted, not yet answered
+    expect(openAlerts(w.db)).toBe(1);
+    const rep = await collect(deps(w, f, NOW + DAY + 10 * MIN));
+    expect(rep.counts).toMatchObject({ applied: 1, alert_resolved_invalid_request: 1 });
+    expect(openAlerts(w.db)).toBe(0);
+    expect(count(w.db, `SELECT resolved_at FROM alerts WHERE source = ?`, INVALID_REQUEST_ALERT)).toBeGreaterThanOrEqual(NOW + DAY + 10 * MIN);
+  });
+
+  it('a window still dead keeps the alert open; once dismissed, collects never reopen it', async () => {
+    const { w, f } = await deadLettered();
+    expect((await collect(deps(w, f, NOW + HOUR))).counts.alert_resolved_invalid_request).toBeUndefined();
+    expect(openAlerts(w.db)).toBe(1);
+    w.db.prepare(`UPDATE alerts SET resolved_at = ? WHERE source = ?`).run(NOW + HOUR, INVALID_REQUEST_ALERT);
+    await collect(deps(w, f, NOW + 2 * HOUR));
+    expect(count(w.db, `SELECT count(*) FROM alerts`)).toBe(1);
+    expect(openAlerts(w.db)).toBe(0);
   });
 });
 
