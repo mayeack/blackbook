@@ -13,7 +13,8 @@
  *                  signals still apply). Haiku 5.5 has no server-side fallback, so a refusal is final; only a route
  *                  overridden to a model with sync fallbacks re-runs it once synchronously (llm.parse).
  *   result types   errored/invalid_request → dead-letter + alert; errored/other, canceled → retry now before 06:00
- *                  else next night; expired → next night; attempts > 3 → dead-letter.
+ *                  else next night; expired → next night; attempts > 3 → dead-letter. The invalid_request alert
+ *                  resolves itself (every collect) once no window it was opened for is still unsettled.
  *   backfill       startBackfill: conversation-month windows over everything before each conversation's steady
  *                  start, submitted in one or two batches from the separate 'backfill' pool (as much as its
  *                  allowance covers; the rest waits); when all are done: chronological reconcile, then one
@@ -338,6 +339,26 @@ function markLedger(db: DB, customIdValue: string, status: 'applied' | 'rejected
 
 function raiseAlert(db: DB, source: string, message: string, now: number): void {
   db.prepare(`INSERT OR IGNORE INTO alerts (id, source, severity, message, opened_at) VALUES (?, ?, 'warning', ?, ?)`).run(uuidv7(now), source, message, now);
+}
+
+export const INVALID_REQUEST_ALERT = 'extraction:invalid_request';
+
+/**
+ * Resolves the open invalid_request alert once no window the API ever refused as invalid is still pending, submitted
+ * or dead-lettered (e.g. all of them were revived under a newer prompt version and applied). It never opens one (a
+ * new refusal does), so a dismissed alert stays dismissed. Returns 1 when it resolved the alert.
+ */
+export function resolveInvalidRequestAlert(db: DB, now: number): number {
+  if (!db.prepare('SELECT 1 FROM alerts WHERE source = ? AND resolved_at IS NULL').pluck().get(INVALID_REQUEST_ALERT)) return 0;
+  const unsettled = db
+    .prepare(
+      `SELECT 1 FROM windows w WHERE w.status IN ('pending','submitted','dead_letter')
+         AND EXISTS (SELECT 1 FROM extraction_items i WHERE i.window_id = w.id AND i.outcome = 'invalid_request') LIMIT 1`,
+    )
+    .pluck()
+    .get();
+  if (unsettled) return 0;
+  return db.prepare('UPDATE alerts SET resolved_at = ? WHERE source = ? AND resolved_at IS NULL').run(now, INVALID_REQUEST_ALERT).changes;
 }
 
 /**
@@ -736,7 +757,7 @@ async function handleWindowResult(c: CollectCtx, item: ItemRow, knowledge: LlmBa
   if (r.type === 'errored') {
     if (r.errorType === 'invalid_request') {
       deadLetter(c, item, 'invalid_request');
-      raiseAlert(db, 'extraction:invalid_request', 'Some extraction requests were rejected as invalid (a prompt or schema bug); those windows were dead-lettered.', c.env.now);
+      raiseAlert(db, INVALID_REQUEST_ALERT, 'Some extraction requests were rejected as invalid (a prompt or schema bug); those windows were dead-lettered.', c.env.now);
       return;
     }
     return hhmm(c.env.now, c.env.tz) < RETRY_NOW_BEFORE ? again({ outcome: 'errored' }) : retryLater(c, item, 'errored');
@@ -894,6 +915,7 @@ export async function collect(deps: ExtractionDeps): Promise<CollectReport> {
     const now = deps.now();
     bump(counts, 'pending_expired', expirePendingMentions(db, now));
     bump(counts, 'packets_purged', purgePackets(db, now));
+    if (resolveInvalidRequestAlert(db, now)) bump(counts, 'alert_resolved_invalid_request');
   };
   if (!open.length && !active) {
     housekeeping();
