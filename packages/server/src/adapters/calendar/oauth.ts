@@ -6,7 +6,9 @@
  *   consume()  → the verifier and product for a returned state, once (a replayed or expired state gets null). The
  *                product comes from the pending entry, never from the callback's query, so a callback can't store a
  *                token under another product.
- *   exchange() → code + verifier → refresh token and granted scopes (POST oauth2.googleapis.com/token).
+ *   exchange() → code + verifier → refresh token, granted scopes and, when the consent asked for openid email
+ *                (gmail_send), the account's verified address from the id_token (POST oauth2.googleapis.com/token:
+ *                straight from Google over TLS, so its payload is read without checking the signature).
  *   revoke()   → POST oauth2.googleapis.com/revoke.
  * A server restart drops pending flows: the owner just starts again from Settings.
  */
@@ -27,6 +29,22 @@ export const codeChallenge = (verifier: string) => b64url(hash(verifier));
 export interface ExchangeResult {
   refreshToken: string | null;
   scopes: string[];
+  /** The id_token's address when Google says it is verified, else null. */
+  email: string | null;
+}
+
+/** The verified address in an id_token's payload, or null. */
+export function idTokenEmail(idToken: unknown): string | null {
+  if (typeof idToken !== 'string') return null;
+  const payload = idToken.split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { email?: unknown; email_verified?: unknown };
+    const email = typeof claims.email === 'string' ? claims.email.trim() : '';
+    return (claims.email_verified === true || claims.email_verified === 'true') && /^[^@\s]{1,64}@[^@\s]{1,255}\.[a-z]{2,}$/i.test(email) ? email : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface OAuthFlowOptions {
@@ -62,7 +80,7 @@ export class GoogleOAuthFlow {
     const url = this.client().generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
-      scope: [GOOGLE_PRODUCTS[product].scope],
+      scope: [GOOGLE_PRODUCTS[product].scope, ...(GOOGLE_PRODUCTS[product].extraScopes ?? [])],
       include_granted_scopes: false,
       response_type: 'code',
       state,
@@ -91,6 +109,7 @@ export class GoogleOAuthFlow {
       return {
         refreshToken: typeof tokens.refresh_token === 'string' && tokens.refresh_token ? tokens.refresh_token : null,
         scopes: typeof tokens.scope === 'string' ? tokens.scope.split(/\s+/).filter(Boolean) : [],
+        email: idTokenEmail(tokens.id_token),
       };
     } catch (e) {
       throw mapGoogleError(e);

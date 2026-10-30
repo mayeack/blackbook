@@ -25,7 +25,7 @@ export function validateField<K extends SettingKey>(key: K, value: unknown): str
   if (r.success) return null;
   const b = numberBounds(key);
   if (b.min != null && b.max != null) return `${b.int ? 'A whole number' : 'A number'} from ${b.min} to ${b.max}.`;
-  if (key === 'digest.time' || key === 'digest.catch_up_until') return 'A time like 08:00.';
+  if (key === 'digest.time' || key === 'digest.catch_up_until' || key === 'events.time') return 'A time like 08:00.';
   return r.error.issues[0]?.message ?? 'Not a valid value.';
 }
 
@@ -107,6 +107,9 @@ export function hhmmLabel(t: string): string {
   const d = new Date(2000, 0, 1, Math.floor(m / 60), m % 60);
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(d);
 }
+
+/** Day name for events.weekday (0 = Sunday … 6 = Saturday) in the viewer's locale: "Monday". */
+export const weekdayName = (day: number) => new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(new Date(2026, 0, 4 + day));
 
 /** Wildcard chance as a percentage string ("20%"). */
 export const pct = (x: number, digits = 0) => `${(x * 100).toFixed(digits)}%`;

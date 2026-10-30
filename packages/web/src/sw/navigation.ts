@@ -22,10 +22,16 @@ export interface NavigationDeps {
 /** Cloudflare Access endpoints (login callback, logout) are never handled or cached. */
 export const isAccessPath = (pathname: string) => pathname.startsWith('/cdn-cgi/');
 
-/** Same-origin page navigations the worker answers (never API calls, health, or Access endpoints). */
+/**
+ * The event-picks ticket link (/go/<id>): the server redirects it to a ticket site, which is not a sign of a
+ * signed-out session, so the worker leaves it alone instead of dropping the shell.
+ */
+export const isTicketRedirect = (pathname: string) => pathname.startsWith('/go/');
+
+/** Same-origin page navigations the worker answers (never API calls, health, Access endpoints or ticket redirects). */
 export function shouldHandle(url: URL, origin: string, mode: string, method: string): boolean {
   if (mode !== 'navigate' || method !== 'GET' || url.origin !== origin) return false;
-  return !url.pathname.startsWith('/api/') && url.pathname !== '/healthz' && !isAccessPath(url.pathname);
+  return !url.pathname.startsWith('/api/') && url.pathname !== '/healthz' && !isAccessPath(url.pathname) && !isTicketRedirect(url.pathname);
 }
 
 export const signedOut = (res: Response) =>

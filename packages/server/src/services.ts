@@ -1,16 +1,20 @@
 /**
- * The agent's outward-facing services (LLM, egress, outbound iMessage-to-self, web push, command screenshots from
- * the collector), built once per database from the config and shared by routes and jobs. Every one is inert when
- * unconfigured (no API key, no collector, no VAPID keys), so callers always take their deterministic/template path
- * in that case.
+ * The agent's outward-facing services (LLM, egress, outbound iMessage-to-self, web push, email to the owner's own
+ * inbox, Gmail reads for the event picks' newsletters, command screenshots from the collector), built once per
+ * database from the config and shared by routes and jobs. Every one is inert when unconfigured (no API key, no
+ * collector, no VAPID keys, no Google client / grant), so callers always take their deterministic/template path in
+ * that case.
  *
  * Route modules:  const { llm } = resolveServices(deps);          (deps: RouteDeps)
  * Job modules:    const { outbound } = resolveServices({ ...deps, db: ctx.db });
  * Tests inject fakes with `services: () => ({ llm: new FakeLlmClient(), … })`.
  */
+import { connectedClient } from './adapters/calendar/google';
+import { gmailApi, type GmailApi } from './adapters/gmail/api';
 import { collectorAttachmentSource, disabledAttachmentSource, type AttachmentSource } from './adapters/imessage/attachments';
 import type { AppConfig } from './config';
 import type { DB } from './db/connection';
+import { createEmailSender, type EmailSender } from './delivery/email';
 import { createOutboundSender } from './delivery/outbound';
 import { createPushSender } from './delivery/push';
 import type { OutboundSender, PushSender } from './delivery/types';
@@ -27,13 +31,17 @@ export interface AgentServices {
   local?: LocalLlm;
   outbound: OutboundSender;
   push: PushSender;
+  /** Email to the owner's own address (the gmail_send grant); absent = not available (tests, scratch CLIs). */
+  email?: EmailSender;
+  /** Read-only Gmail (the gmail grant), or null until it is connected; absent = not available. */
+  gmail?: () => GmailApi | null;
   /** Self-thread command screenshots from the collector (absent = commands are text-only). */
   attachments?: AttachmentSource;
 }
 
 export type ServicesProvider = (db: DB) => AgentServices;
 
-export type ServicesConfig = Partial<Pick<AppConfig, 'anthropicApiKey' | 'ollamaUrl' | 'vapid' | 'collectorUrl' | 'collectorTokenFile'>>;
+export type ServicesConfig = Partial<Pick<AppConfig, 'anthropicApiKey' | 'ollamaUrl' | 'vapid' | 'collectorUrl' | 'collectorTokenFile' | 'google' | 'secretsKey'>>;
 
 const cache = new WeakMap<DB, AgentServices>();
 
@@ -53,6 +61,12 @@ export function servicesFor(db: DB, config?: ServicesConfig, log?: Logger): Agen
         log,
       }),
       push: createPushSender({ vapid: config?.vapid ?? null, log }),
+      email: createEmailSender({ db, secretsKey: config?.secretsKey ?? null, google: config?.google ?? null, log }),
+      gmail: () => {
+        if (!config?.google || !config.secretsKey) return null;
+        const client = connectedClient(db, config.secretsKey, config.google, undefined, 'gmail');
+        return client ? gmailApi(client) : null;
+      },
       attachments:
         config?.collectorUrl && config.collectorTokenFile
           ? collectorAttachmentSource({ url: config.collectorUrl, tokenFile: config.collectorTokenFile, log })

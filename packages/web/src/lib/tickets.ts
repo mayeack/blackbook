@@ -57,8 +57,8 @@ export function ticketCountsLine(t: Pick<TicketItem, 'status' | 'held' | 'quanti
   return [heldText(t), ...flows].filter(Boolean).join(' · ');
 }
 
-/** "Concert · house, techno": the category and up to three inferred genres. */
-export function ticketKindLine(t: Pick<TicketItem, 'category' | 'genres'>): string {
+/** "Concert · house, techno": the category and up to three inferred genres (a ticket's, or an event pick's). */
+export function ticketKindLine(t: { category: string; genres: readonly string[] }): string {
   const genres = t.genres.slice(0, 3).join(', ');
   return genres ? `${ticketCategoryLabel(t.category)} · ${genres}` : ticketCategoryLabel(t.category);
 }
