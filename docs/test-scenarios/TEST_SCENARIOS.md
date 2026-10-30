@@ -508,7 +508,7 @@ now has: a Node/Express server with the full schema, an undo journal, a schedule
 collector (inside the BlackbookServer target) serving a loopback API that decodes `attributedBody`; a legacy SwiftData
 migration; iMessage ingest; and a PWA shell (People / Person / Sources / Today / Settings → Hidden).
 
-**Setup:** Node 25, `npm install` at the repo root. The collector's SwiftPM tests and dev runner need only the Command Line
+**Setup:** Node 26, `npm install` at the repo root. The collector's SwiftPM tests and dev runner need only the Command Line
 Tools. The app build needs Xcode.
 
 ### Scenario A — Automated suites
