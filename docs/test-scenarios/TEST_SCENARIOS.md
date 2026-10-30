@@ -1936,6 +1936,29 @@ today ✓".
 **Edge cases**: a brief where every item was skipped shows "All done for today ✓", not the "No brief yet" empty state.
 **Platforms**: web only. Not checked in a browser; not deployed.
 
+## Ask: no History button, recent questions a page at a time (2026-10-28)
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2012 tests pass.
+2. `test/ask/routes.test.ts` "pages the conversation list…": 7 conversations, two with the same `updated_at` across
+   the first page break, `limit=3` → every id once, newest first, `nextCursor` null on the last page (also when the
+   last page is exactly full); `cursor=nope` → 400. A cursor that repeats or skips the tied row fails the test.
+
+### Scenario B — Browser preview (Claude verified, synthetic data)
+1. The real app on the synthetic Ask test world with 12 conversations, through Vite. **Expected**: /ask has no History
+   button; Recent shows 5 and "Show older"; two clicks → 10, then 12 and the button is gone; no console errors.
+2. Open a recent question. **Expected**: the header shows only "New"; New goes back to /ask with 5 recent.
+
+### Scenario C — yeackbot.com (owner, after deploy)
+1. Open Ask. **Expected**: no "History" link top right; Recent lists up to 5 questions.
+2. With more than 5 earlier questions, tap "Show older". **Expected**: the next 5 appear below; the button goes away
+   once all are shown.
+3. Ask something new, then tap New. **Expected**: it is first under Recent.
+
+**Edge cases**: an iMessage `?` question is listed with the web ones; asking while older pages are open refetches
+them in order, nothing doubled.
+**Platforms**: web (desktop + phone widths checked) and the server list route.
+
 ## 2026-10-28 — Network map: people only, and every person a separate dot
 
 **Why:** the map showed venues and party brands as people (a gallery that hosted twenty Partiful parties was one of

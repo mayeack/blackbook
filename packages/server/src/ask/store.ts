@@ -163,20 +163,32 @@ export function getConversation(db: DB, id: string): AskConversation | null {
   return { id: c.id, title: f.title(c.title), turns, createdAt: c.created_at, updatedAt: c.updated_at };
 }
 
-export function listConversations(db: DB, limit = 50): AskConversationSummary[] {
+/** A list page cursor: the previous page's last row, `<updated_at>.<id>`. */
+export const CONVERSATION_CURSOR = /^(\d{1,15})\.([0-9a-f-]{36})$/i;
+
+/** Most recent first, `limit` per page; `cursor` (a page's nextCursor) continues after that page. */
+export function listConversations(db: DB, limit = 50, cursor: string | null = null): { conversations: AskConversationSummary[]; nextCursor: string | null } {
   const f = visibilityFilter(db);
-  return (db
+  const after = cursor ? CONVERSATION_CURSOR.exec(cursor) : null;
+  const rows = db
     .prepare(
       `SELECT c.id, c.title, c.created_at, c.updated_at, (SELECT count(*) FROM ask_turns t WHERE t.conversation_id = c.id) AS n
-       FROM ask_conversations c ORDER BY c.updated_at DESC, c.id DESC LIMIT ?`,
+       FROM ask_conversations c ${after ? 'WHERE c.updated_at < ? OR (c.updated_at = ? AND c.id < ?)' : ''}
+       ORDER BY c.updated_at DESC, c.id DESC LIMIT ?`,
     )
-    .all(limit) as { id: string; title: string; created_at: number; updated_at: number; n: number }[]).map((r) => ({
-    id: r.id,
-    title: f.title(r.title),
-    turnCount: r.n,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  }));
+    .all(...(after ? [Number(after[1]), Number(after[1]), after[2]!.toLowerCase()] : []), limit + 1) as {
+    id: string;
+    title: string;
+    created_at: number;
+    updated_at: number;
+    n: number;
+  }[];
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  return {
+    conversations: page.map((r) => ({ id: r.id, title: f.title(r.title), turnCount: r.n, createdAt: r.created_at, updatedAt: r.updated_at })),
+    nextCursor: rows.length > limit && last ? `${last.updated_at}.${last.id}` : null,
+  };
 }
 
 /** Turns left 'running' by a crash or restart are closed as errors (they'll never finish). */

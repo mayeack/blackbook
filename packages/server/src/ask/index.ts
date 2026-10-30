@@ -7,5 +7,5 @@
 export { askNetwork, ASK_TIMEOUT_MS, type AskEngineAnswer, type AskEngineRequest } from './engine';
 export { answerForImessage, askForImessage, formatImessageAnswer, IMESSAGE_ANSWER_CHARS, type ImessageAnswer, type ImessageAskContext } from './imessage';
 export { NEEDS_KEY_MESSAGE } from './degraded';
-export { conversationExists, getConversation, listConversations } from './store';
+export { CONVERSATION_CURSOR, conversationExists, getConversation, listConversations } from './store';
 export { suggestedPrompts } from './suggested';
