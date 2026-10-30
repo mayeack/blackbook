@@ -418,6 +418,9 @@ Ticket count ("4 tickets") caps how many unnamed companions are assumed.
 - Base scores, per-(person, kind) cooldowns and fatigue are in intelligence §5.
 - Time-critical items are forced in.
 - Default cap 4 (max 5), at most 2 items of one kind.
+- Nothing is brought up about an event that is over (a past plan, "follow up after last night", "a year ago today")
+  unless there is a documented intent to follow up: a reminder the owner set, or a promise to send / call / intro /
+  reply / do a favor (owner, 2026-10-25/28).
 
 **Self-learning ranker** (new; `pipeline/learner.ts`), driven by what Michael requested:
 - **Arms**: one Beta(α, β) per `kind`, per `kind × tie-tier`, per `kind × circle` (backoff to the kind level when sparse), per **person**, and per wildcard generator.
@@ -446,7 +449,8 @@ Ticket count ("4 tickets") caps how many unnamed companions are assumed.
 - The wildcard is drawn uniformly from these generators:
   - a once-close dormant person (H≥50, S>180 days);
   - a suggestion kind not shown in 14 days;
-  - an "on this day" memory (an occasion or conversation from a year ago, with the people involved);
+  - an "on this day" memory (an occasion or conversation from a year ago, with the people involved), only for people
+    with a follow-up promised around that day and still open (so in practice rarely);
   - a mid-score intro pair;
   - a random circle check-in.
 - Wildcard feedback trains the wildcard-generator arm, plus the underlying kind at weight 0.5.

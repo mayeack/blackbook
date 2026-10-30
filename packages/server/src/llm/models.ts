@@ -315,9 +315,10 @@ export const ROUTES: Readonly<Record<LlmRoute, RouteDefaults>> = {
   ticket_parse: r(HAIKU_5_5, 'low', 'disabled', 1200, '1h', 'batch', 220),
   /**
    * Weekly event picks (intel/eventPicks): two web_search calls a week (candidates, then ticket pages), free-text
-   * JSON answers. A week apart, so no cache marker. Search results count as input (~10–15K tokens per search).
+   * JSON answers (up to ~40 events: 3–5 for each free day). A week apart, so no cache marker. Search results count as
+   * input (~10–15K tokens per search).
    */
-  events_search: r(HAIKU_5_5, 'low', 'disabled', 6000, null, 'sync', 2000),
+  events_search: r(HAIKU_5_5, 'low', 'disabled', 8000, null, 'sync', 2000),
   /** The fallback when a search answer isn't parseable JSON: the same answer, structured. Rare. */
   events_extract: r(HAIKU_5_5, 'low', 'disabled', 4000, null, 'sync', 1500),
   /** The past week's event newsletters from Gmail (masked text, links as refs) → events on the free nights. Weekly. */

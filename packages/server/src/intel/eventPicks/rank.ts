@@ -15,10 +15,12 @@
  *
  *   score = 0.4·taste + 0.25·kind + 0.25·learned + 0.1·link
  *
- * Choosing (choosePicks): best score first, at most 2 per night and 2 per kind while others are left, only events
- * with a ticket (or resale) link unless that leaves fewer than 2. With probability PICK.wildcardEpsilon the last slot
- * goes to a 🎲 wildcard: the best remaining event of a kind he rarely goes to (share < 15%), so the picks can learn
- * beyond what he already does. Deterministic for a given rng.
+ * Choosing (choosePerDay; owner 2026-10-28: "Have 3-5 events per day where it looks like I am free"): for each free
+ * day, best score first, up to events.max_picks that day (less the Recurring Events listings already on it), at most
+ * PICK.perKind of one kind while others are left, events with a ticket (or resale) link first; one with only a listing
+ * page only to reach PICK.minPerDay. With probability PICK.wildcardEpsilon one slot of the week goes to a 🎲 wildcard:
+ * the best remaining event of a kind he rarely goes to (share < 15%), so the picks can learn beyond what he already
+ * does. Deterministic for a given rng.
  */
 import { features, similarity, type EventFeatures, type TicketCategory } from '../similarity';
 import type { LinkKind } from './links';
@@ -27,7 +29,9 @@ import type { TasteProfile } from './profile';
 export const PICK = {
   weights: { taste: 0.4, kind: 0.25, learned: 0.25, link: 0.1 },
   linkScore: { ticket: 1, resale: 0.6, listing: 0.2 } as Readonly<Record<LinkKind, number>>,
-  perNight: 2,
+  /** A free day gets at least this many when there are enough (listing pages fill up to it). */
+  minPerDay: 3,
+  /** Of one kind in a day while other kinds are left. */
   perKind: 2,
   wildcardEpsilon: 0.2,
   /** A wildcard's kind is one he rarely goes to. */
@@ -170,36 +174,58 @@ export interface Chosen<C extends Candidate = Candidate> extends Scored<C> {
 
 const buyable = (c: Candidate) => c.linkKind === 'ticket' || c.linkKind === 'resale';
 
-/** The week's picks, in send order (by date, then score). */
-export function choosePicks<C extends Candidate>(scored: readonly Scored<C>[], max: number, profile: TasteProfile, rng: Rng): Chosen<C>[] {
-  const pool = [...scored].sort((a, b) => b.parts.score - a.parts.score || a.c.date.localeCompare(b.c.date) || a.c.id.localeCompare(b.c.id));
-  const withLinks = pool.filter((s) => buyable(s.c));
-  const eligible = withLinks.length >= Math.min(2, max) ? withLinks : pool.filter((s) => s.c.linkKind !== null);
-  const wildcard = max >= 3 && rng() < PICK.wildcardEpsilon;
-  const regular = wildcard ? max - 1 : max;
+/**
+ * Each free day's picks (see the header), in send order (by date, then score). `taken` = slots a day already has
+ * (its Recurring Events listings).
+ */
+export function choosePerDay<C extends Candidate>(
+  scored: readonly Scored<C>[],
+  perDay: number,
+  profile: TasteProfile,
+  rng: Rng,
+  taken: ReadonlyMap<string, number> = new Map(),
+): Chosen<C>[] {
+  const byScore = [...scored].sort((a, b) => b.parts.score - a.parts.score || a.c.date.localeCompare(b.c.date) || a.c.id.localeCompare(b.c.id));
+  const dates = [...new Set(byScore.map((s) => s.c.date))].sort();
   const chosen: Chosen<C>[] = [];
-  const take = (strict: boolean) => {
-    for (const s of eligible) {
-      if (chosen.length >= regular) return;
-      if (chosen.some((x) => x.c.id === s.c.id)) continue;
-      if (strict) {
-        const nightCount = chosen.filter((x) => x.c.date === s.c.date).length;
-        const kindCount = chosen.filter((x) => x.c.category === s.c.category).length;
-        if (nightCount >= PICK.perNight || kindCount >= PICK.perKind) continue;
+  for (const date of dates) {
+    const already = taken.get(date) ?? 0;
+    const room = perDay - already;
+    if (room <= 0) continue;
+    const pool = byScore.filter((s) => s.c.date === date);
+    const day: Chosen<C>[] = [];
+    const take = (ok: (c: C) => boolean, strict: boolean, upTo: number) => {
+      for (const s of pool) {
+        if (day.length >= upTo) return;
+        if (!ok(s.c) || day.some((x) => x.c.id === s.c.id)) continue;
+        if (strict && day.filter((x) => x.c.category === s.c.category).length >= PICK.perKind) continue;
+        day.push({ ...s, wildcard: false });
       }
-      chosen.push({ ...s, wildcard: false });
-    }
-  };
-  take(true);
-  take(false);
-  if (wildcard) {
-    const rare = eligible.find(
-      (s) => !chosen.some((x) => x.c.id === s.c.id) && (profile.categoryShare.get(s.c.category) ?? 0) < PICK.wildcardMaxShare && s.c.category !== 'other',
+    };
+    take(buyable, true, room);
+    take(buyable, false, room);
+    // A listing page only to reach the day's minimum.
+    const floor = Math.min(room, Math.max(0, PICK.minPerDay - already));
+    take((c) => c.linkKind !== null, true, floor);
+    take((c) => c.linkKind !== null, false, floor);
+    chosen.push(...day);
+  }
+  if (rng() < PICK.wildcardEpsilon) {
+    const rare = byScore.find(
+      (s) =>
+        !chosen.some((x) => x.c.id === s.c.id) &&
+        s.c.linkKind !== null &&
+        s.c.category !== 'other' &&
+        (profile.categoryShare.get(s.c.category) ?? 0) < PICK.wildcardMaxShare &&
+        perDay - (taken.get(s.c.date) ?? 0) > 0,
     );
-    if (rare) chosen.push({ ...rare, wildcard: true });
-    else {
-      const next = eligible.find((s) => !chosen.some((x) => x.c.id === s.c.id));
-      if (next) chosen.push({ ...next, wildcard: false });
+    if (rare) {
+      const sameDay = chosen.filter((x) => x.c.date === rare.c.date);
+      if (sameDay.length + (taken.get(rare.c.date) ?? 0) >= perDay) {
+        const weakest = sameDay.reduce((a, b) => (b.parts.score < a.parts.score ? b : a));
+        chosen.splice(chosen.indexOf(weakest), 1);
+      }
+      chosen.push({ ...rare, wildcard: true });
     }
   }
   return chosen.sort((a, b) => a.c.date.localeCompare(b.c.date) || b.parts.score - a.parts.score);

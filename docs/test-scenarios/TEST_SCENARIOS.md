@@ -1857,13 +1857,18 @@ Design: `docs/design/event-picks.md` §1, §6–9.
    to your own address.
 3. **Disconnect** → confirm. **Expected**: the panel offers Connect again; Gmail reading and Calendar stay connected.
 
-### Scenario C — The Sunday email
+### Scenario C — The Sunday email, by day (updated 2026-10-28 after the owner reviewed a preview)
 1. With "Email me" connected, set Settings → Agent → Event picks to today, a few minutes from now (at or after 4 pm).
-2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)", with **Picks**, **On your
-   Recurring Events calendar**, and (from the second week) **Last week**. No texts.
+2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)". No note at the top, no
+   footer. One section per day, Monday to Sunday:
+   - a free day lists 3–5 events in time order (fewer only when fewer were found; "Free, but nothing stood out." when
+     none), Recurring Events items marked "On your Recurring Events calendar";
+   - a busy day lists your evening plans ("Busy: Dinner · 7pm"), at most 4 then "and N more"; a trip reads "Away: …";
+     a Partiful party that's also on your calendar appears once;
+   - from the second week, a "Last week" line at the end. No texts.
 3. Tap **Get tickets** on a pick. **Expected**: the event's ticket page (after Cloudflare Access if signed out).
-4. **Expected**: nothing on a night you have a plan after 6 pm; a daytime market shows only when you have 2 free
-   hours of it; an event already on your Recurring Events calendar isn't repeated under Picks.
+4. **Expected**: no events on a day you have a plan after 6 pm; a daytime market shows only on a free day with 2
+   free hours of it; an event already on your Recurring Events calendar isn't listed twice.
 
 ### Scenario D — Learning from what you go to
 1. Buy a ticket to a pick, or add one to your own calendar. **Expected**: by the next morning `/picks` shows
@@ -1874,7 +1879,7 @@ Design: `docs/design/event-picks.md` §1, §6–9.
    or went to keeps coming.
 
 **Edge cases**:
-- "Email me" not connected → the picks come by text, with "To get these by email, connect “Email me” in Settings →
+- "Email me" not connected → one text, by day, with "To get these by email, connect “Email me” in Settings →
   Email & photos."
 - Gmail busy → retried every 10 minutes; still failing at 8:30 pm → texts, saying the email didn't go through.
 - The server stops mid-send → that week's email is never sent twice.
@@ -1915,6 +1920,30 @@ they stay on Sources only.
 **Edge cases**: if /sources fails, Today renders normally with no strip; a revoked Google grant shows "Reconnect
 Google Calendar / Gmail / Google Photos" in red; the Mac helper being down shows iMessage, Contacts and calls rows.
 **Platforms**: web only (no server change). Not deployed.
+
+## 2026-10-28 — "Follow up after last night" and "a year ago today" need a stated follow-up
+
+What changed: the past-event rule from 2026-10-25 now covers two more items. "Follow up with X" the morning after an
+event names only people with a documented intent to follow up: an open promise to send / call / intro / reply / do a
+favor, or a reminder the owner set by text, made from 2 days before the event on. Nobody qualifies → no item. "A year
+ago today" memories name only people with such a promise made around that day and still open, so in practice they
+rarely appear. (Live: 1 follow-up item and 0 memories were delivered in the 30 days before.)
+
+### Scenario A — Automated
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2091 tests pass (with #83, #87, #88, #89, #91 and #93 merged).
+2. `test/intel/events.test.ts` "event_followup" (nothing without intent; a meet plan, an old promise and a kept one
+   don't count; with promises: new → quiet → host order, a regular stays out), `test/pipeline/suggestions/
+   generators.test.ts` memory generator, `test/intel/stage.test.ts`, `test/pipeline/selfExclusion.test.ts`.
+
+### Scenario B — Live (owner, after deploy)
+1. The morning after a party where nothing was promised: **Expected**: no "Follow up with …" item in the brief.
+2. At a party, text `yb remind me to thank <host> tomorrow` (or promise someone the photos in a text). The next
+   morning: **Expected**: a "Follow up with <host>" item (and the reminder itself when due).
+3. **Expected**: no "A year ago today" item unless something promised that day is still open.
+
+**Edge cases**: a promise made 12 days before the event doesn't count; a promise already marked done doesn't count;
+records of the owner never appear even with a promise.
+**Platforms**: server only. Not deployed.
 
 ## 2026-10-28 — Today: done and skipped cards leave the brief
 

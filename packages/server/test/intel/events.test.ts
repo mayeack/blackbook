@@ -11,7 +11,7 @@ import type { GeneratorContext } from '../../src/pipeline/suggestions/types';
 import { settingsSnapshot } from '../../src/settings/registry';
 import { FakePushSender } from '../fakes/delivery';
 import { seedSuggestion } from '../delivery/world';
-import { seedPerson } from '../helpers';
+import { seedCommitment, seedPerson } from '../helpers';
 import { at, DAY, HOUR, intelWorld, NOW, occasion, setSetting, TZ, type IntelWorld } from './world';
 
 let w: IntelWorld;
@@ -154,7 +154,20 @@ describe('the brief', () => {
 });
 
 describe('event_followup', () => {
-  it('the morning after: new people first, then the ones who had gone quiet, then the host', async () => {
+  it('nothing the morning after without a documented intent to follow up', async () => {
+    expect(await eventFollowupGenerator.generate(ctx(at(0, 7, 16)))).toEqual([]);
+    // A plan to meet isn't a follow-up; neither is a promise made long before, or one already kept.
+    seedCommitment(w.db, gus, { kind: 'meet', what: 'grab a drink', created_at: at(-1, 22) });
+    seedCommitment(w.db, dee, { kind: 'call', what: 'call about the trip', created_at: at(-12, 10) });
+    seedCommitment(w.db, hana, { kind: 'send', what: 'send the photos', status: 'done', created_at: at(-1, 23) });
+    expect(followupCandidates(w.db, at(0, 7, 16), TZ)).toEqual([]);
+  });
+
+  it('the morning after: people with a promise or reminder about them, new first, then quiet, then the host', async () => {
+    seedCommitment(w.db, gus, { kind: 'send', what: 'send the photos', created_at: at(-1, 22) });
+    seedCommitment(w.db, dee, { kind: 'call', what: 'call about the trip', created_at: at(-1, 21) });
+    seedCommitment(w.db, hana, { kind: 'other', what: 'thank the host', origin: 'command', created_at: at(0, 1) });
+    seedCommitment(w.db, ana, { kind: 'send', what: 'send the recipe', created_at: at(-1, 22) });
     const c = await eventFollowupGenerator.generate(ctx(at(0, 7, 16)));
     expect(c).toHaveLength(1);
     expect(c[0]).toMatchObject({
@@ -165,7 +178,7 @@ describe('event_followup', () => {
       links: { occasionId: party },
       payload: { newPeople: 1, fadingPeople: 1, host: true, roles: ['new', 'fading', 'host'], attendeeCount: 5 },
     });
-    // Ana (a regular) and Bo (came to an earlier event) aren't follow-ups
+    // Ana (a regular, even with a promise) and Bo (came to an earlier event, no promise) aren't follow-ups
     expect(c[0]!.personIds).not.toContain(ana);
     expect(c[0]!.personIds).not.toContain(bo);
     // a day later the party is no longer "the morning after" (tonight's rooftop party is: Dee had gone quiet)

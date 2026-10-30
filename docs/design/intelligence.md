@@ -471,7 +471,7 @@ Each generator emits `{kind, persons[], subject_key, base∈[0,1], evidence_ids[
 | `reply_debt` | normalized priority | 1.00 | 2 days; ≤3 showings |
 | `pre_event_brief` | 0.8 | 1.00 | once per event |
 | `commitment_due` | (0.6 + 0.4·[owner ME]) × stakes (high 1, normal 0.8, low: never) | 0.95 | 3 days |
-| `event_followup` | 0.7 | 0.85 | once per event |
+| `event_followup` | 0.7; only people with a follow-up promise or reminder made from 2 days before the event | 0.85 | once per event |
 | `party_invite` | 0.8 if ≤5 days out, else 0.7 | 0.80 | once per hosted event |
 | `event_invite` | 0.75 with a screenshot person, else 0.6 | 0.75 | once per ticketed event (`tkt:<id>`) |
 | `fading` | sev | 0.80 | 14 days |

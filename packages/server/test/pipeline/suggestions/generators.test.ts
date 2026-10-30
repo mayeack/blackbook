@@ -11,6 +11,7 @@ import type { Candidate, GeneratorContext } from '../../../src/pipeline/suggesti
 import { nullLogger } from '../../../src/ops/logger';
 import { settingsSnapshot } from '../../../src/settings/registry';
 import type { DB } from '../../../src/db/connection';
+import { seedCommitment } from '../../helpers';
 import { circle, commitment, DAY, fadingFriend, friend, HOUR, message, occasion, replyDebt, stats, suggestionsDb, T0 } from './world';
 
 const ctxOf = (db: DB, now = T0, runId: string | null = null): GeneratorContext => ({
@@ -140,7 +141,7 @@ describe('circle generators', () => {
 });
 
 describe('memory generator', () => {
-  it('"on this day": a social occasion a year ago with its people, and a long two-way conversation', () => {
+  it('"on this day": a social occasion a year ago and a long two-way conversation, naming only people with a follow-up', () => {
     const db = suggestionsDb();
     const a = friend(db, 'Avery', 'Quill');
     const b = friend(db, 'Bram', 'Ostrow');
@@ -154,9 +155,15 @@ describe('memory generator', () => {
       `INSERT INTO interactions (id, person_id, kind, conversation_id, started_at, msgs_from_me, msgs_from_them, origin, created_at, updated_at)
        VALUES ('i-1', ?, 'dm_session', ?, ?, 6, 7, 'derived', ?, ?)`,
     ).run(c.id, c.dm, yearAgo + HOUR, T0, T0);
+    // A year-old event is over: no memory without a documented intent to follow up from around then, still open.
+    expect(memoryCandidates(db, T0, 'UTC')).toEqual([]);
+    seedCommitment(db, a.id, { what: 'send the photos', created_at: T0 - DAY }); // made now, not then
+    seedCommitment(db, b.id, { kind: 'call', what: 'call about the job', created_at: yearAgo + HOUR });
+    seedCommitment(db, c.id, { kind: 'intro', what: 'intro to the climbing gym', created_at: yearAgo + 2 * HOUR });
+    seedCommitment(db, a.id, { kind: 'send', what: 'send the photos', status: 'done', created_at: yearAgo + HOUR });
     const out = memoryCandidates(db, T0, 'UTC');
     expect(out.map((x) => x.subjectKey)).toEqual([`occ:${occ}`, `conv:${c.dm}:2025-10-14`]);
-    expect(out[0]!.personIds).toEqual([b.id, a.id]); // strongest tie first
+    expect(out[0]).toMatchObject({ personIds: [b.id], payload: { attendeeCount: 1 } });
     expect(out[1]).toMatchObject({ kind: 'memory', personIds: [c.id], payload: { messages: 13, source: 'conversation' } });
     const [, end] = localDayRange('2026-10-14', 'UTC');
     expect(out.every((x) => x.expiresAt === end)).toBe(true);
