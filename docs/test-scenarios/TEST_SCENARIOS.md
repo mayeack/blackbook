@@ -1987,3 +1987,36 @@ today ✓".
 **Edge cases**: an iMessage `?` question is listed with the web ones; asking while older pages are open refetches
 them in order, nothing doubled.
 **Platforms**: web (desktop + phone widths checked) and the server list route.
+
+## 2026-10-28 — Network map: people only, and every person a separate dot
+
+**Why:** the map showed venues and party brands as people (a gallery that hosted twenty Partiful parties was one of
+the biggest hubs), and the busy party clusters were one overlapping blob. Records named like a venue, brand or
+promoter (identity/nonPerson.ts) are left off the map. The layout now runs ForceAtlas2 in LinLog mode (friend groups
+stay apart), and its last step pushes apart any two dots closer than their size plus 3 px at the fit zoom.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2019 tests pass.
+2. `test/identity/nonPerson.test.ts` (strong words anywhere; weak words and emoji-only names only for
+   Partiful/Instagram-only records; handles, first names that are words and phone numbers stay people),
+   `test/routes/network-circles.test.ts` (a venue linked to two people is not a node and has no edges),
+   `packages/web/test/network-logic.test.ts` (LinLog on; a piled-up cluster ends ≥ 3 px apart, deterministic; the
+   last chunk leaves no overlaps for a ≥ 600 px canvas).
+3. On a copy of the live database (1 year, default strength): 330 → 312 people, 1,033 → 956 connections; 21 of ~2,700
+   visible records read as organizations (galleries, hotels, clubs, an LLC, a tequila brand…). At 760×760 px, people
+   overlapping another dot went from 219 of 312 to 0; median gap to the nearest dot 10.7 → 23.4 px.
+
+### Scenario B — Map (owner, after deploy)
+1. yeackbot.com/network. **Expected**: no galleries, hotels, clubs, "… Presents", "… Events LLC" or brand dots;
+   search for one finds nothing. The people count in the header is a bit lower than before.
+2. Look at the two big party clusters. **Expected**: separate dots you can tap one by one; friend groups sit apart
+   instead of one blob.
+3. Switch 90 days / 1 year / All time and tap ⤢. **Expected**: the map re-settles in about a second, still no
+   overlapping dots.
+4. On a phone, open the map and pinch in a little. **Expected**: same overall shape as on desktop; dots separate after
+   a light zoom (at full zoom-out a phone is too small for ~300 separate dots).
+
+**Edge cases**: a contact saved in Contacts, Messages or WhatsApp is only dropped for a strong word ("Hotel", "LLC"),
+never for "Beach" or "Music"; promoters or party series with person-like names (one word in capitals, two plain words)
+still show (name rules can't tell them from people); the People list and person pages are unchanged.
+**Platforms**: server + web. Not deployed.

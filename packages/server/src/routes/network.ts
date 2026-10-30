@@ -2,8 +2,9 @@
  * GET /network?circle=&types=&minStrength=&window=&includeMe=&limit=   → NetworkGraph (@yb/shared api/network.ts)
  *
  * The person↔person graph from edge_stats (pipeline/graph). Nodes are visible canonical people only (person_visible:
- * never hidden, merged-away, roster-only or service people); the owner is hidden unless includeMe, and then only
- * linked by tie strength (T/100) to the people shown. Filters:
+ * never hidden, merged-away, roster-only or service people), minus records named like a venue, brand or promoter
+ * (identity/nonPerson); the owner is hidden unless includeMe, and then only linked by tie strength (T/100) to the
+ * people shown. Filters:
  *   types        keep only these evidence types: W and strength are recomputed from the per-type breakdown
  *   window       90d / 1y keep evidence types whose latest evidence is that recent (labels always count); all = no cut
  *   minStrength  default 0.15 (faint edges hidden)
@@ -15,6 +16,7 @@ import { Router } from 'express';
 import { NetworkQuery, type NetworkCircle, type NetworkEdge, type NetworkGraph, type NetworkNode, type TieState } from '@yb/shared';
 import type { DB } from '../db/connection';
 import { notFound } from '../http/errors';
+import { organizationPeople } from '../identity/nonPerson';
 import { strengthOf, tierOf } from '../pipeline/graph/weights';
 import type { RouteDeps } from './index';
 import { maskText } from './people';
@@ -51,6 +53,7 @@ export function networkGraph(db: DB, q: NetworkQuery, now = Date.now()): Network
       }[]
     ).map((p) => [p.id, p]),
   );
+  for (const id of organizationPeople(db)) visible.delete(id);
 
   // circles: active ones with their visible canonical members
   const circleRows = db

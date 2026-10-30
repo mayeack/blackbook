@@ -16,8 +16,8 @@ let runner: LayoutRunner | null = null;
 function run(job: number, remaining: number) {
   if (job !== current || !runner) return;
   const n = Math.min(CHUNK, remaining);
-  const positions = runner.step(n);
   const done = remaining - n <= 0;
+  const positions = runner.step(n, done);
   scope.postMessage({ type: 'positions', job, positions, done }, [positions.buffer]);
   if (!done) setTimeout(() => run(job, remaining - n), 0);
 }

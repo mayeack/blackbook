@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Graph from 'graphology';
 import Sigma from 'sigma';
-import type { NetworkGraph } from '@yb/shared';
+import type { NetworkGraph, NetworkNode } from '@yb/shared';
 import { LayoutClient } from './layoutClient';
 import {
   circleColors,
@@ -183,13 +183,14 @@ export function GraphCanvas({
       data.circles.map((c) => c.id),
       positions.current,
     );
+    const sizeOf = (n: NetworkNode) => (n.isMe ? 9 : nodeSize(n.tieStrength));
     graph.clear();
     for (const n of data.nodes) {
       const p = seeded.get(n.id) ?? { x: 0, y: 0 };
       graph.addNode(n.id, {
         x: p.x,
         y: p.y,
-        size: n.isMe ? 9 : nodeSize(n.tieStrength),
+        size: sizeOf(n),
         color: n.isMe ? theme.me : n.primaryCircleId ? (colors.get(n.primaryCircleId) ?? theme.none) : theme.none,
         label: n.label,
         degree: n.degree,
@@ -218,8 +219,9 @@ export function GraphCanvas({
     setSettling(true);
     layout.start(
       {
-        nodes: data.nodes.map((n) => ({ id: n.id, ...(seeded.get(n.id) ?? { x: 0, y: 0 }), size: nodeSize(n.tieStrength) })),
+        nodes: data.nodes.map((n) => ({ id: n.id, ...(seeded.get(n.id) ?? { x: 0, y: 0 }), size: sizeOf(n) })),
         edges: data.edges.map((e) => ({ a: e.a, b: e.b, weight: e.strength })),
+        viewport: sigma.getDimensions(),
       },
       iterations,
       (pos, done) => {
