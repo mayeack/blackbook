@@ -26,8 +26,9 @@ interface AlertRow {
   resolved_at: number | null;
 }
 
-/** Web path of the screen that fixes it. */
-export function alertHref(source: string): string {
+/** Web path of the screen that fixes it; null when none can (extraction: a prompt/schema or privacy-filter problem, only Dismiss). */
+export function alertHref(source: string): string | null {
+  if (source.startsWith('extraction:')) return null;
   if (source === 'llm') return '/settings/privacy';
   if (source === 'delivery' || source === 'digest') return '/settings/digest';
   if (source === 'push') return '/settings/push';
