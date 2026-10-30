@@ -50,6 +50,16 @@ export function seedIdentity(db: DB, personId: string, kind: string, key: string
   return id;
 }
 
+/** Inserts a commitment directly (an open promise of mine by default; `made_at` defaults to `created_at`). */
+export function seedCommitment(db: DB, personId: string, c: Partial<Row> = {}): string {
+  const id = (c.id as string) ?? uuidv7();
+  const row: Row = { id, person_id: personId, owner: 'me', kind: 'send', what: 'send the photos', confidence: 0.9, status: 'open', origin: 'llm', created_at: T0, updated_at: T0, ...c };
+  row.made_at ??= row.created_at;
+  const cols = Object.keys(row);
+  db.prepare(`INSERT INTO commitments (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(...cols.map((k) => row[k]));
+  return id;
+}
+
 /** A conversation + message sent by `identityId`, for evidence tests. */
 export function seedMessage(db: DB, identityId: string, text = 'hello'): number {
   const convId = uuidv7();

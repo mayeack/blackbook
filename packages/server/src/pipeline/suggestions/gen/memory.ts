@@ -6,12 +6,15 @@
  *   - a real conversation that day: a DM/group session with a visible person, ≥10 messages, both directions.
  * kind 'memory' (base 0.3, 365-day cooldown, shown once). Regular memories rarely clear the floor; the 🎲 memory
  * wildcard is where they usually surface.
+ * A memory is about an event that is long over, so it only names people with a documented intent to follow up made
+ * around that day and still open (obligations followUpPeople); without one there is no memory.
  */
 import { localDate } from '@yb/shared';
 import type { DB } from '../../../db/connection';
 import { selfPeople } from '../../../identity/self';
+import { followUpPeople } from '../../obligations/commitments';
 import type { Candidate, CandidateGenerator, GeneratorContext, WildcardSource } from '../types';
-import { ATTENDING, localDayRange, sameDayYearsAgo } from './common';
+import { ATTENDING, DAY, localDayRange, sameDayYearsAgo } from './common';
 
 const MIN_MESSAGES = 10;
 const MAX_PEOPLE = 3;
@@ -34,6 +37,21 @@ function attendees(db: DB, column: 'occasion_id' | 'event_id', id: string, self:
 }
 
 export function memoryCandidates(db: DB, now: number, timeZone: string): Candidate[] {
+  return withFollowUpIntent(db, rawMemories(db, now, timeZone), now, timeZone);
+}
+
+/** Keeps only the people with a documented intent to follow up made within 2 days of that day; drops empty memories. */
+function withFollowUpIntent(db: DB, memories: Candidate[], now: number, timeZone: string): Candidate[] {
+  const [start, end] = localDayRange(sameDayYearsAgo(localDate(now, timeZone), 1), timeZone);
+  const intent = followUpPeople(db, memories.flatMap((c) => c.personIds), start - 2 * DAY, end + 2 * DAY);
+  return memories.flatMap((c) => {
+    const personIds = c.personIds.filter((p) => intent.has(p));
+    if (!personIds.length) return [];
+    return [{ ...c, personIds, payload: c.payload.attendeeCount === undefined ? c.payload : { ...c.payload, attendeeCount: personIds.length } }];
+  });
+}
+
+function rawMemories(db: DB, now: number, timeZone: string): Candidate[] {
   const today = localDate(now, timeZone);
   const day = sameDayYearsAgo(today, 1);
   const [start, end] = localDayRange(day, timeZone);

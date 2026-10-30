@@ -124,6 +124,28 @@ export function commitmentPeople(db: DB, c: Pick<CommitmentRow, 'person_id' | 'o
   return [...new Set([c.person_id, ...otherIds(c)].map((p) => canonical(db, p)))];
 }
 
+/**
+ * Of `personIds` (canonical), the people with a documented intent to follow up made in [from, to]: a live commitment
+ * (open, due, snoozed) with them that followUpIntent accepts. The generators about a past event ("Follow up with …"
+ * the morning after, "A year ago today") keep only these people (intel/events.ts, suggestions/gen/memory.ts).
+ */
+export function followUpPeople(db: DB, personIds: readonly string[], from: number, to: number): Set<string> {
+  const wanted = new Set(personIds);
+  const out = new Set<string>();
+  if (!wanted.size) return out;
+  const rows = db
+    .prepare(
+      `SELECT person_id, other_person_ids, kind, what, origin FROM commitments
+       WHERE status IN (SELECT value FROM json_each(?)) AND coalesce(made_at, created_at) BETWEEN ? AND ?`,
+    )
+    .all(JSON.stringify(LIVE_COMMITMENT), from, to) as Pick<CommitmentRow, 'person_id' | 'other_person_ids' | 'kind' | 'what' | 'origin'>[];
+  for (const k of rows) {
+    if (!followUpIntent(k)) continue;
+    for (const p of commitmentPeople(db, k)) if (wanted.has(p)) out.add(p);
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------------------------------------- extraction hook
 
 export interface ExtractedCommitmentInput {

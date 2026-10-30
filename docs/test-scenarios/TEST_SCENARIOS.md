@@ -1921,6 +1921,30 @@ they stay on Sources only.
 Google Calendar / Gmail / Google Photos" in red; the Mac helper being down shows iMessage, Contacts and calls rows.
 **Platforms**: web only (no server change). Not deployed.
 
+## 2026-10-28 — "Follow up after last night" and "a year ago today" need a stated follow-up
+
+What changed: the past-event rule from 2026-10-25 now covers two more items. "Follow up with X" the morning after an
+event names only people with a documented intent to follow up: an open promise to send / call / intro / reply / do a
+favor, or a reminder the owner set by text, made from 2 days before the event on. Nobody qualifies → no item. "A year
+ago today" memories name only people with such a promise made around that day and still open, so in practice they
+rarely appear. (Live: 1 follow-up item and 0 memories were delivered in the 30 days before.)
+
+### Scenario A — Automated
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2091 tests pass (with #83, #87, #88, #89, #91 and #93 merged).
+2. `test/intel/events.test.ts` "event_followup" (nothing without intent; a meet plan, an old promise and a kept one
+   don't count; with promises: new → quiet → host order, a regular stays out), `test/pipeline/suggestions/
+   generators.test.ts` memory generator, `test/intel/stage.test.ts`, `test/pipeline/selfExclusion.test.ts`.
+
+### Scenario B — Live (owner, after deploy)
+1. The morning after a party where nothing was promised: **Expected**: no "Follow up with …" item in the brief.
+2. At a party, text `yb remind me to thank <host> tomorrow` (or promise someone the photos in a text). The next
+   morning: **Expected**: a "Follow up with <host>" item (and the reminder itself when due).
+3. **Expected**: no "A year ago today" item unless something promised that day is still open.
+
+**Edge cases**: a promise made 12 days before the event doesn't count; a promise already marked done doesn't count;
+records of the owner never appear even with a promise.
+**Platforms**: server only. Not deployed.
+
 ## 2026-10-28 — Today: done and skipped cards leave the brief
 
 On yeackbot.com/today, a brief card marked Done, Skip or Wrong… no longer stays in the list with a "Done" / "Skipped"

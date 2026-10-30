@@ -15,6 +15,9 @@
  *                      2. known people who had gone quiet (silence before the event ≥ 2× their usual gap, or a
  *                         fading / cooling / dormant state) → "great seeing you",
  *                      3. the host (not the owner) with 20 ≤ T ≤ 70 → a thank-you.
+ *                    Only people with a documented intent to follow up (a promise or reminder about them made from
+ *                    2 days before the event on: obligations followUpPeople); the owner doesn't want reminders
+ *                    about events that are over otherwise.
  * Generators are pure readers; the push tick writes only push_log / push_subscriptions (through pushToDevices).
  */
 import { localParts, PushPayload } from '@yb/shared';
@@ -26,6 +29,7 @@ import type { Candidate } from '../pipeline/suggestions/types';
 import { inLocalWindow, settingsSnapshot, type SettingsSnapshot } from '../settings/registry';
 import { DAY, HOUR, addDays, attendedEvents, dayStart, knownAttendees, localDate, statsOf, unknownGuestNames, type KnownAttendee, type SocialEvent } from './common';
 import { preferredPeople } from '../pipeline/circles/preferences';
+import { followUpPeople } from '../pipeline/obligations/commitments';
 import { occasionChain } from '../pipeline/occasions/build';
 
 /** Known (counted) attendees an event needs for a brief or a push. */
@@ -189,7 +193,8 @@ export function followupCandidates(db: DB, now: number, timeZone: string): Candi
   for (const e of attendedEvents(db, { endFrom: w.from, endTo: w.to })) {
     const counted = knownAttendees(db, refOf(e)).filter((a) => a.counted);
     if (!counted.length) continue;
-    const picks = followupPicks(db, e, counted);
+    const intent = followUpPeople(db, counted.map((a) => a.personId), e.startsAt - 2 * DAY, now);
+    const picks = followupPicks(db, e, counted).filter((p) => intent.has(p.personId));
     if (!picks.length) continue;
     out.push({
       kind: 'event_followup',
