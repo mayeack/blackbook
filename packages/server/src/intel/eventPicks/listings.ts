@@ -5,13 +5,13 @@
  *
  *   which    timed instances in the window on a calendar whose name says "recurring" (LISTINGS.calendarName), that
  *            are listings (recurring, no invitees, not the primary calendar) and not cancelled;
- *   free     an evening one (still on after 18:00) needs a free night (nights.ts); a daytime one (a weekend market)
- *            needs no trip that day and LISTINGS.minFreeHours of it clear of plans and Partiful RSVPs (a 10–6 market
- *            with a 3 pm plan still has the morning);
+ *   free     only on a free day (his evening is free, nights.ts: a busy day's email shows his plans instead); a
+ *            daytime one (a weekend market) also needs LISTINGS.minFreeHours of it clear of plans and Partiful RSVPs
+ *            (a 10–6 market with a 3 pm plan still has the morning);
  *   series   one instance per series (the earliest free one); a series shown in the last LISTINGS.cooldownDays that he
  *            didn't act on (no going, no tap) rests for a while, so the same jazz night isn't in every email;
  *   cool     scored like any pick (rank.ts scoreCandidate: taste, kind, learned), best first, at most
- *            LISTINGS.perNight a night and LISTINGS.max a week.
+ *            LISTINGS.perDay a day (they take that day's first slots; web and newsletter picks fill the rest).
  * Rows here only ever go into his own email / texts (never into a prompt). Pure reader.
  */
 import { addDays, localDate, localParts } from '@yb/shared';
@@ -27,8 +27,8 @@ import { scoreCandidate, type Candidate, type Learned, type Rng, type ScoreParts
 export const LISTINGS = {
   /** Calendars whose name matches are read ("Recurring Events"). */
   calendarName: /\brecurring\b/i,
-  max: 3,
-  perNight: 1,
+  max: 14,
+  perDay: 2,
   /** A series shown this recently and not acted on rests. */
   cooldownDays: 21,
   /** No end time: assume this long. */
@@ -150,13 +150,12 @@ export function longestGap(spans: readonly Span[], from: number, to: number): nu
   return Math.max(best, to - cursor);
 }
 
-/** Whether he is free for a listing: a free night for an evening one; no trip and enough clear time for a daytime one. */
+/** Whether he is free for a listing: only on a free day, and a daytime one also needs enough clear time. */
 export function listingFree(db: DB, l: Pick<Listing, 'date' | 'startsAt' | 'endsAt'>, nights: readonly Night[], timeZone: string): boolean {
   const night = nights.find((n) => n.date === l.date);
-  if (!night) return false;
+  if (!night?.free) return false;
   const evening = dayStart(l.date, timeZone) + EVENING.fromHour * HOUR;
-  if (l.endsAt > evening) return night.free;
-  if (night.reason === 'away') return false;
+  if (l.endsAt > evening) return true;
   const busy = [...calendarPlans(db, l.startsAt, l.endsAt), ...partifulSpans(db, l.startsAt, l.endsAt)];
   return longestGap(busy, l.startsAt, l.endsAt) >= Math.min(LISTINGS.minFreeHours * HOUR, l.endsAt - l.startsAt);
 }
@@ -212,7 +211,7 @@ export function chooseListings(db: DB, i: ChooseListingsInput): ChosenListing[] 
   const out: ChosenListing[] = [];
   for (const s of scored) {
     if (out.length >= (i.max ?? LISTINGS.max)) break;
-    if (out.filter((x) => x.l.date === s.l.date).length >= LISTINGS.perNight) continue;
+    if (out.filter((x) => x.l.date === s.l.date).length >= LISTINGS.perDay) continue;
     out.push({ ...s, why: listingWhy(s.parts) });
   }
   return out.sort((a, b) => a.l.startsAt - b.l.startsAt);

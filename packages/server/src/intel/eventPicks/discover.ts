@@ -170,8 +170,10 @@ export interface SearchSetup {
   location: LlmSearchLocation | null;
   /** Free local dates. */
   nights: string[];
-  /** How many events to ask for. */
+  /** How many events to ask for in all. */
   want: number;
+  /** About this many for each night (the email shows 3–5 a free day). */
+  perNight?: number;
 }
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -220,7 +222,7 @@ export function candidatesPrompt(profile: TasteProfile, s: SearchSetup): string 
   return [
     ...tasteLines(profile, s),
     '### FIND',
-    `Up to ${s.want} events, spread across the nights and kinds, best fits first. One or two may be good events a little outside his usual taste.`,
+    `Up to ${s.want} events in all, ${s.perNight ? `about ${s.perNight} for each night listed` : 'spread across the nights'} and across kinds, best fits first. One or two may be good events a little outside his usual taste.`,
   ].join('\n');
 }
 
