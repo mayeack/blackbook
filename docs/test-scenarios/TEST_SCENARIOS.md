@@ -750,7 +750,7 @@ answered with people, never events, reservations, flights or venues. The plain-s
 people for "who …" questions and no longer repeats a city that equals the person's top fact ("London · London¹").
 
 ### Scenario A — Automated (Claude verified)
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2016 tests pass, 1025 files clean.
 2. `test/llm/models.test.ts`: the old 24-union shape is flagged; the Ask tools fit both limits.
 3. `test/ask/tools.test.ts`: omitted filters are accepted. `test/ask/engine.test.ts`: the "who" fallback lists no events or
    message quotes, no "Austin · Austin" over iMessage; non-"who" questions still show events.
@@ -783,7 +783,7 @@ if it still does, the executor replies "Didn't get that · try help" instead of 
 (not addressed, outside the window rules) stay silent as before.
 
 ### Scenario A — Automated (Claude verified)
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2016 tests pass, 1025 files clean.
 2. `test/commands/executor.test.ts`: "text addressed to the bot is never dropped as a note" (yb + inline reply, both
    get a reply, packet carries `### ADDRESSED\nyes`); the existing window test asserts `### ADDRESSED\nno` and silence.
 
@@ -946,7 +946,7 @@ messages}[:{field path from fixed words}]`, e.g. `invalid_request_error:strict_u
 `api_error:{error_code}`. `llm_batch_results` counts errored items per code. The API's message is never logged or stored.
 
 ### Scenario A — Automated (Claude verified)
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2016 tests pass, 1025 files clean.
 2. `test/ask/request.test.ts`: real client, real Ask system prompt and tools, both routes (ask_imessage 2500 /
    ask_web 4000 max_tokens), first request and the request after two tool results pass `requestIssues`; the
    pre-#57 tool set (24 nullable filters) is refused locally and nothing reaches the API.
@@ -1307,7 +1307,7 @@ for the owner's own circle of that name. On the first weekly run, auto circles n
 still detected, otherwise retired (undoable from Activity), unless the owner ever edited them.
 
 ### Scenario A — Automated (Claude verified)
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2016 tests pass, 1025 files clean.
 2. `test/pipeline/circles/socialGroups.test.ts`: one party → no circle, two → a circle named without the title; LLM
    packet has no event titles; a chat titled like the party lends no name; "Rock climbing crew"; organizer excluded;
    interest circle kept by signature (join / retract / owner removal / owner delete); "Running" user circle gets
@@ -1424,7 +1424,7 @@ can lift a message-only candidate one tier at most; its rows for people who lost
 `yb eval attendance` grades the clues against Partiful guest lists of past events (held out).
 
 ### Scenario A — Automated (Claude verified)
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2016 tests pass, 1025 files clean.
 2. `test/pipeline/occasions/plans.test.ts`: thank-you after the friend's own show → no candidate on the listing and the
    old AI row withdrawn; listing needs a message about it, lands on the nearest week; two plans share a vague
    "great seeing you", a plan naming the person takes it; "last night" and "brunch" pick the right plan; no other
@@ -1598,7 +1598,7 @@ its people get a line each (when you last talked, the first thing open between y
 emoji in it ("Zed ⚡️") reads as "Zed", not "someone". Sensitive items still say "The details are in the app."
 
 ### Scenario A — Automated (Claude verified)
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2016 tests pass, 1025 files clean.
 2. `test/delivery/compose.test.ts` (the exact one-text brief, health line before the closing, `parts` = [null]; a
    one-item brief's text carries its item), `test/delivery/send.test.ts` (one text, every item delivered; a stored
    one-text-per-suggestion brief that never went out is recomposed into one; one that was part-way out finishes as
@@ -1686,6 +1686,53 @@ intros) outrank normal ones.
 **Edge cases**: a repeat of a promise in more serious words raises it, never the reverse; a money word wins over a
 small-task verb ("bring the deposit check" is high); meet-ups and calls are never guessed low.
 **Platforms**: server only (no web change). Not deployed; the new prompt has not read real texts yet.
+
+---
+
+## Duplicates by exact full name: Instagram DM records and Partiful guests with an IG handle (2026-10-28)
+
+**What changed**: the owner found the same friend twice in a circle: the Contacts card (phone, WhatsApp) and a second
+record that only Instagram knew (IG id + username, a long DM thread). The matcher kept them apart: a name alone never
+merges (G1), and in a ~15k-person book two identical full names score p ≈ 0.3, below even the "possible duplicate"
+band. The Partiful unique-name pass already handled this shape for Partiful-only guests; it is now the unique-name
+pass (`identity/partifulLink.ts` renamed to `identity/uniqueNameLink.ts`) and also covers:
+- **Instagram-only records** (IG id / username only) with a DM thread **you have written in** (a message request you
+  never answered doesn't count);
+- **Partiful guests that also carry an IG username** from their Partiful profile (they were skipped before because
+  they held a non-Partiful identity).
+New safety check: the contact must not already hold a different Partiful user or Instagram id (a second account with
+the same name is skipped). Records with a phone, email, card or WhatsApp id are never linked this way. The rest is
+unchanged: unique full name in the whole book, the contact is real (card / 1:1 / logged interaction), guards G2–G7,
+"not the same" pairs and undo history respected, the contact survives, journaled, counts against the nightly cap (25).
+Matcher stat `partiful_linked` is now `name_linked`.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2016 tests pass, 1025 files clean.
+2. `test/identity/uniqueNameLink.test.ts`: the Partiful cases plus an Instagram DM record linked (evidence
+   `instagram_unique_name`, title "… in your Instagram DMs", undo splits + do_not_merge); the nightly matcher links one
+   whose name alone scores below its band (`merged: 0`, `name_linked: 1`); no link for a thread you never wrote in, a
+   record with an email, or a contact on another Instagram id; a stale card IG username doesn't block; a Partiful guest
+   with an IG handle links under `partiful_unique_name`; an IG record and a Partiful record with one name are
+   ambiguous. Mutation-checked (from-me check, other-account check, email exclusion, IG tie each fail a test).
+3. Dry run on a copy of the live database (2026-10-28): 2,184 records considered → 39 linked (14 Instagram DM
+   records, 25 Partiful guests with IG handles), 21 ambiguous, 13 namesakes not real contacts, 0 other-account,
+   0 blocked; ~10 s.
+
+### Scenario B — The reported duplicate (Claude verified, live)
+1. The reported friend's Instagram record was merged into their contact on the live database (2026-10-28, journaled, same evidence the
+   rule writes). **Expected**: yeackbot.com → Circles → the circle lists them once; Today's feed shows "Merged … (same full
+   name, in your Instagram DMs)" with Undo.
+
+### Scenario C — After deploy (owner)
+1. The morning after the deploy, Today's activity feed: up to 25 entries like "Merged <name> into <name> (same full
+   name, in your Instagram DMs)" or "(…, Partiful guest of yours)"; the rest the next night.
+2. Open one of the people: their Instagram DMs (or Partiful events) now appear on the contact you know.
+3. If one is wrong, undo it from the feed. **Expected**: the two split and are never re-linked.
+
+**Edge cases**: two contacts with one name, or an Instagram and a Partiful record with it → no link; an IG-only person
+who only messaged you → no link; a contact whose card lists an old IG username still links.
+**Platforms**: server only (no web change). Not deployed; the remaining 38 links happen on the nightly
+`identity-match` run after deploy.
 
 ## 2026-10-28 — Integrations to fix at the top of Today
 
