@@ -44,13 +44,13 @@ describe('Settings → Privacy and Data', () => {
     expect((await request(app).delete(`/api/v1/settings/do-not-merge/${ava}/${ava}`).set('X-YB', '1').set('Content-Type', 'application/json').send({})).status).toBe(404);
   });
 
-  it('My identities: the owner’s own accounts, masked', async () => {
+  it('My identities: the owner’s own accounts, phones in full, emails masked', async () => {
     const { app, me } = world();
     const r = MyIdentities.parse((await request(app).get('/api/v1/settings/my-identities')).body);
     expect(r.personId).toBe(me);
     expect(r.identities.map((i) => i.kind)).toEqual(['phone', 'email']);
-    expect(JSON.stringify(r)).not.toMatch(/5550123|owner@example\.com/);
-    expect(r.identities.every((i) => i.masked)).toBe(true);
+    expect(JSON.stringify(r)).not.toMatch(/owner@example\.com/);
+    expect(r.identities.map((i) => [i.value, i.masked])).toEqual([['(202) 555-0123', false], ['o•••@example.com', true]]);
   });
 
   it('the JSON export is an attachment with people, accounts, facts and notes; merged-away people fold in', async () => {

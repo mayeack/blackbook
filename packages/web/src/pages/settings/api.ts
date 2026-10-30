@@ -63,7 +63,7 @@ export function useAllowMerge() {
   });
 }
 
-/** The owner's own accounts (masked). */
+/** The owner’s own accounts (phones in full, the rest masked). */
 export const useMyIdentities = () => useQuery({ queryKey: settingsKeys.myIdentities, queryFn: () => api.get<MyIdentities>('/settings/my-identities'), retry: retryOnce });
 
 /** Settings → Data: the JSON export (a plain download; the browser saves it, nothing is sent anywhere). */

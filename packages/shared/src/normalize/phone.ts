@@ -51,6 +51,13 @@ export function toE164(raw: string, region: CountryCode = 'US'): string | null {
 
 export const isE164 = (s: string): boolean => /^\+[1-9]\d{6,14}$/.test(s);
 
+/** The whole number for display: "(512) 555-0134" for US/Canada, "+44 20 7946 0958" elsewhere, else as given. */
+export function formatPhone(e164: string): string {
+  const parsed = parsePhoneNumberFromString(e164);
+  if (!parsed) return e164;
+  return parsed.countryCallingCode === '1' ? parsed.formatNational() : parsed.formatInternational();
+}
+
 /** "(512) •••-••34" style display for a phone with no known name; keeps area code + last two digits. */
 export function maskPhone(e164: string): string {
   const parsed = parsePhoneNumberFromString(e164);
