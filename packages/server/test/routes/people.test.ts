@@ -158,20 +158,20 @@ describe('GET /api/v1/people', () => {
 });
 
 describe('GET /api/v1/people/:id', () => {
-  it('returns header fields and masked linked accounts gathered through canon', async () => {
+  it('returns header fields and linked accounts gathered through canon (phones in full, emails masked)', async () => {
     const p = await get<PersonDetail>(`/api/v1/people/${w.alice}`);
     expect(p).toMatchObject({ id: w.alice, displayName: 'Alice Avery', company: 'Acme Robotics', jobTitle: 'Engineer', mergedCount: 1 });
     const byKind = Object.fromEntries(p.identities.map((i) => [i.id, i]));
     expect(byKind[w.ids.alicePhone]).toMatchObject({
       kind: 'phone',
-      value: '(555) •••-••01',
-      masked: true,
-      revealable: true,
+      value: '(555) 555-0101',
+      masked: false,
+      revealable: false,
       source: 'addressbook',
       matchMethod: 'addressbook',
       label: 'mobile',
     });
-    expect(byKind[w.ids.aliceEmail]).toMatchObject({ kind: 'email', value: 'a•••@example.com', masked: true });
+    expect(byKind[w.ids.aliceEmail]).toMatchObject({ kind: 'email', value: 'a•••@example.com', masked: true, revealable: true });
     expect(byKind[w.ids.aliceIg]).toMatchObject({ value: '@alice.avery', masked: false, revealable: false, confidence: 0.9 });
     // The merged-away record's email is a linked account of the survivor.
     expect(byKind[w.ids.aliceDupEmail]).toMatchObject({ value: 'a•••@example.com', source: 'imessage' });
@@ -265,12 +265,12 @@ describe('GET /api/v1/people/:id/sessions/:sessionId/messages', () => {
     expectNoHidden(s);
   });
 
-  it('labels non-visible, non-hidden senders by their masked identity; provisional senders link', async () => {
+  it('labels non-visible, non-hidden senders by their identity; provisional senders link', async () => {
     w.db.prepare('UPDATE messages SET sender_identity_id = ? WHERE text = ?').run(w.ids.provisionalPhone, 'I have two');
     const url = `/api/v1/people/${w.alice}/sessions/${w.sessions.group}/messages`;
     expect((await get<SessionMessages>(url)).messages[1]!.sender).toEqual({ personId: w.provisional, label: 'Pat Provo' });
     w.db.prepare(`UPDATE people SET status = 'roster_only' WHERE id = ?`).run(w.provisional);
-    expect((await get<SessionMessages>(url)).messages[1]!.sender).toEqual({ personId: null, label: '(555) •••-••10' });
+    expect((await get<SessionMessages>(url)).messages[1]!.sender).toEqual({ personId: null, label: '(555) 555-0110' });
   });
 
   it('only opens sessions on this person’s timeline', async () => {
@@ -282,11 +282,12 @@ describe('GET /api/v1/people/:id/sessions/:sessionId/messages', () => {
 });
 
 describe('masking helpers', () => {
-  it('masks phones, emails and opaque ids; leaves handles', () => {
-    expect(identityValue('phone', '+15555550123').value).toBe('(555) •••-••23');
-    expect(identityValue('phone', 'raw:12345').value).toBe('••• 45');
-    expect(identityValue('email', 'someone@example.com').value).toBe('s•••@example.com');
-    expect(identityValue('whatsapp_jid', '15555550123@s.whatsapp.test').value).toBe('(555) •••-••23');
+  it('shows phones and handles in full; masks emails and opaque ids', () => {
+    expect(identityValue('phone', '+15555550123')).toEqual({ value: '(555) 555-0123', masked: false });
+    expect(identityValue('phone', '+442079460958').value).toBe('+44 20 7946 0958');
+    expect(identityValue('phone', 'raw:12345').value).toBe('12345');
+    expect(identityValue('email', 'someone@example.com')).toEqual({ value: 's•••@example.com', masked: true });
+    expect(identityValue('whatsapp_jid', '15555550123@s.whatsapp.test')).toEqual({ value: '(555) 555-0123', masked: false });
     expect(identityValue('instagram_id', '1234567890').value).toBe('Instagram ID ••7890');
     expect(identityValue('x_username', '@handle').value).toBe('@handle');
     expect(maskText('Call +1 555 555 0123 or mail a.b@example.com')).toBe('Call (555) •••-••23 or mail a•••@example.com');

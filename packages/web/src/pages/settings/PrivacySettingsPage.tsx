@@ -264,7 +264,7 @@ function DoNotMergePairs() {
   );
 }
 
-/** The owner's own accounts (masked): what the agent recognizes as "you". */
+/** The owner’s own accounts (phones in full, the rest masked): what the agent recognizes as "you". */
 function MyIdentitiesList() {
   const q = useMyIdentities();
   return (

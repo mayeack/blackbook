@@ -53,7 +53,7 @@ function dm(source: string, identityId: string, at: number): string {
 }
 
 describe('linked accounts from the new sources', () => {
-  it('shows WhatsApp, Instagram, Partiful and Contacts identities masked, with source, method and confidence', async () => {
+  it('shows WhatsApp, Instagram, Partiful and Contacts identities (a WhatsApp number in full, ids masked), with source, method and confidence', async () => {
     const wa = seedIdentity(w.db, w.alice, 'whatsapp_jid', '15555550101@s.whatsapp.test', { source: 'whatsapp', match_method: 'deterministic' });
     const lid = seedIdentity(w.db, w.alice, 'whatsapp_lid', '123456789012345@lid', { source: 'whatsapp', match_method: 'deterministic' });
     const igId = seedIdentity(w.db, w.alice, 'instagram_id', '17841400000000001', { source: 'beeper', match_method: 'deterministic' });
@@ -67,14 +67,14 @@ describe('linked accounts from the new sources', () => {
 
     const p = await get<PersonDetail>(`/api/v1/people/${w.alice}`);
     const byId = Object.fromEntries(p.identities.map((i) => [i.id, i]));
-    expect(byId[wa]).toMatchObject({ kind: 'whatsapp_jid', source: 'whatsapp', value: '(555) •••-••01', masked: true, revealable: true });
+    expect(byId[wa]).toMatchObject({ kind: 'whatsapp_jid', source: 'whatsapp', value: '(555) 555-0101', masked: false, revealable: false });
     expect(byId[lid]).toMatchObject({ value: 'WhatsApp ID ••2345', masked: true });
     expect(byId[igId]).toMatchObject({ source: 'beeper', value: 'Instagram ID ••0001', masked: true });
     expect(byId[igName]).toMatchObject({ value: 'Alice A.', masked: false, matchMethod: 'probabilistic', confidence: 0.6 });
     expect(byId[pf]).toMatchObject({ value: 'Partiful ID ••ic01', masked: true, revealable: true });
     expect(byId[card]).toMatchObject({ value: 'Contacts card', masked: true, revealable: false });
     const s = JSON.stringify(p);
-    for (const raw of ['15555550101@', '123456789012345', '17841400000000001', 'thread-42', 'pfUserSynthetic01', 'AB-CARD-0001']) expect(s).not.toContain(raw);
+    for (const raw of ['@s.whatsapp.test', '123456789012345', '17841400000000001', 'thread-42', 'pfUserSynthetic01', 'AB-CARD-0001']) expect(s).not.toContain(raw);
   });
 
   it('identityValue: export names drop the thread key; LIDs and Beeper ids stay opaque', () => {
@@ -86,17 +86,17 @@ describe('linked accounts from the new sources', () => {
 });
 
 describe('list handles', () => {
-  it('fall back to a masked phone or email when there is no username; never raw', async () => {
+  it('fall back to the phone number (in full) or a masked email when there is no username', async () => {
     const page = await get<PeoplePage>('/api/v1/people');
     const by = Object.fromEntries(page.items.map((p) => [p.id, p]));
     expect(by[w.alice]!.handle).toBe('@alice.avery');
-    expect(by[w.bea]!.handle).toBe('(555) •••-••02');
-    expect(by[w.provisional]!.handle).toBe('(555) •••-••10');
+    expect(by[w.bea]!.handle).toBe('(555) 555-0102');
+    expect(by[w.provisional]!.handle).toBe('(555) 555-0110');
     expect(by[w.cher]!.handle).toBeNull();
     seedIdentity(w.db, w.cher, 'whatsapp_jid', '15555550112@s.whatsapp.test', { source: 'whatsapp' });
     const again = await get<PeoplePage>('/api/v1/people');
-    expect(again.items.find((p) => p.id === w.cher)!.handle).toBe('(555) •••-••12');
-    expect(JSON.stringify(again)).not.toMatch(/555555\d{4}/);
+    expect(again.items.find((p) => p.id === w.cher)!.handle).toBe('(555) 555-0112');
+    expect(JSON.stringify(again)).not.toMatch(/\+1555555\d{4}|@s\.whatsapp/);
   });
 });
 
