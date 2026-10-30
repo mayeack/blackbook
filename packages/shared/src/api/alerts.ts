@@ -19,7 +19,7 @@ export const Alert = z.object({
   openedAt: Ms,
   lastNotifiedAt: Ms.nullable(),
   resolvedAt: Ms.nullable(),
-  /** Web path of the screen that fixes it (usually /sources). */
+  /** Web path of the screen that fixes it (usually /sources); null when no screen can (the web shows only Dismiss). */
   href: z.string().nullable(),
 });
 export type Alert = z.infer<typeof Alert>;

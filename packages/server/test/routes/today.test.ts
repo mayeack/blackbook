@@ -104,17 +104,20 @@ describe('alerts', () => {
     const id = uuidv7();
     db.prepare(`INSERT INTO alerts (id, source, severity, message, opened_at) VALUES (?, 'whatsapp', 'critical', 'WhatsApp stopped · call 212-555-0123', ?)`).run(id, Date.now());
     db.prepare(`INSERT INTO alerts (id, source, severity, message, opened_at) VALUES (?, 'llm', 'warning', 'Daily AI budget reached', ?)`).run(uuidv7(), Date.now() - HOUR);
+    // No screen fixes an extraction problem (a prompt/schema bug): no Fix link, only Dismiss.
+    db.prepare(`INSERT INTO alerts (id, source, severity, message, opened_at) VALUES (?, 'extraction:invalid_request', 'warning', 'Rejected as invalid', ?)`).run(uuidv7(), Date.now() - 2 * HOUR);
     const list = AlertList.parse((await request(app).get('/api/v1/alerts')).body);
     expect(list.alerts.map((a) => [a.source, a.severity, a.href])).toEqual([
       ['whatsapp', 'critical', '/sources'],
       ['llm', 'warning', '/settings/privacy'],
+      ['extraction:invalid_request', 'warning', null],
     ]);
     expect(list.alerts[0]!.message).not.toContain('555-0123');
-    expect((await today()).alerts).toHaveLength(2);
+    expect((await today()).alerts).toHaveLength(3);
     expect((await post(`/api/v1/alerts/${id}/dismiss`)).body).toEqual({ ok: true });
-    expect(AlertList.parse((await request(app).get('/api/v1/alerts?status=open')).body).alerts).toHaveLength(1);
+    expect(AlertList.parse((await request(app).get('/api/v1/alerts?status=open')).body).alerts).toHaveLength(2);
     const all = AlertList.parse((await request(app).get('/api/v1/alerts?status=all')).body).alerts;
-    expect(all).toHaveLength(2);
+    expect(all).toHaveLength(3);
     expect(all.find((a) => a.id === id)!.resolvedAt).not.toBeNull();
     expect((await post(`/api/v1/alerts/${uuidv7()}/dismiss`)).status).toBe(404);
     expect((await request(app).get('/api/v1/alerts?status=bogus')).status).toBe(400);
