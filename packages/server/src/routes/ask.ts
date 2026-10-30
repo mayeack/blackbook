@@ -2,7 +2,7 @@
  * Ask your network (web). DTOs in @yb/shared (api/ask.ts); the engine in ../ask.
  *
  *   POST /ask                       AskRequest → text/event-stream: start → (tool_status | delta | citation)* → done | error
- *   GET  /ask/conversations         AskConversationList (most recent first) + suggested prompts
+ *   GET  /ask/conversations         ?cursor=&limit= → AskConversationList (most recent first, paged) + suggested prompts
  *   GET  /ask/conversations/:id     AskConversation
  *
  * The POST is a normal JSON + X-YB request (CSRF middleware), validated before the stream opens (bad input → 400
@@ -12,14 +12,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { AskRequest, encodeSseEvent, UuidId, type AskConversationList, type AskEvent } from '@yb/shared';
-import { askNetwork, conversationExists, getConversation, listConversations, suggestedPrompts } from '../ask';
+import { askNetwork, CONVERSATION_CURSOR, conversationExists, getConversation, listConversations, suggestedPrompts } from '../ask';
 import { notFound } from '../http/errors';
 import { resolveServices } from '../services';
 import type { RouteDeps } from './index';
 
 const PING_MS = 15_000;
 
-const ListQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
+const ListQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), cursor: z.string().regex(CONVERSATION_CURSOR).optional() });
 
 export function askRoutes(deps: RouteDeps): Router {
   const { db, log } = deps;
@@ -87,7 +87,7 @@ export function askRoutes(deps: RouteDeps): Router {
 
   r.get('/ask/conversations', (req, res) => {
     const q = ListQuery.parse(req.query);
-    const body: AskConversationList = { conversations: listConversations(db, q.limit), suggestedPrompts: suggestedPrompts(db) };
+    const body: AskConversationList = { ...listConversations(db, q.limit, q.cursor ?? null), suggestedPrompts: suggestedPrompts(db) };
     res.json(body);
   });
 

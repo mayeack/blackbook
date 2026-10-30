@@ -15,11 +15,13 @@ import { GMAIL_SEND_ADDRESS_SECRET, GMAIL_SEND_REFRESH_TOKEN_SECRET, GoogleEgres
 import { idTokenEmail } from '../../src/adapters/calendar/oauth';
 import type { GmailApi, GmailMessage } from '../../src/adapters/gmail/api';
 import type { AppConfig } from '../../src/config';
+import { openDatabase } from '../../src/db/connection';
+import { currentVersion, migrate } from '../../src/db/migrate';
 import { buildMime, createEmailSender, encodeHeader } from '../../src/delivery/email';
-import { picksEmail } from '../../src/intel/eventPicks/email';
+import { picksEmail, type EmailDay, type EmailPick } from '../../src/intel/eventPicks/email';
 import { chooseListings, listingCategory, listingsBetween, listingVenue, longestGap, restingSeries } from '../../src/intel/eventPicks/listings';
 import { isEventNewsletter, newsletterEvents, newsletterText, readNewsletters, scrub } from '../../src/intel/eventPicks/newsletters';
-import { nightsOf } from '../../src/intel/eventPicks/nights';
+import { eveningPlans, nightsOf } from '../../src/intel/eventPicks/nights';
 import { updatePickOutcomes } from '../../src/intel/eventPicks/outcomes';
 import { tasteProfile } from '../../src/intel/eventPicks/profile';
 import { learnFrom, seededRng } from '../../src/intel/eventPicks/rank';
@@ -197,31 +199,92 @@ describe('email to himself (gmail_send)', () => {
     expect((w.db.prepare(`SELECT status FROM source_health WHERE source = 'gmail_send'`).get() as { status: string }).status).toBe('ok');
   });
 
-  it('the picks email: every section, yeackbot.com links only, web text filtered and escaped', () => {
+  it('the picks email, by day: free days list their picks, busy days his plans; no front matter or footer; yeackbot.com links only', () => {
+    const pick = (o: Partial<EmailPick> & Pick<EmailPick, 'id' | 'title' | 'localDate'>): EmailPick => ({ venue: 'Example Hall', startTime: null, why: null, wildcard: false, hasLink: true, ticketHost: null, source: 'web', ...o });
+    const day = (date: string, o: Partial<EmailDay> = {}): EmailDay => ({ date, free: true, plans: [], picks: [], ...o });
     const m = picksEmail({
       weekStart: '2026-10-26',
       windowEnd: '2026-11-01',
-      freeNights: ['2026-10-27', '2026-10-30'],
-      picks: [
-        { id: 'pkA1b2c3d4', title: 'Sample Band <script>', venue: 'Example Hall', localDate: '2026-10-30', startTime: '21:00', why: 'Indie, call 555-010-0199 for info', wildcard: false, hasLink: true, ticketHost: 'dice.fm', source: 'web' },
-        { id: 'pkE5f6g7h8', title: 'Laugh Riot', venue: 'Example Club', localDate: '2026-10-27', startTime: null, why: null, wildcard: true, hasLink: true, ticketHost: null, source: 'newsletter' },
+      days: [
+        day('2026-10-26', { free: false, plans: [{ title: 'Dinner at Example Bistro', time: '19:00' }, { title: 'Example Coast', time: null, away: true }] }),
+        day('2026-10-27', {
+          picks: [
+            pick({ id: 'pkI9j0k1l2', title: 'Jazz at Example Lounge', venue: 'Example Lounge', localDate: '2026-10-27', startTime: '20:00', why: 'Close to what you usually go to.', hasLink: false, source: 'calendar' }),
+            pick({ id: 'pkE5f6g7h8', title: 'Laugh Riot', venue: 'Example Club', localDate: '2026-10-27', wildcard: true, source: 'newsletter' }),
+          ],
+        }),
+        day('2026-10-28'),
+        day('2026-10-29', { free: false, plans: ['A', 'B', 'C', 'D', 'E', 'F'].map((t) => ({ title: `Party ${t}`, time: '21:00' })) }),
+        day('2026-10-30', { picks: [pick({ id: 'pkA1b2c3d4', title: 'Sample Band <script>', localDate: '2026-10-30', startTime: '21:00', why: 'Indie, call 555-010-0199 for info', ticketHost: 'dice.fm' })] }),
       ],
-      listings: [{ id: 'pkI9j0k1l2', title: 'Jazz at Example Lounge', venue: 'Example Lounge', localDate: '2026-10-27', startTime: '20:00', why: 'Close to what you usually go to.', wildcard: false, hasLink: false, ticketHost: null, source: 'calendar' }],
       lastWeek: { sent: 4, went: [{ title: 'Neon Example', how: 'a ticket in your email' }], tapped: 1, notForMe: 1 },
     });
     expect(m.subject).toBe('Your week: 3 event picks (Mon Oct 26 – Sun Nov 1)');
-    expect(m.text).toContain('Your free nights this week: Tue, Fri.');
-    expect(m.text).toContain('1. Fri Oct 30 · Sample Band');
-    expect(m.text).toContain('Get tickets on dice.fm: https://yeackbot.com/go/pkA1b2c3d4');
-    expect(m.text).toContain('🎲 Something different: Tue Oct 27 · Laugh Riot');
+    expect(m.text.startsWith('MON OCT 26\nBusy: Dinner at Example Bistro · 7pm\nAway: Example Coast\n\nTUE OCT 27\n\nJazz at Example Lounge\nExample Lounge, 8pm')).toBe(true);
+    expect(m.text).toContain('THU OCT 29\nBusy: Party A · 9pm\nBusy: Party B · 9pm\nBusy: Party C · 9pm\nBusy: Party D · 9pm\nand 2 more');
+    expect(m.text).toContain('On your Recurring Events calendar\nDetails: https://yeackbot.com/go/pkI9j0k1l2');
+    expect(m.text).toContain('🎲 Something different: Laugh Riot');
     expect(m.text).toContain('From one of your newsletters');
-    expect(m.text).toContain('ON YOUR RECURRING EVENTS CALENDAR');
-    expect(m.text).toContain('Details: https://yeackbot.com/go/pkI9j0k1l2');
-    expect(m.text).toContain('Last week: you went to Neon Example (a ticket in your email); you looked at 1 other; 1 was not for you. This week leans that way.');
+    expect(m.text).toContain('WED OCT 28\nFree, but nothing stood out.');
+    expect(m.text).toContain('FRI OCT 30\n\nSample Band <script>\nExample Hall, 9pm'); // plain text; the HTML escapes it
+    expect(m.text).toContain('Get tickets on dice.fm: https://yeackbot.com/go/pkA1b2c3d4');
+    expect(m.text.endsWith('Last week: you went to Neon Example (a ticket in your email); you looked at 1 other; 1 was not for you. This week leans that way.')).toBe(true);
+    expect(`${m.text}${m.html}`).not.toMatch(/Preview|Going to one|Tell me|— yeackbot|free nights this week/);
     expect(`${m.text}${m.html}`).not.toMatch(/555|010-0199/);
     expect(m.html).not.toContain('<script>');
     const links = [...m.html.matchAll(/href="([^"]+)"/g)].map((x) => x[1]!);
     expect(links.every((u) => u.startsWith('https://yeackbot.com/'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------- migration 029
+
+describe('migration 029: a week by day can number more than 20 picks', () => {
+  it('a database at 028 with picks in it keeps every row and index and takes ordinals up to 60', () => {
+    const db = openDatabase(':memory:');
+    migrate(db, 28);
+    db.prepare(`INSERT INTO event_pick_runs (id, week_start, window_end, status, created_at, updated_at) VALUES ('epr_m', '2026-11-02', '2026-11-08', 'sent', 1, 1)`).run();
+    const pick = (id: string, ordinal: number) =>
+      db
+        .prepare(
+          `INSERT INTO event_picks (id, run_id, ordinal, event_key, title, category, venue, local_date, starts_at, status, created_at, updated_at)
+           VALUES (?, 'epr_m', ?, ?, 'Sample Band', 'concert', 'Example Hall', '2026-11-02', 1, 'picked', 1, 1)`,
+        )
+        .run(id, ordinal, `k-${id}`);
+    pick('pickBefore01', 20);
+    expect(() => pick('pickBefore02', 21)).toThrow(/CHECK/);
+    const indexes = () => db.prepare(`SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'event_picks' AND sql IS NOT NULL ORDER BY name`).pluck().all();
+    const before = indexes();
+    expect(migrate(db)).toContain(29);
+    expect(currentVersion(db)).toBeGreaterThanOrEqual(29);
+    pick('pickAfter0001', 35);
+    expect(() => pick('pickAfter0002', 61)).toThrow(/CHECK/);
+    expect(db.prepare('SELECT id FROM event_picks ORDER BY ordinal').pluck().all()).toEqual(['pickBefore01', 'pickAfter0001']);
+    expect(indexes()).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------- busy days
+
+describe('a busy day shows what fills his evening', () => {
+  it('calendar plans and Partiful RSVPs that evening, tickets he holds, a trip; one line per title, in time order', () => {
+    plan('Late set', at(1, 22));
+    plan('Dinner at Example Bistro', at(1, 19));
+    plan('Lunch', at(1, 12)); // not the evening
+    w.partiful({ title: 'Rooftop thing', start: at(1, 20) });
+    w.cal({ summary: 'Rooftop thing | Partiful', start: at(1, 20), calendar: CAL.personal }); // the same event, from the Partiful calendar feed
+    w.cal({ summary: '[Pending] Rooftop  thing!', start: at(1, 20), calendar: CAL.personal }); // and once more, pending
+    listing({ summary: 'Jazz at Example Lounge', start: at(1, 20), series: 'jazz' }); // a listing is not a plan
+    ticketEvent(w.db, { title: 'Held show', start: at(1, 21), localDate: '2026-10-15' });
+    expect(eveningPlans(w.db, '2026-10-15', 'UTC').map((p) => [p.title, p.reason])).toEqual([
+      ['Dinner at Example Bistro', 'calendar'],
+      ['Rooftop thing', 'calendar'],
+      ['Held show', 'tickets'],
+      ['Late set', 'calendar'],
+    ]);
+    const stay = w.cal({ summary: 'Example Coast trip', start: Date.parse('2026-10-17T00:00:00Z'), end: Date.parse('2026-10-19T00:00:00Z'), allDay: true });
+    w.db.prepare(`UPDATE calendar_events SET start_date = '2026-10-17', end_date = '2026-10-19' WHERE id = ?`).run(stay);
+    expect(eveningPlans(w.db, '2026-10-18', 'UTC')).toEqual([{ title: 'Example Coast trip', start: null, reason: 'away' }]);
   });
 });
 
@@ -244,7 +307,7 @@ describe('the Recurring Events calendar', () => {
     expect(listingVenue('Example Lounge, 1 Sample St', 'Jazz')).toBe('Example Lounge');
   });
 
-  it('when he is free: evening ones need a free night, daytime ones an empty slot; one per series, at most one a night', () => {
+  it('only on free days: daytime ones also need 2 clear hours; one per series, at most two a day', () => {
     listing({ summary: 'Jazz at Example Lounge', start: at(1, 20), series: 'jazz', location: 'Example Lounge' }); // Thu evening
     listing({ summary: 'Jazz at Example Lounge', start: at(2, 20), series: 'jazz', location: 'Example Lounge' }); // Fri: same series
     listing({ summary: 'Sunday Comedy', start: at(4, 20), series: 'comedy', location: 'Example Cellar' }); // Sun evening: busy
@@ -254,17 +317,15 @@ describe('the Recurring Events calendar', () => {
     plan('Brunch', at(5, 11));
     listing({ summary: 'All Day Fair', start: at(6, 10), end: at(6, 18), series: 'fair', location: 'Example Park' }); // Tue: 10–3 still free
     plan('Afternoon thing', at(6, 15));
-    listing({ summary: 'Thursday Trivia', start: at(1, 21), series: 'trivia', location: 'Example Pub' }); // Thu: second on a night
+    listing({ summary: 'Thursday Trivia', start: at(1, 21), series: 'trivia', location: 'Example Pub' }); // Thu: second that day
+    listing({ summary: 'Thursday Open Mic', start: at(1, 22), series: 'openmic', location: 'Example Bar' }); // Thu: a third, no
+    listing({ summary: 'Sunday Market', start: at(4, 10), end: at(4, 14), series: 'sunmarket', location: 'Example Lot' }); // Sun: free morning, busy evening
     const nights = nightsOf(w.db, WEEK, 7, 'UTC');
-    const chosen = chooseListings(w.db, { nights, first: WEEK, days: 7, timeZone: 'UTC', profile: tasteProfile(w.db, NOW), learned: new Map(), rng: seededRng(1), runId: 'epr_test', max: 5 });
-    expect(chosen.map((c) => [c.l.title, c.l.date])).toEqual(
-      expect.arrayContaining([
-        [expect.stringMatching(/Jazz|Trivia/), '2026-10-15'],
-        ['Weekend Market', '2026-10-17'],
-      ]),
-    );
-    expect(chosen.map((c) => c.l.title)).toContain('All Day Fair');
-    expect(chosen).toHaveLength(3);
+    const chosen = chooseListings(w.db, { nights, first: WEEK, days: 7, timeZone: 'UTC', profile: tasteProfile(w.db, NOW), learned: new Map(), rng: seededRng(1), runId: 'epr_test' });
+    expect(chosen.filter((c) => c.l.date === '2026-10-15')).toHaveLength(2);
+    expect(chosen.map((c) => c.l.title)).toEqual(expect.arrayContaining(['Weekend Market', 'All Day Fair']));
+    expect(chosen).toHaveLength(4);
+    expect(chosen.map((c) => c.l.title)).not.toContain('Sunday Market'); // a busy day shows his plans instead
     expect(longestGap([{ start: 5, end: 7 }, { start: 6, end: 9 }], 0, 12)).toBe(5);
     expect(chosen.map((c) => c.l.title)).not.toContain('Sunday Comedy');
     expect(chosen.map((c) => c.l.title)).not.toContain('Morning Flea');
@@ -434,7 +495,8 @@ describe('an evening run', () => {
     listing({ summary: 'Club socials night', start: at(2, 19), series: 'social', calendar: OTHER_CAL });
   });
 
-  it('web + newsletter + Recurring Events in one email to himself; nothing texted; the week starts tomorrow', async () => {
+  it('web + newsletter + Recurring Events in one email to himself, by day; busy days show his plans; the week starts tomorrow', async () => {
+    plan('Dinner with Sam', at(4, 19)); // Sunday evening
     const d = runDeps();
     const r = await runEventPicks(w.db, d, { now: EVENING, send: true });
     expect(r).toMatchObject({ status: 'sent', channel: 'email', newsletters: 1, listings: 2 });
@@ -450,12 +512,17 @@ describe('an evening run', () => {
     expect(by.get('Laugh Riot')).toMatchObject({ source: 'newsletter', source_ref: 'n1', ticket_url: 'https://click.venue-example.com/ls/click?upn=abc123', link_kind: 'ticket' });
     expect(by.has('Club socials night')).toBe(false);
     const sent = picks.filter((p) => p.ordinal !== null).sort((a, b) => a.ordinal! - b.ordinal!);
-    expect(sent.map((p) => p.source)).toEqual(['web', 'newsletter', 'calendar', 'calendar']); // listings numbered after the picks
+    expect(sent.map((p) => [p.local_date, p.source])).toEqual([
+      ['2026-10-15', 'calendar'],
+      ['2026-10-16', 'web'],
+      ['2026-10-17', 'calendar'],
+      ['2026-10-17', 'newsletter'],
+    ]); // by day, then start time: a day's listings sit with its picks
     const m = d.email.sent[0]!;
     expect(m.subject).toBe('Your week: 4 event picks (Thu Oct 15 – Wed Oct 21)');
     expect(m.text).toContain(`https://yeackbot.com/go/${by.get('Sample Band')!.id}`);
     expect(m.text).toContain('From one of your newsletters');
-    expect(m.text).toMatch(/ON YOUR RECURRING EVENTS CALENDAR[\s\S]*Jazz at Example Lounge[\s\S]*Weekend Market/);
+    expect(m.text).toMatch(/^THU OCT 15\n\nJazz at Example Lounge[\s\S]*FRI OCT 16\n\nSample Band[\s\S]*SAT OCT 17\n\nWeekend Market[\s\S]*Laugh Riot[\s\S]*SUN OCT 18\nBusy: Dinner with Sam · 7pm\n\nMON OCT 19\nFree, but nothing stood out\./);
     expect(d.llm.calls.map((c) => c.route)).toEqual(['events_search', 'events_newsletter']);
     // Later ticks the same evening: nothing more goes out.
     expect(await runEventPicks(w.db, d, { now: EVENING + HOUR, send: true })).toEqual({ status: 'skipped', reason: 'already_sent' });
@@ -467,7 +534,8 @@ describe('an evening run', () => {
     const r = await runEventPicks(w.db, d, { now: EVENING, send: true });
     expect(r).toMatchObject({ status: 'sent', channel: 'text' });
     expect(d.outbound.sent[0]!.text).toContain(EMAIL_NOTES.notConnected);
-    expect(d.outbound.sent.some((s) => s.text.includes('On your Recurring Events calendar: Thu Oct 15 · Jazz at Example Lounge'))).toBe(true);
+    expect(d.outbound.sent).toHaveLength(1);
+    expect(d.outbound.sent[0]!.text).toContain('Thu Oct 15\n1. Jazz at Example Lounge (Recurring Events) · Example Lounge, 8pm · yeackbot.com/go/');
     expect(store.runForWeek(w.db, WEEK)!.channel).toBe('text');
   });
 

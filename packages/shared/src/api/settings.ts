@@ -121,6 +121,7 @@ export const SettingsValues = z.object({
    */
   'events.weekday': z.number().int().min(0).max(6),
   'events.time': HHMM,
+  /** Most events for each free day (the email shows at least 3 when there are enough). */
   'events.max_picks': z.number().int().min(2).max(8),
   /** City to search; null = the home city (travel.home_city, else the owner's location fact). */
   'events.city': z.string().min(2).max(80).nullable(),

@@ -34,10 +34,11 @@ export interface Night {
  */
 export const EVENING = { fromHour: 18, toHour: 27 } as const;
 
-/** A busy stretch of time (ms). */
+/** A busy stretch of time (ms), with what the calendar / Partiful calls it. */
 export interface Span {
   start: number;
   end: number;
+  title?: string | null;
 }
 
 /**
@@ -48,12 +49,13 @@ export interface Span {
 export function calendarPlans(db: DB, from: number, to: number): Span[] {
   const timed = db
     .prepare(
-      `SELECT e.starts_at, e.ends_at, e.treatment, e.recurring_event_id, e.attendees, json_extract(e.raw, '$.transparency') AS transparency
+      `SELECT e.summary, e.starts_at, e.ends_at, e.treatment, e.recurring_event_id, e.attendees, json_extract(e.raw, '$.transparency') AS transparency
        FROM calendar_events_included e
        WHERE e.all_day = 0 AND e.status <> 'cancelled' AND coalesce(e.self_response, '') <> 'declined'
          AND e.starts_at < @to AND coalesce(e.ends_at, e.starts_at + ${HOUR}) > @from`,
     )
     .all({ from, to }) as {
+    summary: string | null;
     starts_at: number;
     ends_at: number | null;
     treatment: string;
@@ -63,7 +65,7 @@ export function calendarPlans(db: DB, from: number, to: number): Span[] {
   }[];
   return timed
     .filter((e) => e.transparency !== 'transparent' && !isListing(e))
-    .map((e) => ({ start: e.starts_at, end: e.ends_at ?? e.starts_at + HOUR }));
+    .map((e) => ({ start: e.starts_at, end: e.ends_at ?? e.starts_at + HOUR, title: e.summary }));
 }
 
 /** A calendar row that lists a happening rather than plans one (see calendarPlans). */
@@ -73,9 +75,9 @@ export const isListing = (e: { treatment: string; recurring_event_id: string | n
 /** Partiful events he's going to / maybe / hosting that start in [from - 1 day, to) (no end time = 2 hours). */
 export function partifulSpans(db: DB, from: number, to: number): Span[] {
   const rows = db
-    .prepare(`SELECT e.starts_at, e.ends_at FROM events e WHERE e.source = 'partiful' AND ${PARTIFUL_ATTENDING_SQL} AND e.starts_at >= @from AND e.starts_at < @to`)
-    .all({ from: from - DAY, to }) as { starts_at: number; ends_at: number | null }[];
-  return rows.map((e) => ({ start: e.starts_at, end: e.ends_at && e.ends_at > e.starts_at ? e.ends_at : e.starts_at + 2 * HOUR }));
+    .prepare(`SELECT e.title, e.starts_at, e.ends_at FROM events e WHERE e.source = 'partiful' AND ${PARTIFUL_ATTENDING_SQL} AND e.starts_at >= @from AND e.starts_at < @to`)
+    .all({ from: from - DAY, to }) as { title: string | null; starts_at: number; ends_at: number | null }[];
+  return rows.map((e) => ({ start: e.starts_at, end: e.ends_at && e.ends_at > e.starts_at ? e.ends_at : e.starts_at + 2 * HOUR, title: e.title }));
 }
 
 /** Local dates from..from+days-1 with whether each night is free. */
@@ -128,4 +130,69 @@ function hasInvitees(attendees: string | null): boolean {
   } catch {
     return false;
   }
+}
+
+/** One of the plans that make a night busy, for the email ("Busy: Dinner, 7pm"). */
+export interface EveningPlan {
+  title: string;
+  /** Start (ms); null for a trip or a ticket without a time. */
+  start: number | null;
+  reason: BusyReason;
+}
+
+const PLAN_FALLBACK: Readonly<Record<BusyReason, string>> = { calendar: 'A plan', away: 'Away', tickets: 'A show you have tickets to', partiful: 'A Partiful event' };
+
+/** "Rooftop party | Partiful" → "Rooftop party" (the Partiful calendar feed's suffix). */
+export const planTitle = (t: string): string => t.replace(/\s+/g, ' ').replace(/\s*\|\s*Partiful\s*$/i, '').trim();
+
+/** Folded for de-duplication: case, "[Pending]", punctuation and spacing don't make two plans. */
+const planKey = (t: string): string =>
+  planTitle(t)
+    .toLowerCase()
+    .replace(/^\[pending\]\s*/, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+/**
+ * What makes night D busy (the same rules as nightsOf): calendar plans and Partiful RSVPs in the evening window,
+ * tickets he holds that night, and a trip or flight that day. One line per plan (a Partiful event is usually on his
+ * calendar too, as "<title> | Partiful"), in time order. His own data, for his own email.
+ */
+export function eveningPlans(db: DB, date: string, timeZone: string): EveningPlan[] {
+  const start = dayStart(date, timeZone) + EVENING.fromHour * HOUR;
+  const end = dayStart(date, timeZone) + EVENING.toHour * HOUR;
+  const overlaps = (s: Span) => s.start < end && s.end > start;
+  const out: EveningPlan[] = [];
+  for (const s of calendarPlans(db, start, end)) out.push({ title: s.title ?? '', start: s.start, reason: 'calendar' });
+  for (const s of partifulSpans(db, start, end).filter(overlaps)) out.push({ title: s.title ?? '', start: s.start, reason: 'partiful' });
+  const tickets = db
+    .prepare(`SELECT title, starts_at FROM ticket_events WHERE merged_into_id IS NULL AND status = 'holding' AND local_date = ?`)
+    .all(date) as { title: string | null; starts_at: number | null }[];
+  for (const t of tickets) out.push({ title: t.title ?? '', start: t.starts_at, reason: 'tickets' });
+  const stays = db
+    .prepare(
+      `SELECT e.summary FROM calendar_events_included e
+       WHERE e.all_day = 1 AND e.status <> 'cancelled' AND coalesce(e.self_response, '') <> 'declined'
+         AND e.start_date <= @date AND e.end_date > @date AND e.end_date >= date(e.start_date, '+2 days')`,
+    )
+    .pluck()
+    .all({ date }) as (string | null)[];
+  for (const t of stays) out.push({ title: t ?? '', start: null, reason: 'away' });
+  const flights = db
+    .prepare(
+      `SELECT o.title, o.starts_at FROM occasions o
+       WHERE o.merged_into_id IS NULL AND o.status = 'active' AND o.classification_rule = 'flight' AND o.starts_at >= @from AND o.starts_at < @to`,
+    )
+    .all({ from: dayStart(date, timeZone), to: dayStart(addDays(date, 1), timeZone) }) as { title: string | null; starts_at: number }[];
+  for (const f of flights) out.push({ title: f.title ?? 'A flight', start: f.starts_at, reason: 'away' });
+  const seen = new Set<string>();
+  return out
+    .map((p) => ({ ...p, title: planTitle(p.title) || PLAN_FALLBACK[p.reason] }))
+    .sort((a, b) => (a.start ?? Infinity) - (b.start ?? Infinity))
+    .filter((p) => {
+      const k = planKey(p.title);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
 }

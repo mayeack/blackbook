@@ -2,7 +2,7 @@
  * Ask your network (web; the iMessage `?` path shares the engine).
  *
  *   POST /api/v1/ask                        AskRequest → text/event-stream of AskEvent frames
- *   GET  /api/v1/ask/conversations          → AskConversationList (+ suggested prompts)
+ *   GET  /api/v1/ask/conversations?cursor=&limit=   → AskConversationList (+ suggested prompts)
  *   GET  /api/v1/ask/conversations/:id      → AskConversation
  *
  * The POST is a normal JSON + `X-YB: 1` request (CSRF); the browser reads the stream with fetch + ReadableStream
@@ -134,6 +134,8 @@ export type AskConversationSummary = z.infer<typeof AskConversationSummary>;
 
 export const AskConversationList = z.object({
   conversations: z.array(AskConversationSummary),
+  /** Pass as `cursor` for the next (older) page; null on the last page. */
+  nextCursor: z.string().nullable(),
   suggestedPrompts: z.array(z.string()),
 });
 export type AskConversationList = z.infer<typeof AskConversationList>;

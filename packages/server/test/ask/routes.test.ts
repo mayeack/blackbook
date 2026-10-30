@@ -4,13 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { AskConversation, AskConversationList, SseParser, type AskEvent } from '@yb/shared';
 import { NEEDS_KEY_MESSAGE } from '../../src/ask';
 import { factRef } from '../../src/ask/refs';
+import { startTurn } from '../../src/ask/store';
 import { createApp } from '../../src/http/app';
 import { errorHandler } from '../../src/http/errors';
 import { nullLogger } from '../../src/ops/logger';
 import { askRoutes } from '../../src/routes/ask';
 import { FakeOutboundSender, FakePushSender } from '../fakes/delivery';
 import { FakeEgress, FakeLlmClient } from '../fakes/llm';
-import { buildAskWorld } from './world';
+import { buildAskWorld, MIN, NOW } from './world';
 
 function appWith(llm: FakeLlmClient, egress: FakeEgress, db = buildAskWorld().db) {
   const app = express();
@@ -76,6 +77,39 @@ describe('POST /api/v1/ask (SSE)', () => {
     expect(turn.people).toEqual([]);
     expect(turn.citations).toEqual([]);
     expect(turn.answer).not.toContain('Jess');
+  });
+
+  it('pages the conversation list newest first with a cursor: every conversation once, ties broken by id', async () => {
+    const w = buildAskWorld();
+    const app = appWith(new FakeLlmClient(), new FakeEgress(), w.db);
+    // Seven conversations; two share an updated_at (and straddle the first page break) so the cursor has to break the tie.
+    const minutes = [1, 2, 3, 4, 4, 5, 6];
+    const ids = minutes.map((m, i) => startTurn(w.db, { question: `Question ${i + 1}`, channel: 'web', now: NOW + m * MIN }).conversationId);
+    const newestFirst = ids
+      .map((id, i) => ({ id, m: minutes[i]! }))
+      .sort((a, b) => b.m - a.m || (a.id < b.id ? 1 : -1))
+      .map((x) => x.id);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 5; page++) {
+      const res = await request(app).get(`/api/v1/ask/conversations?limit=3${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+      expect(res.status).toBe(200);
+      const body = AskConversationList.parse(res.body);
+      expect(body.conversations.length).toBeLessThanOrEqual(3);
+      expect(body.suggestedPrompts.length).toBeGreaterThan(0);
+      seen.push(...body.conversations.map((c) => c.id));
+      cursor = body.nextCursor;
+      if (!cursor) break;
+    }
+    expect(cursor).toBeNull();
+    expect(seen).toEqual(newestFirst);
+    expect(new Set(seen).size).toBe(7);
+
+    // A full last page says there is no next one.
+    const exact = AskConversationList.parse((await request(app).get('/api/v1/ask/conversations?limit=7')).body);
+    expect(exact.conversations).toHaveLength(7);
+    expect(exact.nextCursor).toBeNull();
+    expect((await request(app).get('/api/v1/ask/conversations?cursor=nope')).status).toBe(400);
   });
 
   it('validates before streaming: bad body → 400 JSON, unknown conversation → 404', async () => {

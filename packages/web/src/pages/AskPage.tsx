@@ -84,24 +84,33 @@ function Thread({ turns, onRetry }: { turns: LiveTurn[]; onRetry: (q: string) =>
   );
 }
 
-function History({ currentId, onPick }: { currentId: string | null; onPick?: () => void }) {
+/** Earlier conversations on the empty screen, newest first, a page at a time. */
+function Recent() {
   const q = useConversations();
-  if (!q.data) return q.isError && !isNotImplemented(q.error) ? <PageState error={q.error} onRetry={() => void q.refetch()} /> : null;
-  if (!q.data.conversations.length) return <p className="caption">No earlier questions.</p>;
+  const conversations = q.data?.pages.flatMap((p) => p.conversations) ?? [];
+  if (!conversations.length) return null;
   return (
-    <ul className="ask-history">
-      {q.data.conversations.map((c) => (
-        <li key={c.id}>
-          <Link to={`/ask/${encodeURIComponent(c.id)}`} className={c.id === currentId ? 'active' : undefined} onClick={onPick}>
-            <span className="ah-title">{c.title}</span>
-            <span className="caption">
-              {relativeDay(c.updatedAt)}
-              {c.turnCount > 1 ? ` · ${c.turnCount} questions` : ''}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <section className="ask-recent">
+      <h2 className="section-title">Recent</h2>
+      <ul className="ask-history">
+        {conversations.map((c) => (
+          <li key={c.id}>
+            <Link to={`/ask/${encodeURIComponent(c.id)}`}>
+              <span className="ah-title">{c.title}</span>
+              <span className="caption">
+                {relativeDay(c.updatedAt)}
+                {c.turnCount > 1 ? ` · ${c.turnCount} questions` : ''}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {q.hasNextPage && (
+        <button type="button" className="btn btn-sm btn-ghost ask-more" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
+          {q.isFetchingNextPage ? 'Loading…' : 'Show older'}
+        </button>
+      )}
+    </section>
   );
 }
 
@@ -114,7 +123,6 @@ export function AskPage() {
   const store = askStore();
   useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
   const [draftKey, setDraftKey] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
   const llm = useLlmConfigured();
   const list = useConversations();
   const conv = useConversation(conversationId);
@@ -163,7 +171,8 @@ export function AskPage() {
     window.setTimeout(() => bottom.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }), 50);
   };
 
-  const prompts = list.data?.suggestedPrompts.length ? list.data.suggestedPrompts : FALLBACK_PROMPTS;
+  const suggested = list.data?.pages[0]?.suggestedPrompts;
+  const prompts = suggested?.length ? suggested : FALLBACK_PROMPTS;
   const notFound = conversationId && conv.isError && isApiError(conv.error) && (conv.error.status === 404 || conv.error.status === 400);
   const unavailable = list.isError && isNotImplemented(list.error);
 
@@ -173,23 +182,11 @@ export function AskPage() {
         title="Ask"
         sub="Questions about your people, answered from your own messages, facts and events"
         actions={
-          <span className="head-actions">
-            <button type="button" className="btn btn-sm btn-ghost" aria-expanded={showHistory} onClick={() => setShowHistory((s) => !s)}>
-              History
-            </button>
-            {(conversationId || turns.length > 0) && (
-              <Link
-                to="/ask"
-                className="btn btn-sm"
-                onClick={() => {
-                  setDraftKey(null);
-                  setShowHistory(false);
-                }}
-              >
-                New
-              </Link>
-            )}
-          </span>
+          (conversationId || turns.length > 0) && (
+            <Link to="/ask" className="btn btn-sm" onClick={() => setDraftKey(null)}>
+              New
+            </Link>
+          )
         }
       />
       {llm === false && (
@@ -200,13 +197,6 @@ export function AskPage() {
           </span>
         </div>
       )}
-      {showHistory && (
-        <section className="card ask-history-card">
-          <h2 className="section-title">Earlier questions</h2>
-          <History currentId={conversationId} onPick={() => setShowHistory(false)} />
-        </section>
-      )}
-
       {unavailable ? (
         <div className="card-list">
           <Empty title="Ask isn’t available yet." />
@@ -229,12 +219,7 @@ export function AskPage() {
               </button>
             ))}
           </div>
-          {!showHistory && list.data && list.data.conversations.length > 0 && (
-            <section className="ask-recent">
-              <h2 className="section-title">Recent</h2>
-              <History currentId={null} />
-            </section>
-          )}
+          <Recent />
         </div>
       ) : (
         <Thread turns={turns} onRetry={ask} />

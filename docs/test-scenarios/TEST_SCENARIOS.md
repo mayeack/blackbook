@@ -1857,13 +1857,18 @@ Design: `docs/design/event-picks.md` §1, §6–9.
    to your own address.
 3. **Disconnect** → confirm. **Expected**: the panel offers Connect again; Gmail reading and Calendar stay connected.
 
-### Scenario C — The Sunday email
+### Scenario C — The Sunday email, by day (updated 2026-10-28 after the owner reviewed a preview)
 1. With "Email me" connected, set Settings → Agent → Event picks to today, a few minutes from now (at or after 4 pm).
-2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)", with **Picks**, **On your
-   Recurring Events calendar**, and (from the second week) **Last week**. No texts.
+2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)". No note at the top, no
+   footer. One section per day, Monday to Sunday:
+   - a free day lists 3–5 events in time order (fewer only when fewer were found; "Free, but nothing stood out." when
+     none), Recurring Events items marked "On your Recurring Events calendar";
+   - a busy day lists your evening plans ("Busy: Dinner · 7pm"), at most 4 then "and N more"; a trip reads "Away: …";
+     a Partiful party that's also on your calendar appears once;
+   - from the second week, a "Last week" line at the end. No texts.
 3. Tap **Get tickets** on a pick. **Expected**: the event's ticket page (after Cloudflare Access if signed out).
-4. **Expected**: nothing on a night you have a plan after 6 pm; a daytime market shows only when you have 2 free
-   hours of it; an event already on your Recurring Events calendar isn't repeated under Picks.
+4. **Expected**: no events on a day you have a plan after 6 pm; a daytime market shows only on a free day with 2
+   free hours of it; an event already on your Recurring Events calendar isn't listed twice.
 
 ### Scenario D — Learning from what you go to
 1. Buy a ticket to a pick, or add one to your own calendar. **Expected**: by the next morning `/picks` shows
@@ -1874,7 +1879,7 @@ Design: `docs/design/event-picks.md` §1, §6–9.
    or went to keeps coming.
 
 **Edge cases**:
-- "Email me" not connected → the picks come by text, with "To get these by email, connect “Email me” in Settings →
+- "Email me" not connected → one text, by day, with "To get these by email, connect “Email me” in Settings →
   Email & photos."
 - Gmail busy → retried every 10 minutes; still failing at 8:30 pm → texts, saying the email didn't go through.
 - The server stops mid-send → that week's email is never sent twice.
@@ -1936,25 +1941,48 @@ today ✓".
 **Edge cases**: a brief where every item was skipped shows "All done for today ✓", not the "No brief yet" empty state.
 **Platforms**: web only. Not checked in a browser; not deployed.
 
+## Ask: no History button, recent questions a page at a time (2026-10-28)
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2012 tests pass.
+2. `test/ask/routes.test.ts` "pages the conversation list…": 7 conversations, two with the same `updated_at` across
+   the first page break, `limit=3` → every id once, newest first, `nextCursor` null on the last page (also when the
+   last page is exactly full); `cursor=nope` → 400. A cursor that repeats or skips the tied row fails the test.
+
+### Scenario B — Browser preview (Claude verified, synthetic data)
+1. The real app on the synthetic Ask test world with 12 conversations, through Vite. **Expected**: /ask has no History
+   button; Recent shows 5 and "Show older"; two clicks → 10, then 12 and the button is gone; no console errors.
+2. Open a recent question. **Expected**: the header shows only "New"; New goes back to /ask with 5 recent.
+
+### Scenario C — yeackbot.com (owner, after deploy)
+1. Open Ask. **Expected**: no "History" link top right; Recent lists up to 5 questions.
+2. With more than 5 earlier questions, tap "Show older". **Expected**: the next 5 appear below; the button goes away
+   once all are shown.
+3. Ask something new, then tap New. **Expected**: it is first under Recent.
+
+**Edge cases**: an iMessage `?` question is listed with the web ones; asking while older pages are open refetches
+them in order, nothing doubled.
+**Platforms**: web (desktop + phone widths checked) and the server list route.
+
 ## 2026-10-30 — The daily brief by email too
 
 Each morning at the brief time, the whole brief also goes to your own Gmail, from your address to the same address
 (the "Email me" grant the weekly event picks use). It holds what the text holds: the greeting, every numbered item
 with its details and opener draft, the "Heads up" line, and one yeackbot.com/today link. Sensitive items stay
-"Something personal". It's sent once a day (migration 029 records its state on the digest), retried each minute
+"Something personal". It's sent once a day (migration 030 records its state on the digest), retried each minute
 after a Gmail 5xx until catch-up, and never sent twice. It still goes when texting is off. It follows quiet hours,
 pause and catch-up like the text. Settings → Digest has the new toggle "Email me the daily brief" (on by default; it
 does nothing until "Email me" is connected). Today's header shows "email ✓".
 
 ### Scenario A — Automated (Claude verified)
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root (2103 tests, 1053 files clean).
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root (2106 tests, 1054 files clean).
 2. `packages/server/test/delivery/send.test.ts` "the brief by email": the email goes once at digest.time beside the
    text with the same lines; texting off; not connected, then connected before catch-up; digest.email off; 5xx
    retried, revoked grant final; a crash mid-call never sends twice; quiet hours, pause and catch-up; someone hidden
    after the text went is left out; empty days send none.
 3. `packages/server/test/delivery/digestEmail.test.ts`: exact plain text, the outbound-rule fallback ("One for you in
    the app"), HTML escaping, yeackbot.com/today as the only link. `packages/web/test/today.test.ts`: header lines.
-4. A copy of the live DB migrates v28 → [29] and today's stored brief renders as a 4-item email that matches the
+4. A copy of the live DB migrates v28 → [29, 30] and today's stored brief renders as a 4-item email that matches the
    text. Nothing was sent.
 
 ### Scenario B — Owner, after deploy

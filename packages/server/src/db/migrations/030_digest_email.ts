@@ -1,5 +1,5 @@
 /**
- * 029 digest email (owner request 2026-10-30: "Also send my daily digest via email"): the morning brief also goes to
+ * 030 digest email (owner request 2026-10-30: "Also send my daily digest via email"): the morning brief also goes to
  * the owner's own Gmail (delivery/email.ts, the gmail_send grant), tracked per digest beside the text and the push:
  *   email_status   'sending' (written before the Gmail call, so a crash mid-call never sends twice), then the
  *                  channel's state (TodayDigest.email)

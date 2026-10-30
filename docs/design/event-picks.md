@@ -11,13 +11,18 @@
 > cool recurring events happening that week, in addition to what you find online / summarized in my newsletters."
 > "Remember to continuously try and improve on your weekly digest based on what events I actually go to, based on
 > signals in calendar and email." (owner, 2026-10-25)
+>
+> "Don't include front matter … Remove [the footer] … Organize the email by day. I'm seeing a ton of events for Mon
+> Nov 2. Have 3-5 events per day where it looks like I am free (based on my calendar). If it looks like I'm busy (have
+> a calendar event in the evening), print the event." (owner, 2026-10-28, reviewing a preview)
 
-Every Sunday evening (Settings → Agent → Event picks: default Sunday 18:00) yeackbot emails the owner up to 5 events
-for the nights of the week ahead (Monday to Sunday) that his calendar is free, each with a link to buy tickets, from
-the web and his event newsletters, plus the best happenings on his Recurring Events calendar that fall when he's free.
-It learns from which ones he goes to. Until "Email me" is connected (or with events.channel 'text') it texts them.
+Every Sunday evening (Settings → Agent → Event picks: default Sunday 18:00) yeackbot emails the owner his week ahead
+(Monday to Sunday), one section per day. A free day lists 3–5 events, each with a link to buy tickets: from the web,
+his event newsletters and his Recurring Events calendar. A busy day lists the plans that fill his evening. It learns
+from which events he goes to. Until "Email me" is connected (or with events.channel 'text') it texts the same, by
+day.
 Code: `packages/server/src/intel/eventPicks/`, `delivery/email.ts`; web: `/picks`, Settings → Email & photos;
-migration 028.
+migrations 028 and 029 (029 lets a week number up to 60 picks, for the by-day layout).
 
 ## 1. The run (`run.ts`, job `event-picks`, every 10 min; acts only on the picks day from events.time to 21:00)
 
@@ -26,18 +31,21 @@ migration 028.
    to Sunday); sent earlier, that night and the six after it. None free → the run is `empty`: nothing is searched or
    sent.
 3. **Taste** (§3) and the **city** (events.city, else the home city: travel.home_city or his location fact).
-4. **Candidates**: one Claude Haiku 5.5 call with the server-side `web_search` tool (~40% of events.max_searches).
+4. **Candidates**: one Claude Haiku 5.5 call with the server-side `web_search` tool (~60% of events.max_searches),
+   asking for about events.max_picks + 1 events per free night (at most 40).
 5. **Newsletters** (§8): the past 9 days of event newsletters in Gmail, one more Haiku call (no search).
 6. **Filter**: each must be on a free night inside the window and name a venue (not TBA / Unknown), be a public
    kind (no parties), be one real event (eventKey: date + venue + title words), never one sent in an earlier week,
    and not one already on his Recurring Events calendar that day (`on_calendar`: its ticket link goes to that
    listing instead). Dropped rows stay in `event_picks` with the reason.
-7. **Score** (§5), then **ticket pages**: one targeted search per top candidate that has no event-specific page yet
-   (the rest of the search budget). No search is spent on a busy night or a duplicate.
-8. **Choose** ≤ events.max_picks, then the **Recurring Events** listings (§9), numbered after the picks.
-9. **Send** (§7): one email to his own Gmail (events.channel 'email', the default), else one text with every pick
-   (like the brief since #84), purpose `events`, a stable client ref. If nothing can go out yet (Gmail busy, quiet hours, the
-   collector down), the run stays `ready` (the web shows it) and a later tick sends it the same day.
+7. **Score** (§5), then **ticket pages**: one targeted search per event among each day's best that has no
+   event-specific page yet (at most 12, the rest of the search budget). No search is spent on a busy night or a
+   duplicate.
+8. **Choose** per free day (§5): its Recurring Events listings first (§9, at most 2), then the picks up to
+   events.max_picks (default 5), at least 3 when there are enough. Ordinals follow the days (date, then start time).
+9. **Send** (§7): one email to his own Gmail (events.channel 'email', the default), else one text (like the brief
+   since #84), both by day, purpose `events`, a stable client ref. If nothing can go out yet (Gmail busy, quiet hours,
+   the collector down), the run stays `ready` (the web shows it) and a later tick sends it the same day.
 
 A failed web search (API error, budget cap, unreadable answer) is retried every 30 min, at most 3 times a week; the
 last attempt goes on with the newsletters and the calendar alone.
@@ -96,8 +104,10 @@ score = 0.4·taste + 0.25·kind + 0.25·learned + 0.1·link
   passed untouched +0.25 no (nothing for a night he had other plans).
 - **link**: a ticket page scores 1, resale 0.6, a listing 0.2.
 
-Choosing: at most 2 a night and 2 of one kind while others are left. With probability 0.2, the last slot goes to a 🎲
-"something different": the best event of a kind he rarely goes to.
+Choosing (`choosePerDay`), for each free day: best score first, up to events.max_picks less the day's listings, at
+most 2 of one kind while others are left, events with a ticket or resale page first; one with only a listing page
+just to reach 3. With probability 0.2 a week, one slot goes to a 🎲 "something different": the best event of a kind
+he rarely goes to (it replaces the weakest pick of a full day).
 
 ## 6. Did he go? (`outcomes.ts`, job `event-picks-outcomes` daily 06:45 and before each run)
 
@@ -118,11 +128,18 @@ yeackbot knew, what he tapped, what he waved off.
 
 ## 7. The email, texts and the web
 
-- **The email** (`email.ts`, `delivery/email.ts`). Subject "Your week: 4 event picks (Mon Oct 26 – Sun Nov 1)". One
-  message: the free nights; **Picks** (date · title, venue and time, the why, "From one of your newsletters" when it
-  came from one, "Get tickets on dice.fm →"); **On your Recurring Events calendar**; **Last week** (§6); a footer.
-  Links are only `https://yeackbot.com/go/<id>` (the tap counts) and `/picks`; web and newsletter text passes
-  `safeFragment` and is HTML-escaped.
+- **The email** (`email.ts`, `delivery/email.ts`). Subject "Your week: 9 event picks (Mon Oct 26 – Sun Nov 1)". One
+  message, no front matter and no footer, a section per day:
+  - **a free day**: its picks in time order: title (🎲 for the wildcard), venue and time, the why, where it came from
+    ("From one of your newsletters", "On your Recurring Events calendar"), "Get tickets on dice.fm →". A free day with
+    nothing found says "Free, but nothing stood out.";
+  - **a busy day**: "Busy: <plan> · 7pm" per plan (his calendar, Partiful RSVPs, tickets; "Away: <trip>"), at most 4
+    and then "and N more". A Partiful event that is also on his calendar ("… | Partiful", "[Pending] …") is one line
+    (`nights.ts` `eveningPlans`);
+  - **Last week** (§6) at the end, from the second week.
+
+  Links are only `https://yeackbot.com/go/<id>` (the tap counts); web and newsletter text passes `safeFragment` and
+  everything is HTML-escaped.
   - **Sending.** Google product `gmail_send`: its own consent (gmail.send + openid email), refresh token and the
     account's verified address (secret `gmail_send.address`, from the id_token). The only recipient is that address
     (From = To); no `to` parameter exists. guardedFetch allows `POST …/messages/send` only on the gmail_send client;
@@ -132,16 +149,17 @@ yeackbot knew, what he tapped, what he waved off.
     20:30, then texts. Not connected, or refused → texts at once, with a line saying how to get it by email.
   - **Settings → Email & photos → Email me**: Connect (consent), the address, the last email, "Send a test email",
     Disconnect (the Google grant is revoked only when nothing else is connected).
-- **The text.** One text for the whole week, like the brief since #84 (owner, 2026-10-25: everything in the text):
-  the count and the free nights, then each pick as "1. Thu Oct 29 · <title>" / "<venue>, 10pm. <why, in the second
-  person>." / "Tickets: yeackbot.com/go/<id>", a blank line between picks, and the closing line. A pick whose web
-  text still fails the outbound rules keeps only "N. <day>: details at yeackbot.com/go/<id>".
+- **The text.** One text for the whole week, like the brief since #84 (owner, 2026-10-25: everything in the text),
+  laid out by day like the email: "Thu Oct 29: busy (Dinner 7pm; +2 more)" or "away (<trip>)", or the day and its
+  picks as "1. <title> · <venue>, 10pm · yeackbot.com/go/<id>" ("(Recurring Events)" after a listing's title). Web text
+  and plan titles pass `safeFragment`; a text that still fails the outbound rules falls back to counts per day and
+  yeackbot.com/picks.
   Texts may only carry yeackbot.com links, so `/go/<id>` (behind Cloudflare Access) counts the tap and redirects
   (302) to the stored, re-normalized ticket page. The service worker leaves `/go/` to the browser. Web text passes
   `safeFragment` (no URLs, phones, emails, handles or money) and `checkOutboundText`.
 - **The web.** `/picks` shows the latest week: date, venue, the why, a "Get tickets on <site>" link through /go,
   "I'm going" / "Not for me" / Undo, and the running answer counts. Settings → Agent has the toggle, day, time,
-  picks per week, city and search cap.
+  events per free day, city and search cap.
 
 ## 8. Newsletters (`newsletters.ts`)
 
@@ -162,13 +180,15 @@ Through the read-only Gmail grant (nothing when Gmail isn't connected or events.
 His "Recurring Events" calendar holds weekly happenings (jazz nights, comedy, night markets) as listings, not plans.
 - **Which.** Timed instances in the week on a non-primary calendar whose name says "recurring", recurring with no
   invitees.
-- **When he's free.** An evening one (still on after 18:00) needs a free night (§2). A daytime one (a weekend market)
-  needs no trip that day and 2 hours of it clear of plans (a 10–6 market with a 3 pm plan still has the morning).
+- **When he's free.** Only on a free day (§2): a busy day's section shows his plans instead. A daytime one (a weekend
+  market) also needs 2 hours of it clear of plans (a 10–6 market with a 3 pm plan still has the morning).
 - **Which ones.** One instance per series (the earliest free one), scored like any pick (taste, kind, learned), at
-  most one a night and 3 a week. A series shown in the last 21 days that he didn't act on (no going, no tap) rests.
+  most 2 a day; they take the day's first slots and the picks fill the rest. A series shown in the last 21 days that
+  he didn't act on (no going, no tap) rests.
   The kind comes from the title, else the venue ("… Comedy Theater"), else music words ("Jazz", "Sounds").
-- Live data, the week of Oct 26 (DB copy, nothing sent): 22 listings, one free night; chosen: Monday's jazz night and
-  the Saturday and Sunday morning markets (his afternoon plans leave the mornings).
+- Live data (DB copies, nothing sent by yeackbot): the week of Oct 26 had 22 listings and one free night. For the week
+  of Oct 29 (2026-10-28 preview), Monday was the only free evening: Monday's jazz night plus two web picks with ticket
+  pages; the other six days listed his plans (Halloween weekend: 9 plans on Saturday, shown as 4 + "and 5 more").
 
 ## Not done / follow-ups
 

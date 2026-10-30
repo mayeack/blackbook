@@ -15,8 +15,10 @@
  *                   calendar (its ticket link goes to that listing instead). Dropped rows are kept with the reason;
  *   7. score        rank.ts (taste, kind, learned, link);
  *   8. tickets      one targeted search per top candidate still without its own ticket page (the rest of the budget);
- *   9. choose       rank.ts choosePicks (≤ events.max_picks, 🎲 wildcard at ε), then the best Recurring Events
- *                   listings that fall when he's free (listings.ts; events.listings), numbered after the picks;
+ *   9. choose       per free day (owner 2026-10-28: "3-5 events per day where it looks like I am free"): the best
+ *                   Recurring Events listings that fall that day first (listings.ts; events.listings, ≤ 2), then
+ *                   rank.ts choosePerDay fills the day up to events.max_picks (🎲 wildcard at ε a week). Ordinals
+ *                   follow the days (date, then start time). A busy day gets no picks: the email shows his plans;
  *  10. send         events.channel 'email' (default): one email to his own Gmail (email.ts, delivery/email.ts;
  *                   email_state 'sending' is written first, so a crash mid-call never sends twice). Not connected,
  *                   or Gmail refused it → texts, with a line saying why. A failure worth retrying waits for the next
@@ -41,16 +43,16 @@ import { METROS } from '../places';
 import { homePlace } from '../trips';
 import { venueKey as venueKeyOf } from '../../pipeline/occasions/text';
 import { features } from '../similarity';
-import { picksText, type PickText } from './compose';
+import { picksText, type PickText, type TextDay } from './compose';
 import { bestLink, eventKey, findTicketPages, searchCandidates, type CheckedEvent, type SearchSetup, type TicketQuery } from './discover';
-import { HOW_LABEL, picksEmail, type EmailPick, type LastWeek } from './email';
+import { HOW_LABEL, picksEmail, type EmailDay, type EmailPick, type LastWeek } from './email';
 import type { CheckedLink } from './links';
 import { chooseListings, listingsBetween, type Listing } from './listings';
 import { newsletterEvents, readNewsletters, type NewsletterEvent } from './newsletters';
-import { nightsOf } from './nights';
+import { eveningPlans, nightsOf } from './nights';
 import { sameEvent, updatePickOutcomes } from './outcomes';
 import { tasteProfile } from './profile';
-import { choosePicks, scoreCandidate, learnFrom, seededRng, type Candidate, type PickSource, type Scored } from './rank';
+import { choosePerDay, scoreCandidate, learnFrom, seededRng, type Candidate, type PickSource, type Scored } from './rank';
 import * as store from './store';
 
 export const WINDOW_DAYS = 7;
@@ -62,6 +64,12 @@ export const SEND_UNTIL = '21:00';
 export const LAST_EMAIL_TRY = '20:30';
 /** Picks sent at or after this local time cover the next seven nights instead of starting that night. */
 export const EVENING_SEND = '16:00';
+/** Share of events.max_searches the candidates call may use (the ticket pages get the rest). */
+export const CANDIDATE_SEARCH_SHARE = 0.6;
+/** Events asked of the candidates call, at most (each free night wants events.max_picks + 1). */
+export const MAX_WANTED = 40;
+/** Events sent to the ticket-pages call, at most. */
+export const MAX_TICKET_QUERIES = 12;
 
 /** Ends the text's first line when the picks were meant to go by email. */
 export const EMAIL_NOTES = {
@@ -182,11 +190,11 @@ export async function runEventPicks(db: DB, deps: EventPicksDeps, o: RunOptions)
     store.finishRun(db, run.id, { status: 'failed', now: o.now, freeNights: free, error: 'no_city' });
     return { status: 'failed', runId: run.id, reason: 'no_city', searches: 0, costUsd: 0 };
   }
-  const maxPicks = readSetting(db, 'events.max_picks');
+  const perDay = readSetting(db, 'events.max_picks');
   const maxSearches = readSetting(db, 'events.max_searches');
-  const searchesA = Math.max(1, Math.min(maxSearches - 1, Math.ceil(maxSearches * 0.4))) || 1;
+  const searchesA = Math.max(1, Math.min(maxSearches - 1, Math.ceil(maxSearches * CANDIDATE_SEARCH_SHARE))) || 1;
   const profile = tasteProfile(db, o.now);
-  const setup: SearchSetup = { city: city.label, location: city, nights: free, want: Math.min(15, maxPicks * 3) };
+  const setup: SearchSetup = { city: city.label, location: city, nights: free, want: Math.min(MAX_WANTED, free.length * (perDay + 1)), perNight: perDay + 1 };
   const sdeps = { llm: deps.llm, egress: deps.egress, runId: run.id, signal: deps.signal };
 
   const a = await searchCandidates(sdeps, profile, setup, searchesA);
@@ -276,13 +284,14 @@ export async function runEventPicks(db: DB, deps: EventPicksDeps, o: RunOptions)
   const score = (r: Row): Scored<Row> => ({ c: r, parts: scoreCandidate(r, profile, learned, rng) });
   let scored = live.map(score);
 
-  // Ticket pages for the best candidates that lack their own page.
+  // Ticket pages for each day's best candidates that lack their own page.
   const searchesB = maxSearches - searchesA;
-  const needPages = [...scored]
-    .sort((x, y) => y.parts.score - x.parts.score)
-    .slice(0, maxPicks + 2)
-    .filter((s) => s.c.linkKind !== 'ticket')
-    .slice(0, searchesB);
+  const byScore = (x: Scored<Row>, y: Scored<Row>) => y.parts.score - x.parts.score;
+  const needPages = [...new Set(scored.map((x) => x.c.date))]
+    .flatMap((d) => scored.filter((x) => x.c.date === d).sort(byScore).slice(0, perDay + 1))
+    .filter((x) => x.c.linkKind !== 'ticket')
+    .sort(byScore)
+    .slice(0, MAX_TICKET_QUERIES);
   if (needPages.length) {
     const queries: TicketQuery[] = needPages.map((s, i) => ({ ref: `E${i + 1}`, title: s.c.title, performers: s.c.performers, venue: s.c.venue, city: s.c.e.city, date: s.c.date }));
     const b = await findTicketPages(sdeps, queries, setup, Math.min(searchesB, queries.length));
@@ -305,12 +314,21 @@ export async function runEventPicks(db: DB, deps: EventPicksDeps, o: RunOptions)
     scored = live.map(score);
   }
 
-  const pickable = scored.filter((s) => s.c.drop === null);
-  const chosen = choosePicks(pickable, maxPicks, profile, rng);
-  const chosenIds = new Map(chosen.map((c, i) => [c.c.id, { ordinal: i + 1, wildcard: c.wildcard }]));
-  // The best Recurring Events listings when he's free, numbered after the picks; a web / newsletter twin's ticket link
-  // goes to its listing when the calendar entry has none.
+  // Each free day: its best Recurring Events listings first, then the picks fill it up to perDay. A web / newsletter
+  // twin's ticket link goes to its listing when the calendar entry has none.
   const listings = listingsOn ? chooseListings(db, { nights, first: today, days: WINDOW_DAYS, timeZone: tz, profile, learned, rng, runId: run.id }) : [];
+  const taken = new Map<string, number>();
+  for (const x of listings) taken.set(x.l.date, (taken.get(x.l.date) ?? 0) + 1);
+  const pickable = scored.filter((s) => s.c.drop === null);
+  const chosen = choosePerDay(pickable, perDay, profile, rng, taken);
+  // Ordinals follow the days: date, then start time (none last), then score.
+  const listingIds = listings.map(() => store.newPickId());
+  const order = [
+    ...chosen.map((c) => ({ id: c.c.id, date: c.c.date, start: c.c.e.start, score: c.parts.score })),
+    ...listings.map((x, i) => ({ id: listingIds[i]!, date: x.l.date, start: x.l.startTime as string | null, score: x.parts.score })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? '99').localeCompare(b.start ?? '99') || b.score - a.score);
+  const ordinalOf = new Map(order.map((x, i) => [x.id, i + 1]));
+  const chosenIds = new Map(chosen.map((c) => [c.c.id, { ordinal: ordinalOf.get(c.c.id)!, wildcard: c.wildcard }]));
   for (const x of listings) {
     const link = listingLinks.get(`${x.l.seriesRef}|${x.l.date}`);
     if (link && x.l.linkKind !== 'ticket' && x.l.linkKind !== 'resale') {
@@ -359,8 +377,8 @@ export async function runEventPicks(db: DB, deps: EventPicksDeps, o: RunOptions)
       }),
       ...listings.map(
         ({ l, parts, why }, i): store.NewPick => ({
-          id: store.newPickId(),
-          ordinal: chosen.length + i + 1,
+          id: listingIds[i]!,
+          ordinal: ordinalOf.get(listingIds[i]!)!,
           eventKey: eventKey({ date: l.date, venue: l.venue, title: l.title }),
           source: 'calendar',
           sourceRef: l.seriesRef,
@@ -459,6 +477,27 @@ const emailPick = (p: store.PickRow): EmailPick => ({
   source: p.source,
 });
 
+/** One day of the week as the email and the text show it: a free day's picks, or a busy day's plans. */
+export interface WeekDay {
+  date: string;
+  free: boolean;
+  plans: { title: string; time: string | null; away: boolean }[];
+  picks: store.PickRow[];
+}
+
+/** The run's seven days in order (free per the run; a busy day's plans read now, his own calendar). */
+export function weekDays(db: DB, run: store.RunRow, picks: readonly store.PickRow[]): WeekDay[] {
+  const tz = settingTimeZone(db);
+  const free = new Set(jsonList(run.free_nights));
+  const days: WeekDay[] = [];
+  for (let d = run.week_start; d <= run.window_end; d = addDays(d, 1)) {
+    const isFree = free.has(d);
+    const plans = isFree ? [] : eveningPlans(db, d, tz).map((p) => ({ title: p.title, time: p.start !== null ? localParts(p.start, tz).hhmm : null, away: p.reason === 'away' }));
+    days.push({ date: d, free: isFree, plans, picks: picks.filter((p) => p.local_date === d).sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0)) });
+  }
+  return days;
+}
+
 /** Emails a 'ready' run (see the header, step 10): 'sent', 'retry' (wait for the next tick) or 'fallback' (texts). */
 async function emailRun(
   db: DB,
@@ -477,9 +516,7 @@ async function emailRun(
   const message = picksEmail({
     weekStart: run.week_start,
     windowEnd: run.window_end,
-    freeNights: jsonList(run.free_nights),
-    picks: picks.filter((p) => p.source !== 'calendar').map(emailPick),
-    listings: picks.filter((p) => p.source === 'calendar').map(emailPick),
+    days: weekDays(db, run, picks).map((d): EmailDay => ({ date: d.date, free: d.free, plans: d.plans, picks: d.picks.map(emailPick) })),
     lastWeek: lastWeekOf(db, run.week_start),
   });
   store.markEmail(db, run.id, 'sending', { now: o.now });
@@ -495,8 +532,8 @@ async function emailRun(
 }
 
 /**
- * Sends a 'ready' run: the email (events.channel 'email' and connected), else one text with every pick.
- * Idempotent: the email's state is written before the call; the text has a stable client ref.
+ * Sends a 'ready' run: the email (events.channel 'email' and connected), else one text, both by day. Idempotent: the
+ * email's state is written before the call; the text has a stable client ref.
  */
 export async function sendRun(db: DB, deps: EventPicksDeps, run: store.RunRow, o: RunOptions): Promise<RunResult> {
   const picks = store.picksOfRun(db, run.id, { pickedOnly: true });
@@ -522,35 +559,27 @@ export async function sendRun(db: DB, deps: EventPicksDeps, run: store.RunRow, o
     note = e.note;
   }
   if (!deps.outbound.configured) return { status: 'ready', ...base, sendReason: 'delivery_not_configured' };
-  const text = picksText(
-    picks.map(
-      (p): PickText => ({
-        id: p.id,
-        ordinal: p.ordinal!,
-        title: p.title,
-        venue: p.venue,
-        localDate: p.local_date,
-        startTime: p.start_time,
-        why: p.why,
-        wildcard: p.wildcard === 1,
-        hasLink: p.link_kind === 'ticket' || p.link_kind === 'resale',
-        source: p.source,
-      }),
-    ),
-    jsonList(run.free_nights),
-    note,
-  );
-  if (!text) return { status: 'ready', ...base, sendReason: 'no_picks' };
-  // Part 0's client ref (the intro's when the picks went out one text each), so a retry never double-sends.
-  const r = await deps.outbound.sendToSelf(text, 'events', stableUuid(`events:${run.id}:0`));
+  const textPick = (p: store.PickRow): PickText => ({
+    id: p.id,
+    ordinal: p.ordinal!,
+    title: p.title,
+    venue: p.venue,
+    localDate: p.local_date,
+    startTime: p.start_time,
+    why: p.why,
+    wildcard: p.wildcard === 1,
+    hasLink: p.link_kind === 'ticket' || p.link_kind === 'resale',
+    source: p.source,
+  });
+  const days = weekDays(db, run, picks).map((d): TextDay => ({ date: d.date, free: d.free, plans: d.plans, picks: d.picks.map(textPick) }));
+  const text = picksText(days, { weekStart: run.week_start, windowEnd: run.window_end }, note);
+  const r = await deps.outbound.sendToSelf(text, 'events', stableUuid(`events:${run.id}:week`));
   if (r.status === 'blocked' || r.status === 'disabled' || r.status === 'failed') {
     deps.log?.warn('event_picks.send_failed', { error_code: r.reason ?? r.status });
-    // The run stays 'ready'; the next tick tries again the same day.
     db.prepare(`UPDATE event_pick_runs SET status = 'ready', updated_at = ? WHERE id = ?`).run(o.now, run.id);
     return { status: 'ready', ...base, sendReason: r.reason ?? r.status };
   }
   const outboundIds = r.outboundId ? [r.outboundId] : [];
-  // Every pick is in that one text.
   const pickOutbound = new Map(r.outboundId ? picks.map((p) => [p.id, r.outboundId!] as const) : []);
   store.markSent(db, run.id, { now: o.now, outboundIds, pickOutbound, channel: 'text' });
   deps.log?.info('event_picks.sent', { counts: { texts: 1, picks: picks.length } });

@@ -250,7 +250,7 @@ const DEFS: { [K in AnySettingKey]: Def<K> } = {
     default: v(0),
   },
   'events.time': { group: 'features', label: 'Event picks time', description: 'When the picks are sent (local time).', default: v('18:00') },
-  'events.max_picks': { group: 'features', label: 'Events per week', description: 'Most events in one week’s picks (2–8).', default: v(5) },
+  'events.max_picks': { group: 'features', label: 'Events per free day', description: 'Most events for each free day (at least 3 when there are enough; 2–8).', default: v(5) },
   'events.city': {
     group: 'features',
     label: 'Event picks city',

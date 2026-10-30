@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { AskConversation, AskConversationList, SettingsResponse } from '@yb/shared';
-import { api, reloginOnce } from '../../api/client';
+import { api, qs, reloginOnce } from '../../api/client';
 import { retryOnce } from '../person/api';
 import { AskStore } from './store';
 
@@ -10,8 +10,19 @@ export const askKeys = {
   conversation: (id: string) => ['ask', 'conversation', id] as const,
 };
 
+/** Recent questions per page on the empty Ask screen ("Show older" loads the next). */
+export const RECENT_PAGE = 5;
+
 export const useConversations = () =>
-  useQuery({ queryKey: askKeys.list, queryFn: () => api.get<AskConversationList>('/ask/conversations'), retry: retryOnce, staleTime: 30_000 });
+  useInfiniteQuery({
+    queryKey: askKeys.list,
+    queryFn: ({ pageParam }) => api.get<AskConversationList>(`/ask/conversations${qs({ cursor: pageParam, limit: RECENT_PAGE })}`),
+    initialPageParam: null as string | null,
+    // An older server sends no nextCursor: one page.
+    getNextPageParam: (last) => last.nextCursor ?? null,
+    retry: retryOnce,
+    staleTime: 30_000,
+  });
 
 export const useConversation = (id: string | null) =>
   useQuery({
