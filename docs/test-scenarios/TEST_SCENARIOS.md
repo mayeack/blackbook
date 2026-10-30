@@ -1743,7 +1743,7 @@ ago today" memories name only people with such a promise made around that day an
 rarely appear. (Live: 1 follow-up item and 0 memories were delivered in the 30 days before.)
 
 ### Scenario A — Automated
-1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2012 tests pass.
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2017 tests pass (with #88 merged).
 2. `test/intel/events.test.ts` "event_followup" (nothing without intent; a meet plan, an old promise and a kept one
    don't count; with promises: new → quiet → host order, a regular stays out), `test/pipeline/suggestions/
    generators.test.ts` memory generator, `test/intel/stage.test.ts`, `test/pipeline/selfExclusion.test.ts`.
