@@ -1759,3 +1759,30 @@ where nothing could fix it; they show only **Dismiss**, and read "Extraction" / 
 **Edge cases**: a window refused as invalid under the current prompt version stays dead (no revive), so its alert stays
 open until dismissed; a refusal of a consolidation request (no window) neither opens nor holds the alert.
 **Platforms**: server + web. Not deployed; not checked in a browser.
+
+## 2026-10-28 — Phone numbers show in full on yeackbot.com
+
+**Why:** the owner, looking at Circles → Add people (rows like "(555) •••-••01"): "Don’t mask the phone numbers".
+A phone identity (and a WhatsApp account that is a phone number) now shows in full and formatted: "(555) 555-0101"
+in the US/Canada, "+44 20 7946 0958" elsewhere. Emails, opaque ids, LLM prompts, texts and emails out stay masked, and
+names or titles that contain a number are still masked by `maskText`.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2012 tests pass.
+2. `packages/shared/test/normalize.test.ts` (`formatPhone`), `test/routes/people.test.ts` (identityValue, linked
+   accounts not masked / not revealable, unplaced sender labels), `people-sources.test.ts` (list handle and WhatsApp
+   number in full, never the raw E.164 key or `@s.whatsapp` JID), `test/settings/privacy.test.ts` (My identities:
+   phone in full, email masked).
+
+### Scenario B — Web (owner, after deploy)
+1. Circles → any circle → **+ Add** → search a first name. **Expected**: rows without a company show the whole number,
+   e.g. "(555) 555-0101".
+2. People list: someone with no company or Instagram/X handle. **Expected**: subtitle is their full number.
+3. A person's page → Linked accounts. **Expected**: phone rows (and WhatsApp-by-number rows) show the full number with no
+   **Reveal** button; email rows are still masked and still have **Reveal**.
+4. Settings → Privacy → My identities. **Expected**: your own phone in full, your email masked.
+
+**Edge cases**: an unparseable number stored as `raw:` shows its digits as stored; a WhatsApp JID with fewer than 7 digits
+stays "WhatsApp ••1234"; a person with no name whose display name was stored masked ("(555) •••-••01") keeps that
+title: names are not unmasked.
+**Platforms**: server + shared (web reads the same fields). Not deployed; not checked in a browser.
