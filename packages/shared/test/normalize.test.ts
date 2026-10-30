@@ -3,6 +3,7 @@ import {
   canonicalFirstNames,
   emailMatchKey,
   firstNameScore,
+  formatPhone,
   isE164,
   isShortCode,
   jaroWinkler,
@@ -61,6 +62,14 @@ describe('normalizePhone', () => {
 
   it('masks a phone for display', () => {
     expect(maskPhone('+12125550134')).toBe('(212) •••-••34');
+  });
+});
+
+describe('formatPhone', () => {
+  it('shows the whole number: national for US/Canada, international elsewhere', () => {
+    expect(formatPhone('+12125550134')).toBe('(212) 555-0134');
+    expect(formatPhone('+442079460958')).toBe('+44 20 7946 0958');
+    expect(formatPhone('not a number')).toBe('not a number');
   });
 });
 

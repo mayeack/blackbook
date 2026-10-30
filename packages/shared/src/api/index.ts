@@ -15,4 +15,5 @@ export * from './routes';
 export * from './settings';
 export * from './suggestions';
 export * from './tickets';
+export * from './eventPicks';
 export * from './today';

@@ -17,6 +17,7 @@ import {
   serverFieldErrors,
   spendUsd,
   validateField,
+  weekdayName,
   type Draft,
 } from '../src/pages/settings/logic';
 import { deviceLabel, pushSupport, sameKey, subscribeBody, subscribeThisDevice, urlBase64ToUint8Array, type PushEnv } from '../src/pages/settings/push';
@@ -69,6 +70,15 @@ const values = (o: Partial<SettingsValues> = {}): SettingsValues => ({
   'travel.home_city': null,
   'gmail.backfill_days': 1095,
   'gmail.extra_senders': [],
+  'events.enabled': true,
+  'events.weekday': 1,
+  'events.time': '09:30',
+  'events.max_picks': 5,
+  'events.city': null,
+  'events.max_searches': 10,
+  'events.channel': 'email',
+  'events.newsletters': true,
+  'events.listings': true,
   tz: 'UTC',
   ...o,
 });
@@ -290,5 +300,30 @@ describe('extra ticket senders (gmail.extra_senders)', () => {
     expect(parseSenderDomains('Club.Example, tickets.venue.example  @promo.example;club.example')).toEqual(['club.example', 'tickets.venue.example', 'promo.example']);
     expect(parseSenderDomains('not a domain, x, -bad.example, ok.example')).toEqual(['ok.example']);
     expect(parseSenderDomains('')).toEqual([]);
+  });
+});
+
+describe('event picks (events.*)', () => {
+  it('bounds, messages and the weekday names the select shows', () => {
+    expect(numberBounds('events.max_picks')).toEqual({ min: 2, max: 8, int: true });
+    expect(numberBounds('events.max_searches')).toEqual({ min: 2, max: 12, int: true });
+    expect(numberBounds('events.weekday')).toEqual({ min: 0, max: 6, int: true });
+    expect(validateField('events.max_picks', 9)).toBe('A whole number from 2 to 8.');
+    expect(validateField('events.time', '9:30pm')).toBe('A time like 08:00.');
+    expect(validateField('events.time', '21:30')).toBeNull();
+    expect(validateField('events.city', null)).toBeNull();
+    expect(validateField('events.city', 'Springfield')).toBeNull();
+    expect(validateField('events.city', 'X')).not.toBeNull();
+    expect(weekdayName(0)).toMatch(/^Sun/);
+    expect(weekdayName(1)).toMatch(/^Mon/);
+    expect(weekdayName(6)).toMatch(/^Sat/);
+  });
+
+  it('a changed pick day goes in the one PATCH like any other key', () => {
+    const v = values();
+    expect(buildPatch(v, { 'events.weekday': 5, 'events.city': 'Springfield' }, new Set(), new Set())).toEqual({
+      values: { 'events.weekday': 5, 'events.city': 'Springfield' },
+    });
+    expect(crossFieldErrors(values({ 'events.time': '23:00' }))).toEqual({});
   });
 });

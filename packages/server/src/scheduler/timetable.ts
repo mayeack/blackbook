@@ -38,6 +38,9 @@ export const AGENT_TIMES = {
   compose: '07:30',
   deliveryTickMs: MIN,
   commandsTickMs: 10_000,
+  /** Event picks (intel/eventPicks): the weekly run checks every 10 min whether it's the picks day and time. */
+  eventPicksTickMs: 10 * MIN,
+  eventPickOutcomes: '06:45',
 } as const;
 
 /** What every agent job module receives from buildJobs. */

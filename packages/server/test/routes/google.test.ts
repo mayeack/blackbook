@@ -265,7 +265,7 @@ describe('POST /google/disconnect', () => {
     expect((await request(h.app).post('/api/v1/google/disconnect').set(JSON_HEADERS).send({ deleteData: 'yes' })).status).toBe(400);
   });
 
-  it('revokes only when Gmail and Photos hold no token; a revoke disables all three health rows', async () => {
+  it('revokes only when no other product holds a token; a revoke disables every health row', async () => {
     // Gmail still connected: Google's revoke would take it down too, so only the calendar token goes.
     const h = harness();
     await connectFully(h);
@@ -285,6 +285,7 @@ describe('POST /google/disconnect', () => {
     expect(solo.db.prepare(`SELECT source, status FROM source_health ORDER BY source`).all()).toEqual([
       { source: 'gcal', status: 'disabled' },
       { source: 'gmail', status: 'disabled' },
+      { source: 'gmail_send', status: 'disabled' },
       { source: 'gphotos', status: 'disabled' },
     ]);
   });
