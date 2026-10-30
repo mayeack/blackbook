@@ -26,6 +26,15 @@ export function widenTableCheck(db: DB, table: string, column: string, values: r
   if (!ddl) throw new Error(`${table}: no such table`);
   const next = widenCheck(ddl, column, values, table);
   if (next === ddl) return false;
+  rebuildTable(db, table, next);
+  return true;
+}
+
+/**
+ * Rebuilds `table` from new CREATE TABLE DDL (SQLite can't alter a CHECK): create under a temporary name, copy every
+ * row, drop the old table, rename, and re-create its indexes and triggers. Callers set `rebuildsTables`.
+ */
+export function rebuildTable(db: DB, table: string, next: string): void {
   const dependents = db
     .prepare(`SELECT sql FROM sqlite_schema WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL`)
     .pluck()
@@ -36,7 +45,6 @@ export function widenTableCheck(db: DB, table: string, column: string, values: r
   db.exec(`DROP TABLE ${table}`);
   db.exec(`ALTER TABLE ${tmp} RENAME TO ${table}`);
   for (const s of dependents) db.exec(s);
-  return true;
 }
 
 export function up(db: DB): void {

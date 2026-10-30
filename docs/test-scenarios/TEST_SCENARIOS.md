@@ -1857,13 +1857,18 @@ Design: `docs/design/event-picks.md` §1, §6–9.
    to your own address.
 3. **Disconnect** → confirm. **Expected**: the panel offers Connect again; Gmail reading and Calendar stay connected.
 
-### Scenario C — The Sunday email
+### Scenario C — The Sunday email, by day (updated 2026-10-28 after the owner reviewed a preview)
 1. With "Email me" connected, set Settings → Agent → Event picks to today, a few minutes from now (at or after 4 pm).
-2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)", with **Picks**, **On your
-   Recurring Events calendar**, and (from the second week) **Last week**. No texts.
+2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)". No note at the top, no
+   footer. One section per day, Monday to Sunday:
+   - a free day lists 3–5 events in time order (fewer only when fewer were found; "Free, but nothing stood out." when
+     none), Recurring Events items marked "On your Recurring Events calendar";
+   - a busy day lists your evening plans ("Busy: Dinner · 7pm"), at most 4 then "and N more"; a trip reads "Away: …";
+     a Partiful party that's also on your calendar appears once;
+   - from the second week, a "Last week" line at the end. No texts.
 3. Tap **Get tickets** on a pick. **Expected**: the event's ticket page (after Cloudflare Access if signed out).
-4. **Expected**: nothing on a night you have a plan after 6 pm; a daytime market shows only when you have 2 free
-   hours of it; an event already on your Recurring Events calendar isn't repeated under Picks.
+4. **Expected**: no events on a day you have a plan after 6 pm; a daytime market shows only on a free day with 2
+   free hours of it; an event already on your Recurring Events calendar isn't listed twice.
 
 ### Scenario D — Learning from what you go to
 1. Buy a ticket to a pick, or add one to your own calendar. **Expected**: by the next morning `/picks` shows
@@ -1874,7 +1879,7 @@ Design: `docs/design/event-picks.md` §1, §6–9.
    or went to keeps coming.
 
 **Edge cases**:
-- "Email me" not connected → the picks come by text, with "To get these by email, connect “Email me” in Settings →
+- "Email me" not connected → one text, by day, with "To get these by email, connect “Email me” in Settings →
   Email & photos."
 - Gmail busy → retried every 10 minutes; still failing at 8:30 pm → texts, saying the email didn't go through.
 - The server stops mid-send → that week's email is never sent twice.
