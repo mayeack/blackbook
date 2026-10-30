@@ -6,7 +6,7 @@
  */
 import type { GoogleStatusView, SourceCounts, SourceFix, SourceFixKind, SourceView } from '../api/types';
 import { plural } from './format';
-import { sourceStatus } from './labels';
+import { sourceCardLabel, sourceStatus } from './labels';
 
 export const GOOGLE_CONNECT_URL = '/api/v1/google/connect';
 /** Each Google product is its own consent and token (routes/google.ts ?product=). */
@@ -162,6 +162,51 @@ export function googleFix(serverFix: SourceFix | null | undefined, g: GoogleStat
   if (!g.connected) return g.secretsAvailable ? { kind: 'connect_google' } : { kind: 'google_secrets_missing' };
   return serverFix && serverFix.kind !== 'connect_google' && serverFix.kind !== 'google_not_configured' ? serverFix : null;
 }
+
+/** A source that needs fixing, for the strip at the top of Today. */
+export interface SourceIssue {
+  source: string;
+  label: string;
+  severity: 'critical' | 'warning';
+  /** What to do (the fix's title) or, without a fix, what the source last reported. */
+  message: string;
+  lastOkAt: number | null;
+}
+
+/** Broken statuses: signed out or changed shape needs the owner; errors and quiet sources may recover on their own. */
+const ISSUES: Partial<Record<SourceView['status'], { severity: SourceIssue['severity']; fallback: string }>> = {
+  auth_required: { severity: 'critical', fallback: 'Needs you to sign in again.' },
+  contract_broken: { severity: 'critical', fallback: 'This source changed shape; reading it is paused.' },
+  error: { severity: 'warning', fallback: 'Its last check failed.' },
+  stale: { severity: 'warning', fallback: 'No new data lately.' },
+};
+
+/** "Partiful kept answering…" under a bold "Partiful" reads "Kept answering…". */
+function dropLeading(label: string, message: string): string {
+  if (!message.toLowerCase().startsWith(`${label.toLowerCase()} `)) return message;
+  const rest = message.slice(label.length + 1);
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
+/**
+ * Sources that are broken now (Needs you / Error / Stale), most urgent first, in card order otherwise. Not-set-up and
+ * deliberately disabled sources aren't broken, so they stay on the Sources screen only.
+ */
+export function sourceIssues(sources: readonly SourceView[]): SourceIssue[] {
+  const out: SourceIssue[] = [];
+  for (const s of sources) {
+    const issue = ISSUES[s.status];
+    if (!issue) continue;
+    // A connect fix on a broken source means Google stopped accepting a grant that worked: "Reconnect …".
+    const fix = s.fix ? (reconnectCopy(s.fix.kind) ?? fixCopy(s.fix)) : null;
+    const label = sourceCardLabel(s.source);
+    out.push({ source: s.source, label, severity: issue.severity, message: dropLeading(label, fix?.title ?? s.lastError ?? issue.fallback), lastOkAt: s.lastOkAt });
+  }
+  return out.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'critical' ? -1 : 1));
+}
+
+/** The Sources card's element id, for #links from Today. */
+export const sourceCardId = (source: string) => `source-${source}`;
 
 /** "3 calendars · 2 excluded" for the Google card's summary line. */
 export function calendarSummary(g: GoogleStatusView): string {
