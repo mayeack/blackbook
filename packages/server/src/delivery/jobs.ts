@@ -3,8 +3,8 @@
  *   compose      daily AGENT_TIMES.compose (07:30): digest copy for today's ranked items (LLM composer with
  *                grounding, template fallback). Nothing is sent.
  *   digest-send  every AGENT_TIMES.deliveryTickMs: at settings digest.time (DISABLED by default: digest.enabled)
- *                sends the brief to the owner's own handle, pings subscribed devices, heartbeats / failure notices,
- *                and one generic push per new critical-source alert. Most ticks return after two small queries.
+ *                sends the brief to the owner's own handle, pings subscribed devices, emails it to his own Gmail
+ *                (digest.email), heartbeats / failure notices, and one generic push per new critical-source alert. Most ticks return after two small queries.
  * Both are short (≤5 items, one LLM call at most) and await network I/O, so the 10 s iMessage tail stays responsive.
  */
 import { localDate } from '@yb/shared';
@@ -56,7 +56,7 @@ export function deliveryJobs(deps: DeliveryJobDeps): JobDef[] {
           select: deps.select,
           signal: ctx.signal,
         });
-        if (r.action === 'before_time' || r.action === 'final' || r.action === 'no_digest_yet') {
+        if ((r.action === 'before_time' || r.action === 'final' || r.action === 'no_digest_yet') && !r.emailed) {
           return { status: 'skipped', stats: { health_pushes: r.healthPushes ?? 0 } };
         }
         return {
@@ -64,6 +64,7 @@ export function deliveryJobs(deps: DeliveryJobDeps): JobDef[] {
             imessage_sent: r.imessage === 'sent' ? 1 : 0,
             push_sent: r.pushed?.sent ?? 0,
             push_removed: r.pushed?.removed ?? 0,
+            email_sent: r.emailed ? 1 : 0,
             health_pushes: r.healthPushes ?? 0,
           },
         };

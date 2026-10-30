@@ -18,6 +18,8 @@
  *                                             brief off, or catch-up passing closes it with what already went out, and so
  *                                             does the day ending.
  *   push: push.enabled + a VAPID sender + ≥1 device → "Your brief is ready · N things" once
+ *   email: digest.email + "Email me" connected → the whole brief once to the owner's own Gmail (digestEmail.ts), on
+ *          its own track: it still goes when texting is off or the iMessage helper is down, and after the text went
  * A channel that can't go yet (collector down, quiet hours, circuit open) is retried next tick until catch-up passes.
  * The row's final status: 'sent' | 'fallback_sent' (LLM was configured but the copy fell back to templates) |
  * 'failed' | 'skipped' (with skip_reason). Critical-source alerts get one generic health push each.
@@ -28,6 +30,7 @@ import type { Logger } from '../ops/logger';
 import type { AgentServices } from '../services';
 import { inLocalWindow, settingsSnapshot, type SettingsSnapshot } from '../settings/registry';
 import { composeSelection, compositionCurrent, minimalText, partsAttempted, persistComposition, pushBodyFor, storedComposition, type ComposedDigest } from './compose';
+import { briefEmail } from './digestEmail';
 import { pushDeviceCount, pushToDevices, type PushFanoutResult } from './push';
 import { getDigestRow, readDigestSelection, type DigestRow, type DigestSelection, type SelectDigestItems } from './selection';
 import { peopleAdded, pipelineFailure, SOURCE_LABELS } from './status';
@@ -43,7 +46,7 @@ export const HEARTBEAT_EVERY_DAYS = 3;
 
 export interface DeliveryDeps {
   db: DB;
-  services: Pick<AgentServices, 'llm' | 'egress' | 'outbound'>;
+  services: Pick<AgentServices, 'llm' | 'egress' | 'outbound' | 'email'>;
   push: PushSender;
   now?: () => number;
   log?: Logger;
@@ -69,6 +72,9 @@ export interface DeliveryTickResult {
   imessage?: ChannelDelivery;
   push?: ChannelDelivery;
   pushed?: PushFanoutResult | null;
+  email?: ChannelDelivery;
+  /** The brief's email went out this tick. */
+  emailed?: boolean;
   /** Health + pre-event pushes sent this tick. */
   healthPushes?: number;
 }
@@ -191,6 +197,53 @@ async function pushStep(deps: DeliveryDeps, c: Clock, d: DigestRow, payload: Pus
   const ttlSeconds = Math.max(600, Math.round((catchUpEndMs(c) - c.now) / 1000));
   const result = await pushToDevices(deps.db, deps.push, payload, { now: deps.now, log: deps.log, ttlSeconds, urgency: 'normal' });
   return { state: result.sent ? 'sent' : 'failed', final: true, reason: result.sent ? null : 'push_failed', result };
+}
+
+/**
+ * The brief by email (settings digest.email; delivery/email.ts, the "Email me" grant), once a day. It keeps to quiet
+ * hours, a pause and catch-up like the text, but not to digest.enabled or the iMessage helper. 'sending' is written
+ * before the Gmail call, so a crash mid-call never sends twice (it then counts as sent). A failure worth retrying
+ * (5xx, 429, network) is tried again next tick; one only a reconnect fixes is final (source_health 'gmail_send'
+ * asks for the reconnect). The row is written only when the state changes.
+ */
+async function emailStep(
+  deps: DeliveryDeps,
+  c: Clock,
+  d: DigestRow,
+  sel: DigestSelection,
+  composedOf: () => Promise<ComposedDigest | null>,
+): Promise<{ state: ChannelDelivery; sent: boolean }> {
+  const db = deps.db;
+  const set = (state: ChannelDelivery) => {
+    if (state !== d.email_status) updateRow(db, d.id, { email_status: state });
+    return { state, sent: false };
+  };
+  if (d.email_status === 'sent' || d.email_status === 'failed') return { state: d.email_status, sent: false };
+  if (d.email_status === 'sending') {
+    deps.log?.warn('digest.email_unconfirmed', { ids: [d.id] });
+    return set('sent');
+  }
+  if (!c.s['digest.email']) return set('disabled');
+  const email = deps.services.email;
+  if (!email?.configured) return set('not_configured');
+  if (c.pastCatchUp || c.paused || !sel.items.length) return set('skipped');
+  if (c.quiet) return set('pending');
+  const composed = await composedOf();
+  if (!composed?.items.length) return set('skipped');
+  updateRow(db, d.id, { email_status: 'sending' });
+  const message = briefEmail({ localDate: d.local_date, items: composed.items, health: composed.health, digestTime: c.s['digest.time'] });
+  const r = await email.sendToSelf(message, { signal: deps.signal, now: c.now }).catch(() => ({ status: 'failed', reason: 'build_failed', auth: false, retryable: false }) as const);
+  if (r.status === 'sent') {
+    updateRow(db, d.id, { email_status: 'sent', email_sent_at: c.now, email_id: r.messageId });
+    // Like the push, the email puts every item in front of the owner.
+    markDelivered(db, composed.items.map((i) => i.suggestionId), c.now);
+    deps.log?.info('digest.emailed', { ids: [d.id], counts: { items: composed.items.length } });
+    return { state: 'sent', sent: true };
+  }
+  const state: ChannelDelivery = r.status === 'disabled' ? 'not_configured' : r.retryable ? 'pending' : 'failed';
+  updateRow(db, d.id, { email_status: state });
+  if (r.status === 'failed') deps.log?.warn('digest.email_failed', { ids: [d.id], error_code: r.reason });
+  return { state, sent: false };
 }
 
 /** Ms until today's catch-up end (approximate: minutes from the local clock). */
@@ -399,12 +452,17 @@ async function digestStep(deps: DeliveryDeps, c: Clock): Promise<DeliveryTickRes
   // A brief is "started" once one of its texts reached the owner; until all its texts settle it is part-way out.
   const first = d.sent_at && d.outbound_id ? { id: d.outbound_id, at: d.sent_at } : firstDeliveredPart(db, d.id);
   const partial = first !== null && d.imessage_status !== 'sent';
-  if (FINAL_STATUSES.has(d.status) && !partial) return { action: 'final', localDate: c.date };
+  if (FINAL_STATUSES.has(d.status) && !partial) {
+    // The text is done; the email may still be owed (it failed to send at first, or texting went before it).
+    const em = await emailStep(deps, c, d, sel, async () => storedComposition(sel));
+    return { action: 'final', localDate: c.date, email: em.state, emailed: em.sent };
+  }
   if (!sel.items.length && !first) return handleEmpty(deps, c, d);
 
   // Compose (or recompose if the ranker's picks changed) before anything goes out; never once a text was handed to
-  // the sender: parts are sent by position, so the texts must not move under their client_refs.
-  const frozen = first !== null || partsAttempted(db, d.id);
+  // the sender (parts are sent by position, so the texts must not move under their client_refs) or the email went
+  // (the text says what the email said).
+  const frozen = first !== null || partsAttempted(db, d.id) || d.email_status === 'sent' || d.email_status === 'sending';
   let composed = frozen || compositionCurrent(sel) ? storedComposition(sel) : null;
   if (!composed) {
     composed = await composeSelection(db, deps.services, sel, { localDate: c.date, now, log: deps.log, signal: deps.signal, settings: c.s });
@@ -451,9 +509,14 @@ async function digestStep(deps: DeliveryDeps, c: Clock): Promise<DeliveryTickRes
   // iMessage marks each item as its text goes out (sendParts); the push puts every item in front of the owner.
   if (ps.result?.sent) markDelivered(db, sel.items.map((i) => i.suggestionId), now);
 
-  const action: DeliveryAction = im.sent ? 'delivered' : im.final ? (im.state === 'failed' ? 'failed' : 'skipped') : ps.result?.sent ? 'delivered' : 'waiting';
-  if (im.sent || im.final) deps.log?.info('digest.delivery', { ids: [d.id], counts: { items: composed.items.length, texts: composed.texts.length, imessage: im.sent ? 1 : 0, push: ps.result?.sent ?? 0 } });
-  return { action, localDate: c.date, reason: patch.skip_reason as string | null, imessage: im.state, push: ps.state, pushed: ps.result };
+  const ready = composed;
+  const em = await emailStep(deps, c, d, sel, async () => ready);
+
+  const action: DeliveryAction = im.sent ? 'delivered' : im.final ? (im.state === 'failed' ? 'failed' : 'skipped') : ps.result?.sent || em.sent ? 'delivered' : 'waiting';
+  if (im.sent || im.final) {
+    deps.log?.info('digest.delivery', { ids: [d.id], counts: { items: composed.items.length, texts: composed.texts.length, imessage: im.sent ? 1 : 0, push: ps.result?.sent ?? 0, email: em.sent ? 1 : 0 } });
+  }
+  return { action, localDate: c.date, reason: patch.skip_reason as string | null, imessage: im.state, push: ps.state, pushed: ps.result, email: em.state, emailed: em.sent };
 }
 
 /** Why today's digest wouldn't go out over iMessage right now (null = it would). For preview / Today. */

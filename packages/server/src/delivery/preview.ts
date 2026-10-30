@@ -59,6 +59,9 @@ export function todayDigestOf(d: DigestRow): TodayDigest {
     // A brief part-way out (some texts still on their way) is 'pending' until its last text settles.
     imessage: d.sent_at && d.skip_reason !== 'partial' ? 'sent' : channel(d.imessage_status, final ? 'skipped' : 'pending'),
     push: d.push_sent_at ? 'sent' : channel(d.push_status, final ? 'skipped' : 'pending'),
+    // 'sending' (a Gmail call that never answered) counts as sent; not decided yet reads as not set up (hidden).
+    email: d.email_sent_at || d.email_status === 'sending' ? 'sent' : channel(d.email_status, 'not_configured'),
+    emailSentAt: d.email_sent_at,
     skipReason: d.skip_reason,
   };
 }
@@ -93,6 +96,7 @@ export function digestHistory(db: DB, limit: number): DigestSummary[] {
     itemCount: r.item_count,
     sentAt: r.sent_at,
     pushSentAt: r.push_sent_at,
+    emailSentAt: r.email_sent_at,
     hadWildcard: r.had_wildcard === 1,
   }));
 }

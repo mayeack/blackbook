@@ -1,7 +1,7 @@
 /**
  * Email to the owner's own inbox through his Gmail (Google product gmail_send: the gmail.send scope plus openid email,
  * adapters/calendar/google.ts). Used by the weekly event picks (intel/eventPicks/email.ts), which he asked to get
- * "over email every Sunday evening".
+ * "over email every Sunday evening", and the daily brief (delivery/digestEmail.ts, settings digest.email).
  *
  * HARD RULES (enforced here):
  *   1. The only recipient is the connected account's own verified address (secret gmail_send.address, from the

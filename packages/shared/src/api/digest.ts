@@ -64,6 +64,7 @@ export const DigestSummary = z.object({
   itemCount: z.number().int(),
   sentAt: Ms.nullable(),
   pushSentAt: Ms.nullable(),
+  emailSentAt: Ms.nullable(),
   hadWildcard: z.boolean(),
 });
 export type DigestSummary = z.infer<typeof DigestSummary>;

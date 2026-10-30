@@ -32,6 +32,7 @@ afterAll(() => {
 
 const values = (o: Partial<SettingsValues> = {}): SettingsValues => ({
   'digest.enabled': false,
+  'digest.email': true,
   'digest.time': '08:00',
   'digest.catch_up_until': '11:00',
   'digest.max_items': 4,

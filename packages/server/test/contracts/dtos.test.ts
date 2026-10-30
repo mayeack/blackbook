@@ -135,6 +135,8 @@ describe('agent-loop DTO round-trips', () => {
         pushSentAt: null,
         imessage: 'sent',
         push: 'disabled',
+        email: 'sent',
+        emailSentAt: T,
         skipReason: null,
       },
       items: [item, { ...item, ordinal: 2, kind: 'wildcard', isWildcard: true, wildcardGenerator: 'memory', copy: 'llm' }],

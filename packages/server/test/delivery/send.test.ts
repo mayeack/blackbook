@@ -1,15 +1,17 @@
 /**
  * Delivery decisions, tick by tick, with fakes only (nothing is ever sent anywhere): ships disabled, sends once at
- * digest.time to the owner, catch-up, quiet hours, pause, empty days, heartbeat, pipeline-failure notice, push.
+ * digest.time to the owner, catch-up, quiet hours, pause, empty days, heartbeat, pipeline-failure notice, push, and
+ * the email to his own Gmail.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { uuidv7 } from '@yb/shared';
 import { outboundTextHash } from '../../src/adapters/imessage/mapping';
 import { composeDigest, greeting, itemLines, joinTexts, webBodyOf } from '../../src/delivery/compose';
+import { todayDigest } from '../../src/delivery/preview';
 import { upsertSubscription } from '../../src/delivery/push';
 import { deliveryTick, emptyStreak, partRef, type DeliveryDeps } from '../../src/delivery/send';
 import { BOT_MARKER, checkOutboundText, type OutboundSender } from '../../src/delivery/types';
-import { FakeOutboundSender, FakePushSender } from '../fakes/delivery';
+import { FakeEmailSender, FakeOutboundSender, FakePushSender } from '../fakes/delivery';
 import { FakeEgress, FakeLlmClient } from '../fakes/llm';
 import { seedPerson } from '../helpers';
 import { buildWorld, DAY, DAY_DATE, seedDigest, seedSuggestion, setSettings, typicalDay, zoned, type World } from './world';
@@ -390,5 +392,149 @@ describe('push ping', () => {
     expect((await tickAt('23:00')).healthPushes).toBe(0);
     expect(push.sent).toHaveLength(1);
     expect(DAY).toBeGreaterThan(0);
+  });
+});
+
+describe('the brief by email (owner, 2026-10-30: "Also send my daily digest via email")', () => {
+  let email: FakeEmailSender;
+  beforeEach(() => {
+    email = new FakeEmailSender();
+  });
+  const mail = (hhmm: string, date = DAY_DATE) => tickAt(hhmm, date, { services: { llm: new FakeLlmClient({ configured: false }), egress: new FakeEgress(), outbound, email } });
+  const delivered = () => w.db.prepare(`SELECT count(*) FROM suggestions WHERE status = 'delivered'`).pluck().get();
+
+  it('goes once at digest.time beside the text, with the same items, a link to Today and nothing else', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    expect((await mail('07:59')).action).toBe('before_time');
+    expect(await mail('08:00')).toMatchObject({ action: 'delivered', imessage: 'sent', email: 'sent', emailed: true });
+    expect(outbound.sent).toHaveLength(1);
+    expect(email.sent).toHaveLength(1);
+    const m = email.sent[0]!;
+    expect(m).toMatchObject({ tag: 'daily-brief', subject: 'Your brief for Wed Oct 14: 4 things' });
+    // The text's greeting and items, word for word, without the marker or the reply hint (replying to an email does nothing).
+    const text = outbound.sent[0]!.text;
+    const items = text.slice(`${BOT_MARKER} `.length, text.indexOf("\n\nThat's it!"));
+    expect(m.text.startsWith(`Good morning! 4 things for today.\n\n1. `)).toBe(true);
+    expect(m.text.startsWith(items)).toBe(true);
+    expect(m.text.endsWith("\n\nThat's it! It's all at https://yeackbot.com/today")).toBe(true);
+    expect(m.text).not.toMatch(/Reply "done|\u{1F168}/u);
+    // A sensitive item stays as vague as in the text.
+    expect(m.text).toContain('\n\n4. Something personal\nThe details are in the app.\n\n');
+    expect(m.html).toContain('Good morning! 4 things for today.');
+    expect(m.html).toContain('href="https://yeackbot.com/today"');
+    expect(digestRow()).toMatchObject({ status: 'sent', email_status: 'sent', email_sent_at: now, email_id: 'msg1' });
+    expect(todayDigest(w.db, DAY_DATE)).toMatchObject({ imessage: 'sent', email: 'sent', emailSentAt: now });
+    for (const t of ['08:01', '09:00', '10:59']) expect(await mail(t)).toMatchObject({ action: 'final', email: 'sent', emailed: false });
+    expect(email.attempts).toHaveLength(1);
+    expect(outbound.sent).toHaveLength(1);
+  });
+
+  it('texting off: the email still goes at digest.time, every item counts as delivered, and Today says so', async () => {
+    const { ids } = typicalDay(w);
+    expect(await mail('08:00')).toMatchObject({ action: 'delivered', imessage: 'disabled', email: 'sent', emailed: true });
+    expect(outbound.sent).toHaveLength(0);
+    expect(digestRow()).toMatchObject({ status: 'ready', imessage_status: 'disabled', email_status: 'sent' });
+    expect(delivered()).toBe(ids.length);
+    expect(todayDigest(w.db, DAY_DATE)).toMatchObject({ imessage: 'disabled', email: 'sent', emailSentAt: now });
+    await mail('08:01');
+    await mail('11:00');
+    expect(digestRow()).toMatchObject({ status: 'skipped', skip_reason: 'disabled', email_status: 'sent' });
+    expect(email.attempts).toHaveLength(1);
+  });
+
+  it('"Email me" not connected: nothing is emailed and the text goes as before; connected before catch-up, it goes then', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    email = new FakeEmailSender({ configured: false });
+    expect(await mail('08:00')).toMatchObject({ action: 'delivered', imessage: 'sent', email: 'not_configured', emailed: false });
+    expect(outbound.sent).toHaveLength(1);
+    expect(email.attempts).toHaveLength(0);
+    // Today leaves an email that isn't set up out of the header.
+    expect(todayDigest(w.db, DAY_DATE)!.email).toBe('not_configured');
+    email = new FakeEmailSender();
+    expect(await mail('09:30')).toMatchObject({ action: 'final', email: 'sent', emailed: true });
+    expect(email.sent).toHaveLength(1);
+    expect(outbound.sent).toHaveLength(1);
+  });
+
+  it('digest.email off: never emailed, even when connected', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true, 'digest.email': false });
+    expect(await mail('08:00')).toMatchObject({ imessage: 'sent', email: 'disabled' });
+    expect(await mail('08:01')).toMatchObject({ action: 'final', email: 'disabled' });
+    expect(email.attempts).toHaveLength(0);
+    expect(digestRow().email_status).toBe('disabled');
+  });
+
+  it('a Gmail hiccup (5xx) is retried next tick; a revoked grant is final', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    email = new FakeEmailSender({ results: [{ status: 'failed', reason: 'backendError', auth: false, retryable: true }, { status: 'sent', messageId: 'm2' }] });
+    expect(await mail('08:00')).toMatchObject({ imessage: 'sent', email: 'pending', emailed: false });
+    expect(digestRow()).toMatchObject({ status: 'sent', email_status: 'pending', email_sent_at: null });
+    expect(await mail('08:01')).toMatchObject({ action: 'final', email: 'sent', emailed: true });
+    expect(digestRow()).toMatchObject({ email_status: 'sent', email_id: 'm2' });
+    expect(email.attempts).toHaveLength(2);
+
+    w = buildWorld({ enabled: true });
+    outbound = new FakeOutboundSender({ db: w.db, now: () => now });
+    typicalDay(w);
+    email = new FakeEmailSender({ results: [{ status: 'failed', reason: 'invalid_grant', auth: true, retryable: false }] });
+    expect(await mail('08:00')).toMatchObject({ email: 'failed' });
+    expect(await mail('08:01')).toMatchObject({ action: 'final', email: 'failed', emailed: false });
+    expect(email.attempts).toHaveLength(1);
+    expect(todayDigest(w.db, DAY_DATE)!.email).toBe('failed');
+  });
+
+  it('a Gmail call that never answered (a crash mid-call) counts as sent: never a second email', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    await tickAt('08:00');
+    w.db.prepare(`UPDATE digests SET email_status = 'sending'`).run();
+    expect(todayDigest(w.db, DAY_DATE)!.email).toBe('sent');
+    expect(await mail('08:01')).toMatchObject({ action: 'final', email: 'sent', emailed: false });
+    expect(digestRow().email_status).toBe('sent');
+    expect(email.attempts).toHaveLength(0);
+  });
+
+  it('quiet hours and a pause hold it like the text; past catch-up it is skipped', async () => {
+    typicalDay(w);
+    setSettings(w.db, { quiet_hours: { start: '10:00', end: '07:00' }, 'digest.paused_until': zoned(DAY_DATE, '09:00') });
+    expect(await mail('08:00')).toMatchObject({ email: 'skipped', emailed: false });
+    expect(await mail('10:15')).toMatchObject({ email: 'pending', emailed: false });
+    setSettings(w.db, { quiet_hours: { start: '22:00', end: '07:00' } });
+    expect(await mail('10:20')).toMatchObject({ email: 'sent', emailed: true });
+
+    w = buildWorld();
+    outbound = new FakeOutboundSender({ db: w.db, now: () => now });
+    email = new FakeEmailSender();
+    typicalDay(w);
+    expect(await mail('11:00')).toMatchObject({ email: 'skipped' });
+    expect(await mail('11:01')).toMatchObject({ action: 'final', email: 'skipped' });
+    expect(email.attempts).toHaveLength(0);
+  });
+
+  it('someone hidden after the text went is left out of a later email', async () => {
+    typicalDay(w);
+    setSettings(w.db, { 'digest.enabled': true });
+    email = new FakeEmailSender({ results: [{ status: 'failed', reason: 'backendError', auth: false, retryable: true }, { status: 'sent', messageId: 'm2' }] });
+    await mail('08:00');
+    expect(outbound.sent[0]!.text).toMatch(/\n\n3\. /);
+    w.db.prepare('UPDATE people SET is_hidden = 1 WHERE id = ?').run(w.cleo); // item 3 is the Cleo ↔ Dora intro
+    await mail('08:01');
+    const m = email.sent[0]!;
+    expect(m.subject).toBe('Your brief for Wed Oct 14: 3 things');
+    expect(m.text).not.toMatch(/Cleo|Dora|\n3\. /);
+    expect(m.html).not.toMatch(/Cleo|Dora/);
+    expect(m.text).toContain('\n\n4. Something personal');
+  });
+
+  it('an empty day sends no email (the heartbeat and failure notices are texts only)', async () => {
+    seedDigest(w.db, DAY_DATE, []);
+    setSettings(w.db, { 'digest.enabled': true });
+    await mail('08:00');
+    await mail('08:01');
+    expect(email.attempts).toHaveLength(0);
   });
 });

@@ -39,6 +39,8 @@ const digest = (o: Partial<TodayDigest> = {}): TodayDigest => ({
   pushSentAt: 1000,
   imessage: 'sent',
   push: 'sent',
+  email: 'not_configured',
+  emailSentAt: null,
   skipReason: null,
   ...o,
 });
@@ -71,6 +73,15 @@ describe('Today delivery line', () => {
 
   it('texting off (the shipped default) still shows a sent push', () => {
     expect(deliveryLine(digest({ imessage: 'disabled', push: 'sent', sentAt: null }), t).text).toBe('Sent 8:00 via push ✓ · texting off');
+  });
+
+  it('the email shows beside the text; with texting off it alone makes the brief sent; a failed email warns', () => {
+    expect(deliveryLine(digest({ email: 'sent', emailSentAt: 1000 }), t).text).toBe('Sent 8:00 via iMessage ✓ · push ✓ · email ✓');
+    const emailOnly = { imessage: 'disabled', push: 'disabled', sentAt: null, pushSentAt: null, email: 'sent', emailSentAt: 1000 } as const;
+    expect(deliveryLine(digest({ ...emailOnly, status: 'ready' }), t)).toEqual({ text: 'Sent 8:00 via email ✓ · texting off', tone: 'ok' });
+    expect(deliveryLine(digest({ ...emailOnly, status: 'skipped', skipReason: 'disabled' }), t)).toEqual({ text: 'Sent 8:00 via email ✓ · texting off', tone: 'ok' });
+    expect(deliveryLine(digest({ email: 'failed' }), t)).toEqual({ text: 'Sent 8:00 via iMessage ✓ · push ✓ · email ✗', tone: 'warn' });
+    expect(deliveryLine(digest({ email: 'disabled' }), t).text).toBe('Sent 8:00 via iMessage ✓ · push ✓');
   });
 
   it('a failed channel warns; not-configured push is left out', () => {
