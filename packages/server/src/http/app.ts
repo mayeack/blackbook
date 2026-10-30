@@ -14,6 +14,7 @@ import { cfAccess, isPublicPath, type AuthConfig } from './cfAccess';
 import { csrf } from './csrf';
 import { errorHandler, routePattern } from './errors';
 import { publicAssets, spa } from './static';
+import { goRedirect } from '../routes/eventPicks';
 
 export interface CreateAppOptions {
   db: DB;
@@ -102,6 +103,9 @@ export function createApp(o: CreateAppOptions): Express {
   });
 
   app.use(cfAccess(o.auth, log));
+
+  // The ticket link in the weekly event-picks texts (texts only carry yeackbot.com links): count the tap, redirect.
+  app.get('/go/:id', goRedirect(o.db));
 
   app.use('/api', (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');

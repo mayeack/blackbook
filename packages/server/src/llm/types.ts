@@ -78,7 +78,8 @@ export type LlmKind =
   | 'brief'
   | 'calendar'
   | 'intent'
-  | 'ticket';
+  | 'ticket'
+  | 'events';
 
 /** One letter per kind for custom_id (`{letter}{ver}-{subject}-{attempt}`). */
 export const CUSTOM_ID_LETTER: Readonly<Record<LlmKind, string>> = {
@@ -94,6 +95,7 @@ export const CUSTOM_ID_LETTER: Readonly<Record<LlmKind, string>> = {
   brief: 'b',
   intent: 'i',
   ticket: 'g',
+  events: 'v',
 };
 
 /** Ask loop limits (intelligence §7). */
@@ -302,6 +304,56 @@ export type LlmToolLoopOutcome =
   | { status: 'max_tokens' | 'tool_limit'; text: string; toolCalls: number; citableIds: string[]; usage: LlmUsage; requestId: string }
   | LlmUnavailable;
 
+// ---------------------------------------------------------------------------------------------- web search
+
+/** Where the searches should be localized (the API's approximate user_location). */
+export interface LlmSearchLocation {
+  city: string;
+  region?: string | null;
+  /** ISO 3166-1 alpha-2. */
+  country?: string | null;
+  timezone?: string | null;
+}
+
+/**
+ * One synchronous call with Anthropic's server-side web_search tool and no client tools (llm/client.ts webSearch):
+ * the API runs the searches; the answer is free text (structured output can't be combined with web search: its
+ * citations are always on), so the caller parses it and must treat it — and every URL in it — as untrusted.
+ */
+export interface LlmWebSearchRequest extends LlmRequestBase {
+  /** Searches the API may run (each is billed: WEB_SEARCH_USD per search). */
+  maxSearches: number;
+  location?: LlmSearchLocation | null;
+  /** Domains never searched (e.g. encyclopedias); optional. */
+  blockedDomains?: readonly string[];
+  signal?: AbortSignal;
+}
+
+/** A page a search returned (every URL the answer may legitimately cite comes from these). */
+export interface LlmSearchResult {
+  url: string;
+  title: string;
+  pageAge: string | null;
+}
+
+export type LlmWebSearchOutcome =
+  | {
+      status: 'ok' | 'max_tokens';
+      /** The final text (after the last search), as written. */
+      text: string;
+      /** Every result page, in order, deduplicated by URL. */
+      results: LlmSearchResult[];
+      /** Queries the model ran (local logs/ledger only; never sent anywhere). */
+      queries: string[];
+      searches: number;
+      /** Search-result errors the API reported inside the answer (max_uses_exceeded, too_many_requests …). */
+      searchErrors: string[];
+      usage: LlmUsage;
+      requestId: string;
+    }
+  | { status: 'refused'; category: string | null; usage: LlmUsage; requestId: string }
+  | LlmUnavailable;
+
 // ---------------------------------------------------------------------------------------------- batches
 
 export interface LlmBatchItem<T = unknown> extends LlmRequestBase {
@@ -350,6 +402,8 @@ export interface LlmClient {
   parse<T>(req: LlmParseRequest<T>): Promise<LlmOutcome<T>>;
   /** A read-only tool-use loop (tool_choice auto, strict tools, append-only history). */
   runTools(req: LlmToolLoopRequest): Promise<LlmToolLoopOutcome>;
+  /** One synchronous call with the server-side web_search tool (pause_turn continued); free-text answer. */
+  webSearch(req: LlmWebSearchRequest): Promise<LlmWebSearchOutcome>;
   /** Writes llm_requests rows BEFORE the HTTP submit, then creates one Message Batch (≤5,000 items, no fallbacks). */
   submitBatch(items: LlmBatchItem[], o: { purpose: string; runId: string }): Promise<LlmBatchSubmit>;
   batchStatus(batchId: string): Promise<LlmBatchStatus>;

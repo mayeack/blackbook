@@ -1,5 +1,11 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  EventPickFeedback,
+  EventPickItem,
+  EventPicksEmailDisconnect,
+  EventPicksEmailStatus,
+  EventPicksEmailTest,
+  EventPicksResponse,
   GmailDisconnectResult,
   GmailStatus,
   GphotosDisconnectResult,
@@ -9,7 +15,8 @@ import type {
   TicketList,
 } from '@yb/shared';
 import { normalizeEventsPage, normalizeGoogleStatus, normalizeOccasionDetail } from '../lib/events';
-import { gmailNotConfigured, gphotosNotConfigured, sessionActive } from '../lib/googleProducts';
+import { emailNotConfigured, gmailNotConfigured, gphotosNotConfigured, sessionActive } from '../lib/googleProducts';
+import { withPick } from '../lib/picks';
 import type { TicketsWhen } from '../lib/tickets';
 import { api, ApiError, isApiError, qs } from './client';
 import type {
@@ -42,6 +49,8 @@ export const keys = {
   clues: (eventId: string, personId: string) => ['event', eventId, 'clues', personId] as const,
   google: ['google', 'status'] as const,
   tickets: (when: TicketsWhen) => ['tickets', when] as const,
+  eventPicks: ['event-picks'] as const,
+  eventPicksEmail: ['event-picks', 'email'] as const,
   gmail: ['gmail', 'status'] as const,
   gphotos: ['gphotos', 'status'] as const,
   gphotosSession: (id: string) => ['gphotos', 'session', id] as const,
@@ -237,6 +246,33 @@ export function useTickets(when: TicketsWhen) {
   });
 }
 
+// ---------------------------------------------------------------------------------------------- event picks
+
+/** The latest week's picks (sent or ready), the answer counts the ranker learns from, and whether picks are on. */
+export const useEventPicks = () =>
+  useQuery({ queryKey: keys.eventPicks, queryFn: () => api.get<EventPicksResponse>('/event-picks'), retry: retryOnce });
+
+export interface PickFeedbackVars {
+  id: string;
+  verdict: EventPickFeedback['verdict'];
+}
+
+/** POST /event-picks/:id/feedback: the owner's own answer on one pick ('undo' takes it back). Answers the updated pick. */
+export const postPickFeedback = ({ id, verdict }: PickFeedbackVars) =>
+  api.post<EventPickItem>(`/event-picks/${encodeURIComponent(id)}/feedback`, { verdict } satisfies EventPickFeedback);
+
+/** Shows the updated pick right away, then refetches for the new history counts. Errors toast (not silent). */
+export function usePickFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: postPickFeedback,
+    onSuccess: (item) => {
+      qc.setQueryData<EventPicksResponse>(keys.eventPicks, (old) => (old ? withPick(old, item) : old));
+      void qc.invalidateQueries({ queryKey: keys.eventPicks });
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------------------------- Gmail & Google Photos
 
 /** Like /google/status: 503 GOOGLE_NOT_CONFIGURED is a status ("set up the OAuth client"), not an error. */
@@ -285,6 +321,35 @@ export function useGmailDisconnect() {
       invalidateProduct(qc, keys.gmail);
       void qc.invalidateQueries({ queryKey: ['tickets'] });
     },
+  });
+}
+
+/** "Email me" (the weekly picks by email): connected?, the address it sends to, the last email. */
+export const useEmailStatus = () =>
+  useQuery({
+    queryKey: keys.eventPicksEmail,
+    queryFn: () => orNotConfigured(() => api.get<EventPicksEmailStatus>('/event-picks/email'), emailNotConfigured),
+    retry: retryOnce,
+    staleTime: 60_000,
+  });
+
+/** A short test email to his own address. */
+export function useEmailTest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<EventPicksEmailTest>('/event-picks/email/test', {}),
+    meta: { silent: true },
+    onSettled: () => void qc.invalidateQueries({ queryKey: keys.eventPicksEmail }),
+  });
+}
+
+/** Disconnects "Email me" (the picks go back to texts). */
+export function useEmailDisconnect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<EventPicksEmailDisconnect>('/event-picks/email/disconnect', {}),
+    meta: { silent: true },
+    onSuccess: () => invalidateProduct(qc, keys.eventPicksEmail),
   });
 }
 

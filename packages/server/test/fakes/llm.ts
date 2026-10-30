@@ -26,7 +26,7 @@
  * server-side fallback — never Haiku 5.5, never batches). Usage is priced on that model.
  */
 import type { z } from 'zod';
-import { resolveRoute, sendsFallbacks, type LlmRoute, type RouteOverrides, type RouteParams } from '../../src/llm/models';
+import { resolveRoute, sendsFallbacks, WEB_SEARCH_USD, type LlmRoute, type RouteOverrides, type RouteParams } from '../../src/llm/models';
 import {
   costUsd,
   EgressBlocked,
@@ -47,6 +47,8 @@ import {
   type LlmToolLoopRequest,
   type LlmUnavailableReason,
   type LlmUsage,
+  type LlmWebSearchOutcome,
+  type LlmWebSearchRequest,
   type PseudonymizedPacket,
   type SpendCheck,
   type TokenMap,
@@ -73,6 +75,8 @@ export type FakeReply =
   | { refusal: string | null }
   | { maxTokens: true; partialText?: string }
   | { unavailable: LlmUnavailableReason }
+  /** webSearch(): the final text plus the result pages the searches returned (URLs a valid answer may cite). */
+  | { search: { text: string; results?: { url: string; title?: string }[]; searches?: number; errors?: string[] }; usage?: Partial<LlmUsage> }
   /** Tool loop: call these tools in order (one turn each), then answer with `then`. */
   | { toolCalls: { name: string; input: unknown }[]; then: FakeReply }
   /** Batch only. */
@@ -83,7 +87,7 @@ export type FakeReply =
   | { throws: string };
 
 export interface FakeCall {
-  method: 'parse' | 'runTools' | 'batch';
+  method: 'parse' | 'runTools' | 'batch' | 'webSearch';
   kind: LlmKind;
   route: LlmRoute;
   model: string;
@@ -191,7 +195,7 @@ export class FakeLlmClient implements LlmClient {
     return { ok: true };
   }
 
-  private record(method: FakeCall['method'], req: LlmParseRequest<unknown> | LlmToolLoopRequest | LlmBatchItem, customId?: string): FakeCall {
+  private record(method: FakeCall['method'], req: LlmParseRequest<unknown> | LlmToolLoopRequest | LlmBatchItem | LlmWebSearchRequest, customId?: string): FakeCall {
     const p = this.params(req.route);
     const call: FakeCall = {
       method,
@@ -289,6 +293,33 @@ export class FakeLlmClient implements LlmClient {
     for (const piece of text.match(/.{1,16}/gs) ?? []) req.onTextDelta?.(piece);
     this.spent[req.pool ?? 'steady'] += usage.costUsd;
     return { status: 'ok', text, toolCalls, citableIds, usage, requestId };
+  }
+
+  /** Searches are priced like the real client (WEB_SEARCH_USD each) on top of the fixed tokens. */
+  async webSearch(req: LlmWebSearchRequest): Promise<LlmWebSearchOutcome> {
+    const call = this.record('webSearch', req);
+    const blocked = this.gate({ pool: req.pool, estimateUsd: (req.estimateUsd ?? 0) + req.maxSearches * WEB_SEARCH_USD }, call.userText);
+    if (blocked) return blocked;
+    const requestId = `fake_req_${++this.reqSeq}`;
+    const r = this.reply(call);
+    if ('throws' in r) throw new Error(r.throws);
+    if ('unavailable' in r) return { status: 'unavailable', reason: r.unavailable };
+    const base = this.usage(false, 'usage' in r ? r.usage : undefined, this.params(req.route));
+    if ('refusal' in r) return { status: 'refused', category: r.refusal, usage: base, requestId };
+    if (!('search' in r)) throw new Error('FakeLlmClient: webSearch needs a { search } reply');
+    const searches = Math.min(req.maxSearches, r.search.searches ?? Math.min(req.maxSearches, 3));
+    const usage = { ...base, costUsd: base.costUsd + searches * WEB_SEARCH_USD };
+    this.spent[req.pool ?? 'steady'] += usage.costUsd;
+    return {
+      status: 'ok',
+      text: r.search.text,
+      results: (r.search.results ?? []).map((x) => ({ url: x.url, title: x.title ?? '', pageAge: null })),
+      queries: [],
+      searches,
+      searchErrors: r.search.errors ?? [],
+      usage,
+      requestId,
+    };
   }
 
   async submitBatch(items: LlmBatchItem[], _o: { purpose: string; runId: string }): Promise<LlmBatchSubmit> {

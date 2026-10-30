@@ -25,6 +25,7 @@ import { matcherJobs, type MatcherJobDeps } from '../../identity/matcherJobs';
 import { tiebreakJobs } from '../../identity/tiebreakJobs';
 import { intelJobs } from '../../intel/jobs';
 import { metAtJobs } from '../../intel/metAt/jobs';
+import { eventPicksJobs } from '../../intel/eventPicks/jobs';
 import { llmJobs } from '../../llm/jobs';
 import { pruneLogs, type Logger } from '../../ops/logger';
 import { circlesJobs } from '../../pipeline/circles/jobs';
@@ -103,6 +104,9 @@ export function agentJobDeps(deps: JobDeps): AgentJobDepsSet {
       vapid: c.vapid ?? null,
       collectorUrl: c.collectorUrl ?? COLLECTOR_DEFAULT_URL,
       collectorTokenFile: tokenFile,
+      // Email + Gmail for the event picks (services.ts); absent = those stay inert.
+      ...(c.google ? { google: c.google } : {}),
+      ...(c.secretsKey ? { secretsKey: c.secretsKey } : {}),
     },
   };
   return { pipeline: base, llm: c.anthropicApiKey ? base : null, commands: sourceJobDeps(deps).imessage ? base : null };
@@ -180,6 +184,7 @@ export function buildJobs(deps: JobDeps): JobDef[] {
     ...(a.pipeline ? tiesJobs(a.pipeline) : []),
     ...(a.pipeline ? obligationsJobs(a.pipeline) : []),
     ...(a.pipeline ? intelJobs(a.pipeline) : []),
+    ...(a.pipeline ? eventPicksJobs(a.pipeline) : []),
     ...(a.pipeline ? suggestionsJobs(a.pipeline) : []),
     ...(a.pipeline ? deliveryJobs(a.pipeline) : []),
     ...(a.commands ? commandsJobs(a.commands) : []),

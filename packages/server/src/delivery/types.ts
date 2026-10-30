@@ -27,7 +27,7 @@ import { BOT_MARKER } from '@yb/shared/collector/v1';
 export { BOT_MARKER };
 
 /** outbound_messages.purpose */
-export type OutboundPurpose = 'digest' | 'reply' | 'alert' | 'brief' | 'answer' | 'heartbeat' | 'test';
+export type OutboundPurpose = 'digest' | 'reply' | 'alert' | 'brief' | 'answer' | 'heartbeat' | 'test' | 'events';
 
 export const MAX_OUTBOUND_PER_HOUR = 30;
 export const MAX_COMMANDS_PER_HOUR = 30;
