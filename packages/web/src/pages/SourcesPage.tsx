@@ -1,5 +1,5 @@
-import { Fragment } from 'react';
-import { Link } from 'react-router';
+import { Fragment, useEffect } from 'react';
+import { Link, useLocation } from 'react-router';
 import { useGoogleStatus, useSources } from '../api/hooks';
 import type { GoogleStatusView, SourceView } from '../api/types';
 import { CalendarSection, FixBox } from '../components/GoogleCalendar';
@@ -7,7 +7,7 @@ import { Empty, PageHeader, PageState } from '../components/PageState';
 import { SourceTile } from '../components/SourceBadge';
 import { date, dateTime, relativeDay } from '../lib/format';
 import { channelOf, sourceCardLabel } from '../lib/labels';
-import { cardStatus, countRows, googleFix, hasData } from '../lib/sources';
+import { cardStatus, countRows, googleFix, hasData, sourceCardId } from '../lib/sources';
 import { useSettings } from './settings/api';
 import { normalizeSpend, pct, spendUsd, usd } from './settings/logic';
 
@@ -26,7 +26,7 @@ function SourceCard({ s, google }: { s: SourceView; google?: GoogleStatusView })
   const top = s.cursors[0];
   const seen = hasData(s) || s.checkedAt != null;
   return (
-    <section className="card source-card" aria-label={sourceCardLabel(s.source)}>
+    <section id={sourceCardId(s.source)} className="card source-card" aria-label={sourceCardLabel(s.source)}>
       <div className="sc-head">
         <span className="sc-name">
           <SourceTile source={channelOf(s.source)} />
@@ -147,6 +147,19 @@ export function SourcesPage() {
   const q = useSources();
   // Optional: a server without the Google routes answers 501 and the card falls back to its health row.
   const google = useGoogleStatus();
+  const { hash } = useLocation();
+  const loaded = q.data != null;
+
+  // Today's "Fix" links land on their card (#source-partiful) once the cards exist.
+  useEffect(() => {
+    if (!hash || !loaded) return;
+    try {
+      document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: 'start' });
+    } catch {
+      // A malformed #fragment: stay at the top.
+    }
+  }, [hash, loaded]);
+
   return (
     <>
       <PageHeader title="Sources" sub="Where yeackbot reads from, how fresh each one is, and what needs you." />

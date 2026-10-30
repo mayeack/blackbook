@@ -1881,3 +1881,37 @@ Design: `docs/design/event-picks.md` §1, §6–9.
 - Gmail reading not connected, or Settings → "Read event newsletters" off → no newsletter call, web + calendar only.
 
 **Platforms**: server + web. Not deployed; no real email sent yet (needs the one-time "Email me" consent).
+
+## 2026-10-28 — Integrations to fix at the top of Today
+
+**Why:** Partiful had been failing for 2 days and WhatsApp had been quiet for 3, but Today only showed pipeline
+alerts. Broken sources showed up only on the Sources screen. Now every source that is broken right now (Needs you,
+changed shape, Error, Stale) gets a row at the very top of Today, above the alerts. Most urgent sources come first.
+Each row says what to do and when the source last worked. Its Fix button opens that source's card on Sources. Sources
+that were never set up or were turned off on purpose (Gmail not connected, no Instagram export) are not broken, so
+they stay on Sources only.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: 2011 of 2012 pass. The one failure
+   was `test/eval/routes.test.ts`: its `/555/` check matched that run's timestamp (…255575…), and it passes on a
+   re-run.
+2. `packages/web/test/sources.test.ts`: only broken statuses are listed, critical (Needs you / changed shape) before
+   Error / Stale, in card order within each, and a connect fix on a broken source reads "Reconnect …". Without a fix
+   the row uses the source's last error or a status sentence, and a leading repeat of the source name is dropped.
+3. Local preview on a copy of the live DB (outside services pointed at a dead port): Today shows WhatsApp ("Open
+   WhatsApp for Mac…", last worked 3d ago) and Partiful ("Kept answering with server errors…", last worked 2d ago)
+   above the Extraction alert. Partiful's Fix opens /sources#source-partiful scrolled to its card. Rows wrap cleanly at
+   375 px.
+
+### Scenario B — Web (owner, after deploy)
+1. Open yeackbot.com/today. **Expected**: above the existing alert, one row each for WhatsApp and Partiful (while
+   they're still broken), each with a Fix button and "last worked …".
+2. Tap Fix on WhatsApp. **Expected**: Sources opens scrolled to the WhatsApp card.
+3. Open WhatsApp for Mac and wait for the next 30-minute sync, then reload Today. **Expected**: the WhatsApp row is
+   gone. Nothing needs dismissing.
+4. Gmail (not connected) and the Instagram export (never dropped). **Expected**: no rows on Today. They still show
+   their setup boxes on Sources.
+
+**Edge cases**: if /sources fails, Today renders normally with no strip; a revoked Google grant shows "Reconnect
+Google Calendar / Gmail / Google Photos" in red; the Mac helper being down shows iMessage, Contacts and calls rows.
+**Platforms**: web only (no server change). Not deployed.
