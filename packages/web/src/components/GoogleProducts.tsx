@@ -1,17 +1,31 @@
 /**
- * Settings → Email & photos: the Gmail (ticket emails) and Google Photos (contact screenshots) connections. Each is its
- * own Google consent (/api/v1/google/connect?product=gmail|photos), so the callback lands here with ?gmail=… or
- * ?gphotos=…. Read-only toward Google: mail is never sent, labelled or deleted, and Photos only ever hands over the
- * pictures the owner picks. Disconnecting one keeps the others (Google's revoke would drop them all, so the server
- * revokes only when nothing else is connected).
+ * Settings → Email & photos: the Gmail (ticket emails, event newsletters), "Email me" (the weekly event picks to his own
+ * inbox) and Google Photos (contact screenshots) connections. Each is its own Google consent
+ * (/api/v1/google/connect?product=gmail|gmail_send|photos), so the callback lands here with ?gmail=…, ?gmailsend=… or
+ * ?gphotos=…. Reading is read-only (mail is never labelled or deleted, and Photos only ever hands over the pictures the
+ * owner picks); "Email me" can only send to the connected address itself. Disconnecting one keeps the others (Google's
+ * revoke would drop them all, so the server revokes only when nothing else is connected).
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import type { GmailStatus, GphotosStatus } from '@yb/shared';
-import { keys, useGmailDisconnect, useGmailStatus, useGphotosDisconnect, useGphotosSession, useGphotosStatus, useStartPick } from '../api/hooks';
+import type { EventPicksEmailStatus, GmailStatus, GphotosStatus } from '@yb/shared';
+import {
+  keys,
+  useEmailDisconnect,
+  useEmailStatus,
+  useEmailTest,
+  useGmailDisconnect,
+  useGmailStatus,
+  useGphotosDisconnect,
+  useGphotosSession,
+  useGphotosStatus,
+  useStartPick,
+} from '../api/hooks';
 import { relativeDay } from '../lib/format';
 import {
+  EMAIL_CONNECT_HREF,
+  emailTestProblem,
   gmailSummary,
   gphotosSummary,
   healthProblem,
@@ -26,7 +40,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { FixBox } from './GoogleCalendar';
 import { useToast } from './Toast';
 
-/** How /google/callback went for this product (?gmail= / ?gphotos=), dismissible. */
+/** How /google/callback went for this product (?gmail= / ?gmailsend= / ?gphotos=), dismissible. */
 function Outcome({ product }: { product: GoogleProductKey }) {
   const [params, setParams] = useSearchParams();
   const outcome = productOutcome(product, params.get(product));
@@ -156,6 +170,107 @@ export function GmailPanel() {
         <FixBox fix={fix} reconnect={g.data.needsReconnect} />
       ) : (
         <GmailConnected s={g.data} />
+      )}
+    </div>
+  );
+}
+
+function EmailConnected({ s }: { s: EventPicksEmailStatus }) {
+  const test = useEmailTest();
+  const disconnect = useEmailDisconnect();
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <div className="cal-section">
+      <p className="caption" style={{ margin: 0 }}>
+        Sends to {s.address ?? 'your Gmail'}
+        {since(s.connectedAt)}
+        {s.lastSentAt != null ? ` · last email ${relativeDay(s.lastSentAt)}` : ''}
+      </p>
+      <p className="caption" style={{ margin: 0 }}>
+        Your weekly event picks arrive here (Settings → Agent → Event picks sets the day and time). yeackbot can only email this address.
+      </p>
+      {s.problem && (
+        <p className="error-text" role="status" style={{ margin: 0 }}>
+          {s.problem}
+        </p>
+      )}
+      <div className="product-actions">
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={test.isPending}
+          onClick={() =>
+            test.mutate(undefined, {
+              onSuccess: (r) => (r.sent ? toast(`Test email sent to ${s.address ?? 'your inbox'}.`) : toast(emailTestProblem(r.reason), 'error')),
+              onError: (e) => toast(e.message, 'error'),
+            })
+          }
+        >
+          {test.isPending ? 'Sending…' : 'Send a test email'}
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirm(true)}>
+          Disconnect
+        </button>
+      </div>
+      <ConfirmDialog
+        open={confirm}
+        title="Stop emailing you?"
+        confirmLabel="Disconnect"
+        danger
+        busy={disconnect.isPending}
+        onCancel={() => setConfirm(false)}
+        onConfirm={() =>
+          disconnect.mutate(undefined, {
+            onSuccess: () => {
+              setConfirm(false);
+              toast('Email disconnected. Event picks will come by text.');
+            },
+            onError: (e) => toast(e.message, 'error'),
+          })
+        }
+      >
+        <p>Your weekly event picks will come by text instead. Your other Google connections are kept.</p>
+      </ConfirmDialog>
+    </div>
+  );
+}
+
+/** Settings → "Email me": the callback outcome, then Connect (or Reconnect) or where the picks are emailed. */
+export function EmailPanel() {
+  const g = useEmailStatus();
+  const s = g.data;
+  return (
+    <div className="card google-panel">
+      <Outcome product="gmailsend" />
+      {g.isPending ? (
+        <p className="caption">Loading…</p>
+      ) : g.isError || !s ? (
+        <p className="caption">Email status isn’t available right now.</p>
+      ) : !s.configured ? (
+        <div className="fix-box" role="note">
+          <strong>Email me</strong>
+          <p>Set up the Google OAuth client on the server first (the same one Calendar uses).</p>
+        </div>
+      ) : !s.connected || s.needsReconnect ? (
+        <div className="fix-box" role="note">
+          <strong>{s.needsReconnect ? 'Reconnect “Email me”' : 'Email me'}</strong>
+          <p>
+            {s.needsReconnect
+              ? 'Google stopped letting yeackbot send your weekly event picks. Connect again to keep getting them by email.'
+              : 'Get your weekly event picks by email on Sunday evenings. yeackbot asks Google for permission to send email as you, and only ever emails you.'}
+          </p>
+          {s.secretsAvailable ? (
+            // A full navigation: the server redirects to Google's consent screen.
+            <a className="btn btn-primary btn-sm" href={EMAIL_CONNECT_HREF}>
+              {s.needsReconnect ? 'Reconnect' : 'Connect email'}
+            </a>
+          ) : (
+            <p className="caption">Set SECRETS_KEY on the server so the Google token can be stored.</p>
+          )}
+        </div>
+      ) : (
+        <EmailConnected s={s} />
       )}
     </div>
   );

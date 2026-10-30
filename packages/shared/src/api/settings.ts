@@ -110,6 +110,27 @@ export const SettingsValues = z.object({
     )
     .max(50),
 
+  // ---- event picks (intel/eventPicks; group features): a weekly email (or text) of events on free nights, from the
+  // web, his event newsletters and his "Recurring Events" calendar
+  'events.enabled': z.boolean(),
+  /**
+   * Day the picks are sent (0 = Sunday … 6 = Saturday). Sent in the evening (events.time from 16:00) they cover the
+   * next seven nights (a Sunday send: Monday to Sunday); sent earlier, that night and the six after it.
+   */
+  'events.weekday': z.number().int().min(0).max(6),
+  'events.time': HHMM,
+  'events.max_picks': z.number().int().min(2).max(8),
+  /** City to search; null = the home city (travel.home_city, else the owner's location fact). */
+  'events.city': z.string().min(2).max(80).nullable(),
+  /** Web searches per week across both passes (each is billed: $0.01). */
+  'events.max_searches': z.number().int().min(2).max(12),
+  /** How the picks arrive: an email to his own Gmail (falls back to texts until "Email me" is connected), or texts. */
+  'events.channel': z.enum(['email', 'text']),
+  /** Read the past week's event newsletters in Gmail (read-only grant) for events on his free nights. */
+  'events.newsletters': z.boolean(),
+  /** Add the best recurring happenings on his "Recurring Events" calendar that fall on his free nights. */
+  'events.listings': z.boolean(),
+
   // ---- locale
   /** IANA zone for digests, day boundaries and LLM windows; defaults to the system zone. */
   tz: TimeZoneName,

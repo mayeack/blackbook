@@ -32,6 +32,7 @@ import { settingsRoutes } from './settings';
 import { sourcesRoutes } from './sources';
 import { suggestionsRoutes } from './suggestions';
 import { ticketsRoutes } from './tickets';
+import { eventPicksRoutes } from './eventPicks';
 import { todayRoutes } from './today';
 
 export interface RouteDeps {
@@ -53,6 +54,8 @@ export const ROUTES: RouteModule[] = [
   settingsApiRoutes,
   // tickets, Gmail and Google Photos (before the events router, docs/design/tickets-met-at.md)
   ticketsRoutes,
+  // weekly event picks (docs/design/event-picks.md)
+  eventPicksRoutes,
   gmailRoutes,
   gphotosRoutes,
   eventsRouter,

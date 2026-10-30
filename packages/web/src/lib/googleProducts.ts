@@ -1,25 +1,44 @@
 /**
- * Settings → Email & photos: wording for the Gmail and Google Photos panels (routes/gmail.ts, routes/gphotos.ts;
- * shapes in @yb/shared api/tickets.ts). Each product is its own Google consent: /google/callback lands on
- * /settings?gmail=<outcome> or ?gphotos=<outcome>. Pure helpers, unit-tested.
+ * Settings → Email & photos: wording for the Gmail, "Email me" and Google Photos panels (routes/gmail.ts,
+ * routes/eventPicks.ts, routes/gphotos.ts; shapes in @yb/shared api/tickets.ts and api/eventPicks.ts). Each product is
+ * its own Google consent: /google/callback lands on /settings?gmail=<outcome>, ?gmailsend=<outcome> or
+ * ?gphotos=<outcome>. Pure helpers, unit-tested.
  */
-import type { GmailStatus, GphotosSessionView, GphotosStatus, SourceHealthView } from '@yb/shared';
+import type { EventPicksEmailStatus, GmailStatus, GphotosSessionView, GphotosStatus, SourceHealthView } from '@yb/shared';
 import { safeHttpsUrl } from './events';
 import { plural } from './format';
 
-export type GoogleProductKey = 'gmail' | 'gphotos';
+export type GoogleProductKey = 'gmail' | 'gmailsend' | 'gphotos';
 
-const NAMES: Record<GoogleProductKey, string> = { gmail: 'Gmail', gphotos: 'Google Photos' };
+const NAMES: Record<GoogleProductKey, string> = { gmail: 'Gmail', gmailsend: 'Email sending', gphotos: 'Google Photos' };
 
 const CONNECTED: Record<GoogleProductKey, string> = {
   gmail: 'Gmail connected. yeackbot looks for ticket emails within 30 minutes, then works back through the last three years.',
+  gmailsend: 'Email connected. Your weekly event picks will come to your inbox. Send a test below to see one.',
   gphotos: 'Google Photos connected. Pick your contact screenshots below; yeackbot only ever sees the photos you pick.',
 };
 
 const SCOPE: Record<GoogleProductKey, string> = {
   gmail: 'yeackbot needs read access to your email. Connect again and allow “View your email messages and settings”.',
+  gmailsend: 'yeackbot needs to send email as you, to you only. Connect again and allow “Send email on your behalf”.',
   gphotos: 'yeackbot needs access to the photos you pick. Connect again and allow it.',
 };
+
+/** Where Settings → "Email me" sends the owner to connect (a full navigation: the server redirects to Google). */
+export const EMAIL_CONNECT_HREF = '/api/v1/google/connect?product=gmail_send';
+
+/** What the "Email me" panel shows while the server has no Google OAuth client. */
+export function emailNotConfigured(): EventPicksEmailStatus {
+  return { configured: false, secretsAvailable: true, connected: false, address: null, connectedAt: null, needsReconnect: false, lastSentAt: null, problem: null };
+}
+
+/** Why a test email didn't go (EventPicksEmailTest.reason). */
+export function emailTestProblem(reason: string | null): string {
+  if (reason === 'not_connected' || reason === 'not_configured') return 'Email isn’t connected yet.';
+  if (reason === 'accessNotConfigured' || reason === 'SERVICE_DISABLED') return 'The Gmail API is not enabled in the Google Cloud project.';
+  if (reason && /insufficient|SCOPE|unauthorized|invalid_grant/i.test(reason)) return 'Google refused: connect “Email me” again.';
+  return 'The test email didn’t go through. Try again in a minute.';
+}
 
 /** How /google/callback went for this product (`?gmail=` / `?gphotos=`), or null when there is nothing to say. */
 export function productOutcome(product: GoogleProductKey, v: string | null): { tone: 'ok' | 'bad'; text: string } | null {
