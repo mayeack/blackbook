@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ActivityBatch, Alert, TodayDigest } from '@yb/shared';
 import {
+  alertSourceLabel,
   cardActions,
   collapseBulk,
   deliveryLine,
@@ -169,6 +170,12 @@ describe('Alerts and loops', () => {
   it('most severe first, newest first, resolved dropped', () => {
     const out = sortAlerts([alert('a', 'info', 5), alert('b', 'critical', 1), alert('c', 'warning', 3), alert('d', 'warning', 4), alert('e', 'critical', 9, 10)]);
     expect(out.map((a) => a.id)).toEqual(['b', 'd', 'c', 'a']);
+  });
+
+  it('who an alert is about: known sources by name, extraction ones without their raw id', () => {
+    expect(alertSourceLabel('llm')).toBe('Claude');
+    expect(alertSourceLabel('extraction:invalid_request')).toBe('Extraction');
+    expect(alertSourceLabel('extraction:egress_blocked')).toBe('Privacy filter');
   });
 
   it('the strip line', () => {
