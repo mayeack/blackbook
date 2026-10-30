@@ -1,11 +1,11 @@
 /**
- * Disconnecting one Google product: calendar, gmail or photos (design docs/design/tickets-met-at.md "Review
- * amendments → Disconnect"). The three products share one OAuth client and Google's revoke drops the client's whole
+ * Disconnecting one Google product: calendar, gmail, photos or gmail_send (design docs/design/tickets-met-at.md "Review
+ * amendments → Disconnect"). The products share one OAuth client and Google's revoke drops the client's whole
  * grant, so:
  *   - a product's disconnect deletes only that product's secret and cursors, and sets only its health row to
  *     'disabled' (details.connected false: the Sources card offers to connect again);
  *   - the grant is revoked (best effort) only when no other product's secret remains;
- *   - whenever revoke runs, all three secrets are deleted and all three health rows set to 'disabled'.
+ *   - whenever revoke runs, every product's secrets are deleted and every health row set to 'disabled'.
  * Each route adds its own deleteData on top. Tokens are never logged or returned.
  */
 import type { Response } from 'express';
@@ -35,15 +35,22 @@ export function healthView(db: DB, source: string): SourceHealthView | null {
   return h ? { status: h.status, lastOkAt: h.last_ok_at, lastError: h.last_error && redact(h.last_error), checkedAt: h.checked_at } : null;
 }
 
+/** A connected product's problem worth a line (errors only; a refused grant is the Reconnect box instead). */
+export function healthProblemText(h: SourceHealthView | null): string | null {
+  if (!h || (h.status !== 'error' && h.status !== 'contract_broken')) return null;
+  return h.lastError?.trim() || 'The last try failed.';
+}
+
 /** The health line each product's Sources card shows once it is disconnected. */
 export const NOT_CONNECTED: Readonly<Record<GoogleProduct, string>> = {
   calendar: 'Google Calendar is not connected.',
   gmail: 'Gmail is not connected.',
   photos: 'Google Photos is not connected.',
+  gmail_send: 'Email sending is not connected.',
 };
 
 /** Log event prefix per product (calendar keeps its historical 'gcal.*' names). */
-export const LOG_PREFIX: Readonly<Record<GoogleProduct, string>> = { calendar: 'gcal', gmail: 'gmail', photos: 'gphotos' };
+export const LOG_PREFIX: Readonly<Record<GoogleProduct, string>> = { calendar: 'gcal', gmail: 'gmail', photos: 'gphotos', gmail_send: 'gmail_send' };
 
 export interface ProductDisconnect {
   /** Google confirmed the revocation. */
@@ -85,10 +92,14 @@ export async function disconnectGoogleProduct(db: DB, product: GoogleProduct, o:
     }
   }
   const had = deleteSecret(db, secret);
+  if (GOOGLE_PRODUCTS[product].addressSecret) deleteSecret(db, GOOGLE_PRODUCTS[product].addressSecret!);
   // Cursors belong to the old grant's view of the account; a reconnect starts over.
   db.prepare('DELETE FROM source_cursors WHERE source = ?').run(PRODUCT_SOURCE[product]);
   for (const p of all ? PRODUCTS : [product]) {
-    if (p !== product) deleteSecret(db, GOOGLE_PRODUCTS[p].secret);
+    if (p !== product) {
+      deleteSecret(db, GOOGLE_PRODUCTS[p].secret);
+      if (GOOGLE_PRODUCTS[p].addressSecret) deleteSecret(db, GOOGLE_PRODUCTS[p].addressSecret!);
+    }
     recordSourceHealth(db, PRODUCT_SOURCE[p], o.now, 'disabled', { error: NOT_CONNECTED[p], newestDataAt: null, details: { connected: false } });
   }
   return { revoked, had, all };

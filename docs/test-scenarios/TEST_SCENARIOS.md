@@ -1786,3 +1786,98 @@ names or titles that contain a number are still masked by `maskText`.
 stays "WhatsApp ••1234"; a person with no name whose display name was stored masked ("(555) •••-••01") keeps that
 title: names are not unmasked.
 **Platforms**: server + shared (web reads the same fields). Not deployed; not checked in a browser.
+
+## 2026-10-22 — Weekly event picks (public events on your free nights, with ticket links)
+
+Once a week yeackbot searches the web (Claude Haiku 5.5 with Anthropic's web search) for public events in your
+city on the nights your calendar is free. It texts up to 5 of them with a ticket link each, and learns from which
+ones you go to. Design: `docs/design/event-picks.md`.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii && npm run build` from the repo root: 2024 tests pass
+   (new: `test/intel/eventPicks.test.ts`, `test/llm/webSearch.test.ts`, `packages/web/test/picks.test.ts`), 1034
+   files clean, build OK.
+2. Live dry run on a copy of the live database for the week of Oct 26 (no text sent). One free night, 14 events
+   found, 5 picked with event pages on Ticketmaster, AXS, Academy LA and DICE. 9 searches, $0.10.
+3. Browser check of `/picks` on that copy, desktop and 375 px:
+   - "Not for me" stays after a reload and offers Undo;
+   - `/go/<id>` answers 302 to the ticket page and the tap is counted;
+   - Settings → Agent shows the Event picks section.
+
+### Scenario B — The weekly text
+1. Settings → Agent → Event picks: leave it on. Set the day to today and the time to a few minutes from now.
+2. **Expected**, within 10 minutes of that time, ONE text (like the brief) with:
+   - the first line "Event picks for this week: N ideas for your free nights (Thu, …)";
+   - every pick, a blank line between them: "1. Thu Oct 29 · <event>", then "<venue>, 10pm. <why>", then
+     "Tickets: yeackbot.com/go/…";
+   - the closing line "Get tickets to any of these and I'll notice. Not your thing? yeackbot.com/picks".
+3. Tap a Tickets link. **Expected**: after Cloudflare Access (if signed out), the event's own ticket page opens
+   (DICE, Ticketmaster, AXS, a venue …), not a list of events.
+4. **Expected**: no event lands on a night you have a plan after 6 pm, a trip, held tickets or a Partiful RSVP.
+   A 4–6 pm afternoon plan doesn't block the night.
+
+### Scenario C — Answers and learning
+1. Open yeackbot.com/picks. Tap **Not for me** on one pick and **I'm going** on another. Reload. **Expected**: both
+   stick, and Undo puts a pick back.
+2. Buy tickets to a pick (or add it to your calendar, or RSVP on Partiful). **Expected**: by the next morning
+   (06:45), the card reads "Going · found your ticket" (or "on your calendar" / "Partiful RSVP").
+3. Next week. **Expected**: kinds you went to or tapped come up more; kinds you said no to come up less. The same
+   event is never picked twice.
+
+**Edge cases**:
+- A week with no free night → no text and no searches ("empty").
+- Mac asleep at the picks time → the run happens on the next tick that day (until 21:00).
+- Quiet hours or the collector down → the picks wait as "ready" on `/picks` and go out on a later tick that day.
+- An event whose venue is TBA / Unknown, or a private party → never picked.
+- A ticket link the model wrote itself (not a page the search returned) → dropped.
+
+**Platforms**:
+- Server and web. Not deployed.
+- No real text sent yet.
+- Taste is calendar-only until Gmail is connected (no ticket history yet).
+
+## 2026-10-25 — Weekly event picks by email on Sunday evenings, plus newsletters and the Recurring Events calendar
+
+The weekly event picks now arrive as one email every Sunday at 6 pm, for Monday to Sunday. Besides the web, they
+include events from your event newsletters in Gmail and the best happenings on your Recurring Events calendar that
+fall when you're free. They learn from what you actually go to (ticket emails, your calendar, Partiful, taps).
+Design: `docs/design/event-picks.md` §1, §6–9.
+
+### Scenario A — Automated (Claude verified)
+1. `npm run typecheck && npx vitest run && npm run lint:pii` from the repo root: all tests pass (new:
+   `packages/server/test/intel/eventPicksDigest.test.ts`, 22 tests); 5 of 5 mutations caught (listing counted as
+   attendance, resend after a crash, send from a non-send client, busy-night learning, calendar twin).
+2. Dry run on a copy of the live database for the week of Oct 26 (no LLM call, nothing sent): 22 Recurring Events
+   listings, one free night; the email lists Monday's jazz night and the weekend morning markets.
+
+### Scenario B — Connect "Email me"
+1. Settings → Email & photos → **Email me** → **Connect email**. Allow "Send email on your behalf". **Expected**:
+   back on Settings, "Email connected…", and the panel says "Sends to <your Gmail address>".
+2. Tap **Send a test email**. **Expected**: "yeackbot can email you" arrives in your inbox within a minute, from and
+   to your own address.
+3. **Disconnect** → confirm. **Expected**: the panel offers Connect again; Gmail reading and Calendar stay connected.
+
+### Scenario C — The Sunday email
+1. With "Email me" connected, set Settings → Agent → Event picks to today, a few minutes from now (at or after 4 pm).
+2. **Expected** within 10 minutes: one email, "Your week: N event picks (Mon … – Sun …)", with **Picks**, **On your
+   Recurring Events calendar**, and (from the second week) **Last week**. No texts.
+3. Tap **Get tickets** on a pick. **Expected**: the event's ticket page (after Cloudflare Access if signed out).
+4. **Expected**: nothing on a night you have a plan after 6 pm; a daytime market shows only when you have 2 free
+   hours of it; an event already on your Recurring Events calendar isn't repeated under Picks.
+
+### Scenario D — Learning from what you go to
+1. Buy a ticket to a pick, or add one to your own calendar. **Expected**: by the next morning `/picks` shows
+   "Going · found your ticket" / "on your calendar"; next Sunday's email says "Last week: you went to …".
+2. Skip a pick on a night that turned busy. **Expected**: `/picks` shows "Passed · you had plans" (not held against
+   that kind of event).
+3. Ignore a Recurring Events item for a week. **Expected**: that series rests for about three weeks; one you tapped
+   or went to keeps coming.
+
+**Edge cases**:
+- "Email me" not connected → the picks come by text, with "To get these by email, connect “Email me” in Settings →
+  Email & photos."
+- Gmail busy → retried every 10 minutes; still failing at 8:30 pm → texts, saying the email didn't go through.
+- The server stops mid-send → that week's email is never sent twice.
+- Gmail reading not connected, or Settings → "Read event newsletters" off → no newsletter call, web + calendar only.
+
+**Platforms**: server + web. Not deployed; no real email sent yet (needs the one-time "Email me" consent).

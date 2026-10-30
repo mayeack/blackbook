@@ -49,7 +49,7 @@ const config = loadConfig({
 });
 const AUTH = { mode: 'dev-bypass', email: 'owner@example.com' } as const;
 const JSON_HEADERS = { 'x-yb': '1', 'content-type': 'application/json' };
-const TOKENS: Record<GoogleProduct, string> = { calendar: 'test-refresh-calendar', gmail: 'test-refresh-gmail', photos: 'test-refresh-photos' };
+const TOKENS: Record<GoogleProduct, string> = { calendar: 'test-refresh-calendar', gmail: 'test-refresh-gmail', photos: 'test-refresh-photos', gmail_send: 'test-refresh-gmail-send' };
 const SOURCES = Object.values(PRODUCT_SOURCE);
 
 const cleanups: (() => Promise<void> | void)[] = [];

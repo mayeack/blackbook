@@ -1,14 +1,14 @@
 /**
  * Settings root: account, the agent-loop sub-screens (Digest, Push, Agent, Privacy, What I've learned), Calendars
- * (the Google card: the OAuth callback lands here with ?google=…), Email & photos (Gmail tickets and Google Photos
- * screenshots, ?gmail=… / ?gphotos=…), and Eval.
+ * (the Google card: the OAuth callback lands here with ?google=…), Email & photos (Gmail tickets and newsletters,
+ * "Email me" for the weekly picks, Google Photos screenshots; ?gmail=… / ?gmailsend=… / ?gphotos=…), and Eval.
  */
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { useMe } from '../../api/hooks';
 import { EntityRow, IconTile } from '../../components/EntityRow';
 import { GoogleCalendarPanel } from '../../components/GoogleCalendar';
-import { GmailPanel, GooglePhotosPanel } from '../../components/GoogleProducts';
+import { EmailPanel, GmailPanel, GooglePhotosPanel } from '../../components/GoogleProducts';
 import { Icons } from '../../components/icons';
 import { PageHeader } from '../../components/PageState';
 import { pct, usd, hhmmLabel } from './logic';
@@ -107,6 +107,7 @@ export function SettingsPage() {
       </h2>
       <div className="product-panels">
         <GmailPanel />
+        <EmailPanel />
         <GooglePhotosPanel />
       </div>
 

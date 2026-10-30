@@ -1,13 +1,17 @@
 /**
  * Google OAuth + Calendar API v3 client, read-only (PLAN "Ingestion → Google Calendar").
- *   - Three products share the OAuth client, each with its own consent and refresh token (GOOGLE_PRODUCTS):
- *     calendar (calendar.readonly), gmail (gmail.readonly, adapters/gmail) and photos (the Google Photos Picker,
- *     adapters/gphotos). A Gmail-scoped token dies on a password change; kept apart, it can't take Calendar with it.
+ *   - Four products share the OAuth client, each with its own consent and refresh token (GOOGLE_PRODUCTS):
+ *     calendar (calendar.readonly), gmail (gmail.readonly, adapters/gmail), photos (the Google Photos Picker,
+ *     adapters/gphotos) and gmail_send (gmail.send + the account's address, delivery/email.ts: the weekly event picks
+ *     emailed to the owner's own inbox). A Gmail-scoped token dies on a password change; kept apart, it can't take
+ *     Calendar with it, and the read token can't send nor the send token read.
  *   - Every request goes through guardedFetch: an allowlist of POST oauth2.googleapis.com/{token,revoke}, GET
- *     calendarList / events.list on www.googleapis.com, GET Gmail profile / messages.list / messages.get, the Photos
- *     Picker's session calls and GET on its lh*.googleusercontent.com media URLs. Anything else (an insert, a Gmail
- *     modify or send, another host) is refused before it leaves the Mac, so nothing can ever write to the calendar
- *     or the mailbox.
+ *     calendarList / events.list on www.googleapis.com, GET Gmail profile / messages.list / messages.get, POST Gmail
+ *     messages.send (only on a gmail_send client), the Photos Picker's session calls and GET on its
+ *     lh*.googleusercontent.com media URLs. Anything else (an insert, a Gmail modify / trash / draft, another host) is
+ *     refused before it leaves the Mac, so nothing can ever write to the calendar or change the mailbox; the one write
+ *     is a new message, from the send grant's own client, and delivery/email.ts only ever addresses one to the
+ *     connected account itself.
  *   - Only the calendar module of googleapis is loaded (the full package costs ~0.6 s at startup).
  *   - Google errors become GoogleAuthError / SyncTokenGoneError / GoogleApiError carrying a status and a short
  *     reason token. The underlying GaxiosError is dropped: its config holds the refresh token, the auth code and
@@ -25,13 +29,28 @@ export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 export const GMAIL_REFRESH_TOKEN_SECRET = 'gmail.refresh_token';
 export const PHOTOS_PICKER_SCOPE = 'https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 export const GPHOTOS_REFRESH_TOKEN_SECRET = 'gphotos.refresh_token';
+export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+export const GMAIL_SEND_REFRESH_TOKEN_SECRET = 'gmail_send.refresh_token';
+/** The connected account's own address (from the consent's id_token): the only recipient delivery/email.ts uses. */
+export const GMAIL_SEND_ADDRESS_SECRET = 'gmail_send.address';
+
+export interface GoogleProductSpec {
+  scope: string;
+  secret: string;
+  settingsParam: string;
+  /** Scopes asked for alongside `scope` (openid email: the id_token names the account). */
+  extraScopes?: readonly string[];
+  /** Where the account's verified address from the id_token is kept (encrypted); the consent fails without one. */
+  addressSecret?: string;
+}
 
 /** What a consent is for. Each product is its own grant (include_granted_scopes: false) and refresh token. */
-export type GoogleProduct = 'calendar' | 'gmail' | 'photos';
-export const GOOGLE_PRODUCTS: Readonly<Record<GoogleProduct, { scope: string; secret: string; settingsParam: string }>> = {
+export type GoogleProduct = 'calendar' | 'gmail' | 'photos' | 'gmail_send';
+export const GOOGLE_PRODUCTS: Readonly<Record<GoogleProduct, GoogleProductSpec>> = {
   calendar: { scope: CALENDAR_SCOPE, secret: REFRESH_TOKEN_SECRET, settingsParam: 'google' },
   gmail: { scope: GMAIL_SCOPE, secret: GMAIL_REFRESH_TOKEN_SECRET, settingsParam: 'gmail' },
   photos: { scope: PHOTOS_PICKER_SCOPE, secret: GPHOTOS_REFRESH_TOKEN_SECRET, settingsParam: 'gphotos' },
+  gmail_send: { scope: GMAIL_SEND_SCOPE, secret: GMAIL_SEND_REFRESH_TOKEN_SECRET, settingsParam: 'gmailsend', extraScopes: ['openid', 'email'], addressSecret: GMAIL_SEND_ADDRESS_SECRET },
 };
 export const isGoogleProduct = (v: unknown): v is GoogleProduct => typeof v === 'string' && Object.hasOwn(GOOGLE_PRODUCTS, v);
 
@@ -48,18 +67,21 @@ const REQUEST_TIMEOUT_MS = 60_000;
 
 export class GoogleEgressRefusedError extends Error {
   constructor(method: string, origin: string) {
-    super(`refused a ${method} request to ${origin}: not on the read-only Google allowlist`);
+    super(`refused a ${method} request to ${origin}: not on the Google allowlist`);
     this.name = 'GoogleEgressRefusedError';
   }
 }
 
-const ALLOWED: readonly { method: string; origin: string | RegExp; path: RegExp }[] = [
+const ALLOWED: readonly { method: string; origin: string | RegExp; path: RegExp; only?: GoogleProduct }[] = [
   { method: 'POST', origin: 'https://oauth2.googleapis.com', path: /^\/(token|revoke)$/ },
   { method: 'GET', origin: 'https://www.googleapis.com', path: /^\/calendar\/v3\/users\/me\/calendarList$/ },
   { method: 'GET', origin: 'https://www.googleapis.com', path: /^\/calendar\/v3\/calendars\/[^/]+\/events$/ },
   // Gmail (adapters/gmail): read-only — the profile, messages.list and messages.get. Never modify/send/trash/watch.
   { method: 'GET', origin: 'https://gmail.googleapis.com', path: /^\/gmail\/v1\/users\/me\/(profile|messages)$/ },
   { method: 'GET', origin: 'https://gmail.googleapis.com', path: /^\/gmail\/v1\/users\/me\/messages\/[A-Za-z0-9_-]{1,64}$/ },
+  // Gmail sending (delivery/email.ts): a new message to the owner's own address, and only from the gmail_send grant's
+  // client. Never a draft, a modify, a trash or an import.
+  { method: 'POST', origin: 'https://gmail.googleapis.com', path: /^\/gmail\/v1\/users\/me\/messages\/send$/, only: 'gmail_send' },
   // Google Photos Picker (adapters/gphotos): sessions the owner picks into, the picked items, and their media bytes.
   // Creating / deleting a session touches no photo; the library itself is never written.
   { method: 'POST', origin: 'https://photospicker.googleapis.com', path: /^\/v1\/sessions$/ },
@@ -74,12 +96,12 @@ const originMatches = (allowed: string | RegExp, origin: string) => (typeof allo
 const requestUrl = (input: unknown): URL =>
   new URL(input instanceof URL ? input.href : typeof input === 'string' ? input : (input as { url: string }).url);
 
-/** Wraps a fetch so only the read-only allowlist can reach the network. */
-export function guardedFetch(inner: FetchLike): FetchLike {
+/** Wraps a fetch so only the allowlist can reach the network (entries marked `only` need that product's client). */
+export function guardedFetch(inner: FetchLike, product: GoogleProduct | null = null): FetchLike {
   return (input, init) => {
     const url = requestUrl(input);
     const method = (init?.method ?? (input as { method?: string }).method ?? 'GET').toUpperCase();
-    if (!ALLOWED.some((a) => a.method === method && originMatches(a.origin, url.origin) && a.path.test(url.pathname))) {
+    if (!ALLOWED.some((a) => (!a.only || a.only === product) && a.method === method && originMatches(a.origin, url.origin) && a.path.test(url.pathname))) {
       return Promise.reject(new GoogleEgressRefusedError(method, url.origin));
     }
     // A redirect would reach a host the allowlist never saw: refuse it rather than follow it.
@@ -90,12 +112,13 @@ export function guardedFetch(inner: FetchLike): FetchLike {
 /** Node's fetch, looked up per call. */
 export const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
-export function oauthClient(cfg: GoogleOAuthConfig, fetchImpl: FetchLike = defaultFetch): OAuth2Client {
+/** An OAuth client; `product` = whose token it will hold (the consent flow's own client holds none: null). */
+export function oauthClient(cfg: GoogleOAuthConfig, fetchImpl: FetchLike = defaultFetch, product: GoogleProduct | null = null): OAuth2Client {
   return new auth.OAuth2({
     clientId: cfg.clientId,
     clientSecret: cfg.clientSecret,
     redirectUri: cfg.redirectUri,
-    transporterOptions: { fetchImplementation: guardedFetch(fetchImpl) as never, timeout: REQUEST_TIMEOUT_MS },
+    transporterOptions: { fetchImplementation: guardedFetch(fetchImpl, product) as never, timeout: REQUEST_TIMEOUT_MS },
   });
 }
 
@@ -321,7 +344,7 @@ export function connectedClient(
   const secret = GOOGLE_PRODUCTS[product].secret;
   const refreshToken = getSecret(db, secretsKey, secret);
   if (!refreshToken) return null;
-  const client = oauthClient(cfg, fetchImpl);
+  const client = oauthClient(cfg, fetchImpl, product);
   client.setCredentials({ refresh_token: refreshToken });
   client.on('tokens', (t) => {
     if (t.refresh_token && t.refresh_token !== refreshToken) setSecret(db, secretsKey, secret, t.refresh_token);
