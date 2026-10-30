@@ -208,6 +208,8 @@ const ALERT_SOURCES: Record<string, string> = {
   collector: 'Mac helper',
   push: 'Push',
   digest: 'Brief',
+  'extraction:invalid_request': 'Extraction',
+  'extraction:egress_blocked': 'Privacy filter',
 };
 /** Who an alert is about ("Claude", "WhatsApp", "Mac helper"). */
 export const alertSourceLabel = (s: string) => ALERT_SOURCES[s] ?? sourceLabel(s);
