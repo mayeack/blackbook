@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GoogleStatusView, IdentityView, SourceView } from '../src/api/types';
 import { accountSubtitle, confidenceTone, orderAccounts } from '../src/lib/accounts';
 import { channelOf, channelsOf, identityNetwork, sourceCardLabel, sourceShort, sourceStatus, treatmentLabel } from '../src/lib/labels';
-import { calendarSummary, cardStatus, countRows, fixCopy, GOOGLE_CONNECT_URL, googleFix, hasData } from '../src/lib/sources';
+import { calendarSummary, cardStatus, countRows, fixCopy, GOOGLE_CONNECT_URL, googleFix, hasData, sourceCardId, sourceIssues } from '../src/lib/sources';
 
 const card = (o: Partial<SourceView> = {}): SourceView => ({
   source: 'whatsapp',
@@ -113,6 +113,39 @@ describe('source cards', () => {
     ).toBe('2 calendars · 1 excluded');
     expect(treatmentLabel('candidate')).toBe('Candidate only');
     expect(treatmentLabel('some_new')).toBe('Some new');
+  });
+
+  it('Today lists only broken sources: Needs you / changed shape first, then errors and quiet ones in card order', () => {
+    const issues = sourceIssues([
+      card({ source: 'imessage', status: 'ok', lastOkAt: 5 }),
+      card({ source: 'whatsapp', status: 'stale', lastOkAt: 3, lastError: 'Open WhatsApp for Mac (it has to keep running to receive messages)' }),
+      card({ source: 'beeper', status: 'auth_required', fix: { kind: 'beeper_disconnected' } }),
+      card({ source: 'instagram_dyi', status: 'unknown', fix: { kind: 'drop_instagram_export' } }),
+      card({ source: 'partiful', status: 'error', lastOkAt: 2, lastError: 'Partiful kept answering with server errors; the next run retries' }),
+      card({ source: 'gcal', status: 'auth_required', fix: { kind: 'connect_google' } }),
+      card({ source: 'gmail', status: 'disabled', lastError: 'Gmail is not connected.', fix: { kind: 'connect_gmail' } }),
+      card({ source: 'calls', status: 'contract_broken', fix: { kind: 'contract_broken' } }),
+    ]);
+    expect(issues).toEqual([
+      { source: 'beeper', label: 'Instagram (Beeper)', severity: 'critical', message: 'Beeper account disconnected', lastOkAt: null },
+      // A connect fix on a broken source is a reconnect.
+      { source: 'gcal', label: 'Google Calendar', severity: 'critical', message: 'Reconnect Google Calendar', lastOkAt: null },
+      { source: 'calls', label: 'Phone & FaceTime calls', severity: 'critical', message: 'This source changed shape', lastOkAt: null },
+      {
+        source: 'whatsapp',
+        label: 'WhatsApp',
+        severity: 'warning',
+        message: 'Open WhatsApp for Mac (it has to keep running to receive messages)',
+        lastOkAt: 3,
+      },
+      // The bold source name isn't repeated.
+      { source: 'partiful', label: 'Partiful', severity: 'warning', message: 'Kept answering with server errors; the next run retries', lastOkAt: 2 },
+    ]);
+    // Without a fix or an error, the status says what's wrong.
+    expect(sourceIssues([card({ status: 'stale' })])[0]!.message).toBe('No new data lately.');
+    expect(sourceIssues([card({ status: 'error' })])[0]!.message).toBe('Its last check failed.');
+    expect(sourceIssues([card({ status: 'ok' }), card({ status: 'disabled' }), card()])).toEqual([]);
+    expect(sourceCardId('partiful')).toBe('source-partiful');
   });
 
   it('card labels and tiles', () => {
