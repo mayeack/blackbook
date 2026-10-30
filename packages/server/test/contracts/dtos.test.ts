@@ -379,7 +379,7 @@ describe('agent-loop DTO round-trips', () => {
     }
     const turn: AskTurn = { id: B, question: 'q?', answer: 'a', citations: [citation], people: [], channel: 'web', status: 'done', createdAt: T };
     roundTrip(AskConversation, { id: C, title: 'Springfield', turns: [turn], createdAt: T, updatedAt: T });
-    roundTrip(AskConversationList, { conversations: [{ id: C, title: 'Springfield', turnCount: 1, createdAt: T, updatedAt: T }], suggestedPrompts: ['Who do I know in Springfield?'] });
+    roundTrip(AskConversationList, { conversations: [{ id: C, title: 'Springfield', turnCount: 1, createdAt: T, updatedAt: T }], nextCursor: null, suggestedPrompts: ['Who do I know in Springfield?'] });
   });
 
   it('push: https endpoints only; payload urls are relative paths', () => {
