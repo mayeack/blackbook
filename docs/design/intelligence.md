@@ -151,6 +151,8 @@ Worked examples:
 - **G6.** Circuit breaker: more than 25 probabilistic or LLM merges in one night → apply the first 25 by p, hold the rest, raise an alert.
 - **G7.** A priority or hidden person never absorbs into another probabilistically. The other person is merged *into* it; this keeps priority and hidden semantics intact.
 
+**Unique-name link (the one exception to G1, `identity/uniqueNameLink.ts`, runs before scoring).** A record that holds only Partiful / Instagram handles (no phone, email, card or WhatsApp id) carries the name the person gave that platform, so it scores on name alone: in a ~15k-person book two identical full names reach only p ≈ 0.3 and are never even a candidate. It is merged into the contact when the full name (first + last, no initials) belongs to exactly one other person in the book, the record is tied to me on its platform (a guest at a Partiful event I hosted or went to, or an Instagram DM thread I have written in), the contact is real (card, 1:1 conversation or logged interaction) and holds no other Partiful user / Instagram id, and G2–G7 pass. The contact survives; evidence rule `partiful_unique_name` or `instagram_unique_name`; counts against G6; undo writes `do_not_merge`.
+
 ### 1.7 LLM tie-break (synchronous; about 5/night steady, about 200 once at backfill)
 - **Call:** route `tiebreak` (Haiku 5.5), `output_config:{effort:"low", format}`, `thinking:{type:"disabled"}`, max_tokens 1000, no `fallbacks`.
 - **Evidence packet per side** (pseudonymized; area code kept as a geo hint):

@@ -259,6 +259,7 @@ Spec: intelligence §1.
 - G5: cluster sanity checks.
 - G6: at most 25 probabilistic merges per night (one-time backfill allowance is higher, with a "Check these" list).
 - G7: a priority or hidden person is never absorbed into someone else.
+- Exception to G1, the unique-name link: a Partiful- or Instagram-only record tied to me (guest at my event, a DM thread I write in) merges into the one real contact with its exact full name (intelligence §1.6).
 
 **Self-identification**: "hey it's Jake from climbing" (regex + LLM) names provisional people. The new-number rule is deferred.
 
